@@ -850,16 +850,28 @@ def show_manage_requests():
                 if safe_get(request, 'status') == 'Pending':
                     st.subheader("Assign to Vendor")
                     
-                    # Get vendors based on facility type - FIXED: Look in both users and vendors tables
+                    # Get vendors based on facility type - FIXED VENDOR LOOKUP
                     facility_type = safe_str(safe_get(request, 'facility_type'))
                     
-                    # Get registered vendors for this facility type
+                    # Map facility types to vendor types
+                    facility_to_vendor_map = {
+                        "HVAC (Cooling Systems)": "HVAC",
+                        "Generator Maintenance": "Generator",
+                        "Fixture and Fittings": "Fixture and Fittings",
+                        "Building Maintenance": "Building Maintenance",
+                        "HSE": "HSE",
+                        "Space Management": "Space Management"
+                    }
+                    
+                    vendor_type = facility_to_vendor_map.get(facility_type, facility_type)
+                    
+                    # Get registered vendors for this vendor type
                     vendors = execute_query('''
                         SELECT v.*, u.username 
                         FROM vendors v 
                         JOIN users u ON v.username = u.username 
-                        WHERE u.vendor_type = ?
-                    ''', (facility_type,))
+                        WHERE u.vendor_type = ? OR v.vendor_type = ?
+                    ''', (vendor_type, vendor_type))
                     
                     if vendors:
                         vendor_options = {f"{vendor['company_name']} ({vendor['username']})": vendor['username'] for vendor in vendors}
@@ -868,26 +880,30 @@ def show_manage_requests():
                             options=list(vendor_options.keys()),
                             key=f"vendor_{safe_get(request, 'id')}"
                         )
-                        selected_vendor = vendor_options[selected_vendor_key]
                         
-                        if st.button(f"Assign to {selected_vendor}", key=f"assign_{safe_get(request, 'id')}"):
-                            if execute_update(
-                                'UPDATE maintenance_requests SET status = ?, assigned_vendor = ? WHERE id = ?',
-                                ('Assigned', selected_vendor, safe_get(request, 'id'))
-                            ):
-                                st.success(f"Request assigned to {selected_vendor}!")
-                                st.rerun()
+                        if selected_vendor_key:
+                            selected_vendor = vendor_options[selected_vendor_key]
+                            
+                            if st.button(f"Assign to {selected_vendor}", key=f"assign_{safe_get(request, 'id')}"):
+                                if execute_update(
+                                    'UPDATE maintenance_requests SET status = ?, assigned_vendor = ? WHERE id = ?',
+                                    ('Assigned', selected_vendor, safe_get(request, 'id'))
+                                ):
+                                    st.success(f"Request assigned to {selected_vendor}!")
+                                    st.rerun()
                     else:
                         st.warning(f"No registered vendors found for {facility_type}")
                         st.info("Available vendor types in system:")
                         available_vendors = execute_query('''
-                            SELECT DISTINCT u.vendor_type 
+                            SELECT DISTINCT u.vendor_type, v.vendor_type as vendor_vendor_type
                             FROM users u 
-                            JOIN vendors v ON u.username = v.username 
-                            WHERE u.role = 'vendor'
+                            LEFT JOIN vendors v ON u.username = v.username 
+                            WHERE u.role = 'vendor' AND v.username IS NOT NULL
                         ''')
                         for vendor in available_vendors:
-                            st.write(f"- {vendor['vendor_type']}")
+                            vendor_type = vendor['vendor_type'] or vendor['vendor_vendor_type']
+                            if vendor_type:
+                                st.write(f"- {vendor_type}")
                 
                 # Manager approval for completed requests
                 elif safe_get(request, 'status') == 'Completed':
