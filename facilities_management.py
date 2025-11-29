@@ -159,6 +159,39 @@ def init_database():
         except sqlite3.IntegrityError:
             pass
     
+    # Also create sample vendor registrations
+    sample_vendors = [
+        ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
+         'HVAC installation, maintenance and repair services', 500000.00, 'TIN123456', 'RC789012',
+         'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: ABC Bank, Acc: 123456789', 
+         'HVAC Certified', '123 HVAC Street, City, State'),
+        ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
+         'Generator installation and maintenance', 300000.00, 'TIN123457', 'RC789013',
+         'Mike Johnson (Director)', 'Bank: XYZ Bank, Acc: 987654321', 
+         'Generator Specialist', '456 Power Ave, City, State'),
+        ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
+         'Fixture installation and repairs', 250000.00, 'TIN123458', 'RC789014',
+         'Sarah Wilson (Owner)', 'Bank: DEF Bank, Acc: 456123789', 
+         'Fixture Expert', '789 Fixture Road, City, State'),
+        ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
+         'General building maintenance and repairs', 400000.00, 'TIN123459', 'RC789015',
+         'David Brown (Manager)', 'Bank: GHI Bank, Acc: 789456123', 
+         'Building Maintenance Certified', '321 Builders Lane, City, State')
+    ]
+    
+    for username, company_name, contact_person, email, phone, vendor_type, services_offered, annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address in sample_vendors:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO vendors 
+                (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                 annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                 account_details, certification, address) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (username, company_name, contact_person, email, phone, vendor_type, services_offered,
+                  annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address))
+        except sqlite3.IntegrityError:
+            pass
+    
     conn.commit()
     conn.close()
 
@@ -392,9 +425,10 @@ def show_login():
         st.code("""
 Facility User: facility_user / 0123456
 Facility Manager: facility_manager / 0123456
-Vendors: hvac_vendor / 0123456
-         generator_vendor / 0123456
-         fixture_vendor / 0123456
+Vendors: hvac_vendor / 0123456 (HVAC Solutions Inc.)
+         generator_vendor / 0123456 (Generator Pros Ltd.)
+         fixture_vendor / 0123456 (Fixture Masters Co.)
+         building_vendor / 0123456 (Building Care Services)
         """)
 
 def show_main_app():
@@ -728,7 +762,13 @@ def show_my_requests():
                 st.write("**Additional Information**")
                 st.write(f"**Created Date:** {safe_str(safe_get(request, 'created_date'), 'N/A')}")
                 if safe_get(request, 'assigned_vendor'):
-                    st.write(f"**Assigned Vendor:** {safe_str(safe_get(request, 'assigned_vendor'))}")
+                    # Get vendor company name
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(request, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(request, 'assigned_vendor')
+                    st.write(f"**Assigned Vendor:** {vendor_name}")
                 if safe_get(request, 'completion_notes'):
                     st.write(f"**Completion Notes:** {safe_str(safe_get(request, 'completion_notes'))}")
                 if safe_get(request, 'job_breakdown'):
@@ -810,20 +850,25 @@ def show_manage_requests():
                 if safe_get(request, 'status') == 'Pending':
                     st.subheader("Assign to Vendor")
                     
-                    # Get vendors based on facility type
+                    # Get vendors based on facility type - FIXED: Look in both users and vendors tables
                     facility_type = safe_str(safe_get(request, 'facility_type'))
-                    vendors = execute_query(
-                        'SELECT * FROM users WHERE role = ? AND vendor_type = ?',
-                        ('vendor', facility_type)
-                    )
+                    
+                    # Get registered vendors for this facility type
+                    vendors = execute_query('''
+                        SELECT v.*, u.username 
+                        FROM vendors v 
+                        JOIN users u ON v.username = u.username 
+                        WHERE u.vendor_type = ?
+                    ''', (facility_type,))
                     
                     if vendors:
-                        vendor_options = {vendor['username']: vendor['username'] for vendor in vendors}
-                        selected_vendor = st.selectbox(
+                        vendor_options = {f"{vendor['company_name']} ({vendor['username']})": vendor['username'] for vendor in vendors}
+                        selected_vendor_key = st.selectbox(
                             f"Select vendor for {facility_type}",
                             options=list(vendor_options.keys()),
                             key=f"vendor_{safe_get(request, 'id')}"
                         )
+                        selected_vendor = vendor_options[selected_vendor_key]
                         
                         if st.button(f"Assign to {selected_vendor}", key=f"assign_{safe_get(request, 'id')}"):
                             if execute_update(
@@ -833,7 +878,16 @@ def show_manage_requests():
                                 st.success(f"Request assigned to {selected_vendor}!")
                                 st.rerun()
                     else:
-                        st.warning(f"No vendors found for {facility_type}")
+                        st.warning(f"No registered vendors found for {facility_type}")
+                        st.info("Available vendor types in system:")
+                        available_vendors = execute_query('''
+                            SELECT DISTINCT u.vendor_type 
+                            FROM users u 
+                            JOIN vendors v ON u.username = v.username 
+                            WHERE u.role = 'vendor'
+                        ''')
+                        for vendor in available_vendors:
+                            st.write(f"- {vendor['vendor_type']}")
                 
                 # Manager approval for completed requests
                 elif safe_get(request, 'status') == 'Completed':
@@ -857,7 +911,13 @@ def show_manage_requests():
                 
                 # View assigned vendor and completion details
                 if safe_get(request, 'assigned_vendor'):
-                    st.write(f"**Assigned Vendor:** {safe_str(safe_get(request, 'assigned_vendor'))}")
+                    # Get vendor company name
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(request, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(request, 'assigned_vendor')
+                    st.write(f"**Assigned Vendor:** {vendor_name}")
                 
                 if safe_get(request, 'completion_notes'):
                     st.write(f"**Completion Notes:** {safe_str(safe_get(request, 'completion_notes'))}")
