@@ -750,7 +750,321 @@ def show_my_requests():
                         st.success("Department approval granted!")
                         st.rerun()
 
-# ... (other functions like show_manage_requests, show_vendor_management, show_reports remain similar with safe functions)
+def show_manage_requests():
+    st.title("🛠️ Manage Maintenance Requests")
+    
+    all_requests = get_all_requests()
+    
+    if not all_requests:
+        st.info("No maintenance requests found")
+        return
+    
+    # Filters
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        status_options = ["All"] + ["Pending", "Assigned", "Completed", "Approved"]
+        status_filter = st.selectbox("Filter by Status", status_options)
+    with col2:
+        priority_options = ["All"] + ["Low", "Medium", "High", "Critical"]
+        priority_filter = st.selectbox("Filter by Priority", priority_options)
+    with col3:
+        facility_options = ["All"] + list(set(safe_str(req.get('facility_type')) for req in all_requests))
+        facility_filter = st.selectbox("Filter by Facility Type", facility_options)
+    with col4:
+        location_options = ["All"] + list(set(safe_str(req.get('location'), 'Common Area') for req in all_requests))
+        location_filter = st.selectbox("Filter by Location", location_options)
+    
+    # Apply filters
+    filtered_requests = all_requests
+    if status_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('status')) == status_filter]
+    if priority_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('priority')) == priority_filter]
+    if facility_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('facility_type')) == facility_filter]
+    if location_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('location'), 'Common Area') == location_filter]
+    
+    st.subheader(f"Showing {len(filtered_requests)} request(s)")
+    
+    # Display requests
+    for request in filtered_requests:
+        with st.expander(f"Request #{safe_get(request, 'id')}: {safe_str(safe_get(request, 'title'), 'N/A')} - {safe_str(safe_get(request, 'status'), 'N/A')}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Basic Information**")
+                st.write(f"**Title:** {safe_str(safe_get(request, 'title'), 'N/A')}")
+                st.write(f"**Description:** {safe_str(safe_get(request, 'description'), 'N/A')}")
+                st.write(f"**Location:** {safe_str(safe_get(request, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(request, 'facility_type'), 'N/A')}")
+                st.write(f"**Priority:** {safe_str(safe_get(request, 'priority'), 'N/A')}")
+                st.write(f"**Status:** {safe_str(safe_get(request, 'status'), 'N/A')}")
+                st.write(f"**Created By:** {safe_str(safe_get(request, 'created_by'), 'N/A')}")
+                st.write(f"**Created Date:** {safe_str(safe_get(request, 'created_date'), 'N/A')}")
+            
+            with col2:
+                st.write("**Management Actions**")
+                
+                # Assign to vendor
+                if safe_get(request, 'status') == 'Pending':
+                    st.subheader("Assign to Vendor")
+                    
+                    # Get vendors based on facility type
+                    facility_type = safe_str(safe_get(request, 'facility_type'))
+                    vendors = execute_query(
+                        'SELECT * FROM users WHERE role = ? AND vendor_type = ?',
+                        ('vendor', facility_type)
+                    )
+                    
+                    if vendors:
+                        vendor_options = {vendor['username']: vendor['username'] for vendor in vendors}
+                        selected_vendor = st.selectbox(
+                            f"Select vendor for {facility_type}",
+                            options=list(vendor_options.keys()),
+                            key=f"vendor_{safe_get(request, 'id')}"
+                        )
+                        
+                        if st.button(f"Assign to {selected_vendor}", key=f"assign_{safe_get(request, 'id')}"):
+                            if execute_update(
+                                'UPDATE maintenance_requests SET status = ?, assigned_vendor = ? WHERE id = ?',
+                                ('Assigned', selected_vendor, safe_get(request, 'id'))
+                            ):
+                                st.success(f"Request assigned to {selected_vendor}!")
+                                st.rerun()
+                    else:
+                        st.warning(f"No vendors found for {facility_type}")
+                
+                # Manager approval for completed requests
+                elif safe_get(request, 'status') == 'Completed':
+                    st.subheader("Manager Approval")
+                    
+                    if safe_get(request, 'requesting_dept_approval'):
+                        st.success("✅ Department approval received")
+                        
+                        if not safe_get(request, 'facilities_manager_approval'):
+                            if st.button("Approve as Facilities Manager", key=f"approve_{safe_get(request, 'id')}"):
+                                if execute_update(
+                                    'UPDATE maintenance_requests SET status = ?, facilities_manager_approval = ? WHERE id = ?',
+                                    ('Approved', True, safe_get(request, 'id'))
+                                ):
+                                    st.success("Facilities manager approval granted!")
+                                    st.rerun()
+                        else:
+                            st.success("✅ Facilities manager approval granted")
+                    else:
+                        st.warning("Waiting for department approval")
+                
+                # View assigned vendor and completion details
+                if safe_get(request, 'assigned_vendor'):
+                    st.write(f"**Assigned Vendor:** {safe_str(safe_get(request, 'assigned_vendor'))}")
+                
+                if safe_get(request, 'completion_notes'):
+                    st.write(f"**Completion Notes:** {safe_str(safe_get(request, 'completion_notes'))}")
+                
+                if safe_get(request, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:** {safe_str(safe_get(request, 'job_breakdown'))}")
+                
+                if safe_get(request, 'completed_date'):
+                    st.write(f"**Completed Date:** {safe_str(safe_get(request, 'completed_date'))}")
+                
+                if safe_get(request, 'invoice_amount'):
+                    st.write(f"**Invoice Amount:** ${safe_float(safe_get(request, 'invoice_amount')):.2f}")
+                
+                if safe_get(request, 'invoice_number'):
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(request, 'invoice_number'))}")
+
+def show_vendor_management():
+    st.title("👥 Vendor Management")
+    
+    # Get all vendors
+    vendors = execute_query('SELECT * FROM vendors ORDER BY company_name')
+    
+    if not vendors:
+        st.info("No vendors registered yet")
+        return
+    
+    st.subheader(f"Registered Vendors ({len(vendors)})")
+    
+    # Vendor list with details
+    for vendor in vendors:
+        with st.expander(f"{safe_str(safe_get(vendor, 'company_name'))} - {safe_str(safe_get(vendor, 'vendor_type'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Company Information**")
+                st.write(f"**Company Name:** {safe_str(safe_get(vendor, 'company_name'), 'N/A')}")
+                st.write(f"**Contact Person:** {safe_str(safe_get(vendor, 'contact_person'), 'N/A')}")
+                st.write(f"**Email:** {safe_str(safe_get(vendor, 'email'), 'N/A')}")
+                st.write(f"**Phone:** {safe_str(safe_get(vendor, 'phone'), 'N/A')}")
+                st.write(f"**Vendor Type:** {safe_str(safe_get(vendor, 'vendor_type'), 'N/A')}")
+                annual_turnover = safe_get(vendor, 'annual_turnover')
+                if annual_turnover:
+                    st.write(f"**Annual Turnover:** ${safe_float(annual_turnover):,.2f}")
+                tax_id = safe_get(vendor, 'tax_identification_number')
+                st.write(f"**Tax ID:** {safe_str(tax_id)}" if tax_id else "**Tax ID:** Not specified")
+                rc_number = safe_get(vendor, 'rc_number')
+                st.write(f"**RC Number:** {safe_str(rc_number)}" if rc_number else "**RC Number:** Not specified")
+            
+            with col2:
+                st.write("**Services & Details**")
+                st.write(f"**Services Offered:** {safe_str(safe_get(vendor, 'services_offered'), 'N/A')}")
+                key_staff = safe_get(vendor, 'key_management_staff')
+                st.write(f"**Key Management Staff:** {safe_str(key_staff)}" if key_staff else "**Key Management Staff:** Not specified")
+                account_details = safe_get(vendor, 'account_details')
+                st.write(f"**Account Details:** {safe_str(account_details)}" if account_details else "**Account Details:** Not specified")
+                st.write(f"**Certification:** {safe_str(safe_get(vendor, 'certification'), 'Not specified')}")
+                st.write(f"**Address:** {safe_str(safe_get(vendor, 'address'), 'N/A')}")
+                st.write(f"**Registration Date:** {safe_str(safe_get(vendor, 'registration_date'), 'N/A')}")
+                st.write(f"**Username:** {safe_str(safe_get(vendor, 'username'), 'N/A')}")
+            
+            # Vendor performance stats
+            vendor_requests = execute_query(
+                'SELECT * FROM maintenance_requests WHERE assigned_vendor = ?',
+                (safe_get(vendor, 'username'),)
+            )
+            
+            if vendor_requests:
+                total_jobs = len(vendor_requests)
+                completed_jobs = len([r for r in vendor_requests if safe_get(r, 'status') == 'Completed'])
+                completion_rate = (completed_jobs / total_jobs * 100) if total_jobs > 0 else 0
+                
+                st.write("**Performance Statistics**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Jobs", total_jobs)
+                with col2:
+                    st.metric("Completed Jobs", completed_jobs)
+                with col3:
+                    st.metric("Completion Rate", f"{completion_rate:.1f}%")
+
+def show_reports():
+    st.title("📈 Reports & Analytics")
+    
+    all_requests = get_all_requests()
+    
+    if not all_requests:
+        st.info("No data available for reports")
+        return
+    
+    # Create safe data for reporting
+    report_data = []
+    for req in all_requests:
+        report_data.append({
+            'id': safe_get(req, 'id'),
+            'title': safe_str(safe_get(req, 'title'), 'N/A'),
+            'location': safe_str(safe_get(req, 'location'), 'Common Area'),
+            'facility_type': safe_str(safe_get(req, 'facility_type'), 'N/A'),
+            'priority': safe_str(safe_get(req, 'priority'), 'N/A'),
+            'status': safe_str(safe_get(req, 'status'), 'N/A'),
+            'created_by': safe_str(safe_get(req, 'created_by'), 'N/A'),
+            'assigned_vendor': safe_str(safe_get(req, 'assigned_vendor'), 'Not assigned'),
+            'created_date': safe_str(safe_get(req, 'created_date'), 'N/A'),
+            'completed_date': safe_str(safe_get(req, 'completed_date'), ''),
+            'invoice_amount': safe_float(safe_get(req, 'invoice_amount'))
+        })
+    
+    df = pd.DataFrame(report_data)
+    
+    # Convert date columns
+    if not df.empty:
+        df['created_date'] = pd.to_datetime(df['created_date'], errors='coerce')
+        df['completed_date'] = pd.to_datetime(df['completed_date'], errors='coerce')
+    
+    # Summary statistics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_requests = len(df)
+        st.metric("Total Requests", total_requests)
+    
+    with col2:
+        completed_requests = len(df[df['status'] == 'Completed'])
+        st.metric("Completed", completed_requests)
+    
+    with col3:
+        pending_requests = len(df[df['status'] == 'Pending'])
+        st.metric("Pending", pending_requests)
+    
+    with col4:
+        total_invoice_amount = df['invoice_amount'].sum()
+        st.metric("Total Invoice Amount", f"${total_invoice_amount:,.2f}")
+    
+    st.markdown("---")
+    
+    # Charts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Status distribution
+        if not df.empty:
+            status_counts = df['status'].value_counts()
+            fig = px.pie(values=status_counts.values, names=status_counts.index, 
+                        title="Request Status Distribution")
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Priority distribution
+        if not df.empty:
+            priority_counts = df['priority'].value_counts()
+            fig = px.bar(x=priority_counts.index, y=priority_counts.values,
+                        title="Requests by Priority", labels={'x': 'Priority', 'y': 'Count'})
+            st.plotly_chart(fig, use_container_width=True)
+    
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        # Facility type distribution
+        if not df.empty:
+            facility_counts = df['facility_type'].value_counts()
+            fig = px.bar(y=facility_counts.index, x=facility_counts.values,
+                        title="Requests by Facility Type", orientation='h',
+                        labels={'x': 'Count', 'y': 'Facility Type'})
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col4:
+        # Location distribution
+        if not df.empty:
+            location_counts = df['location'].value_counts().head(10)
+            fig = px.bar(y=location_counts.index, x=location_counts.values,
+                        title="Top 10 Locations", orientation='h',
+                        labels={'x': 'Count', 'y': 'Location'})
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Monthly trends
+    st.subheader("Monthly Trends")
+    if not df.empty and 'created_date' in df.columns:
+        df['month'] = df['created_date'].dt.to_period('M')
+        monthly_trends = df.groupby('month').size().reset_index(name='count')
+        monthly_trends['month'] = monthly_trends['month'].astype(str)
+        
+        fig = px.line(monthly_trends, x='month', y='count', 
+                     title="Monthly Request Trends", markers=True)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Vendor performance
+    st.subheader("Vendor Performance")
+    vendor_stats = df[df['assigned_vendor'] != 'Not assigned'].groupby('assigned_vendor').agg({
+        'id': 'count',
+        'status': lambda x: (x == 'Completed').sum()
+    }).rename(columns={'id': 'total_jobs', 'status': 'completed_jobs'})
+    
+    if not vendor_stats.empty:
+        vendor_stats['completion_rate'] = (vendor_stats['completed_jobs'] / vendor_stats['total_jobs'] * 100).round(2)
+        st.dataframe(vendor_stats, use_container_width=True)
+    
+    # Export data
+    st.markdown("---")
+    st.subheader("Export Data")
+    
+    if st.button("Export to CSV"):
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="Download CSV",
+            data=csv,
+            file_name=f"facilities_management_report_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
 
 def show_assigned_jobs():
     st.title("🔧 Assigned Jobs")
