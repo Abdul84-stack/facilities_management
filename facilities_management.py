@@ -5,11 +5,6 @@ import plotly.express as px
 from datetime import datetime
 import base64
 import io
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib import colors
 import tempfile
 import os
 
@@ -41,6 +36,8 @@ st.markdown("""
         border-radius: 20px;
         box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         color: white;
+        max-width: 600px;
+        margin: 0 auto;
     }
     
     .login-title {
@@ -52,6 +49,7 @@ st.markdown("""
         text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
     }
     
+    /* Button styling */
     .stButton > button {
         background: linear-gradient(45deg, #4CAF50, #2E7D32);
         color: white;
@@ -67,6 +65,18 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    
+    /* Logout button specific styling */
+    div[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+        background: linear-gradient(45deg, #f44336, #d32f2f) !important;
+        color: white !important;
+    }
+    
+    div[data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+        background: linear-gradient(45deg, #d32f2f, #b71c1c) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(211, 47, 47, 0.4) !important;
     }
     
     /* Form styling */
@@ -112,23 +122,13 @@ st.markdown("""
         font-size: 1.1em;
     }
     
-    /* Footer styling */
-    .footer {
-        position: fixed;
-        bottom: 0;
-        width: 100%;
-        background: linear-gradient(90deg, #1a237e, #283593);
-        color: white;
-        text-align: center;
-        padding: 10px;
-        font-size: 12px;
-        z-index: 1000;
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #2c3e50, #34495e) !important;
     }
     
-    /* Sidebar styling */
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #2c3e50, #34495e);
-        color: white;
+    [data-testid="stSidebar"] > div:first-child {
+        background: transparent !important;
     }
     
     /* Metric card styling */
@@ -147,38 +147,46 @@ st.markdown("""
         margin: 20px 0;
     }
     
-    /* Custom checkbox styling */
-    .stCheckbox > div > label {
-        font-weight: bold;
-        color: #333;
-    }
-    
-    /* Number input styling */
-    .stNumberInput > div > div > input {
-        background-color: white;
-        border: 2px solid #ddd;
-        border-radius: 8px;
-        padding: 10px;
-    }
-    
-    /* Fix for logout button */
-    .stButton > button[kind="secondary"] {
-        background: linear-gradient(45deg, #f44336, #d32f2f) !important;
-    }
-    
-    /* Streamlit specific fixes */
-    div[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2c3e50, #34495e) !important;
-    }
-    
-    div[data-testid="stSidebar"] * {
+    /* Fix sidebar text color */
+    .sidebar-text {
         color: white !important;
     }
     
-    div[data-testid="stSidebar"] .stRadio > div {
+    /* Fix radio buttons in sidebar */
+    [data-testid="stSidebar"] .stRadio > div {
         background-color: rgba(255,255,255,0.1);
         padding: 10px;
         border-radius: 10px;
+    }
+    
+    [data-testid="stSidebar"] .stRadio label {
+        color: white !important;
+    }
+    
+    /* Fix selectbox in sidebar */
+    [data-testid="stSidebar"] .stSelectbox label {
+        color: white !important;
+    }
+    
+    /* Footer styling */
+    .app-footer {
+        background: linear-gradient(90deg, #1a237e, #283593);
+        color: white;
+        text-align: center;
+        padding: 10px;
+        margin-top: 40px;
+        border-radius: 5px;
+        font-size: 12px;
+    }
+    
+    /* Logout container styling */
+    .logout-container {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 20px;
+        background: transparent;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -200,142 +208,75 @@ def init_database():
         )
     ''')
     
-    # Check if maintenance_requests table exists
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='maintenance_requests'")
-    table_exists = cursor.fetchone()
+    # Create maintenance_requests table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS maintenance_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            location TEXT NOT NULL DEFAULT "Common Area",
+            facility_type TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            status TEXT DEFAULT 'Pending',
+            created_by TEXT NOT NULL,
+            assigned_vendor TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_date TIMESTAMP,
+            completion_notes TEXT,
+            job_breakdown TEXT,
+            invoice_amount REAL,
+            invoice_number TEXT,
+            requesting_dept_approval BOOLEAN DEFAULT 0,
+            facilities_manager_approval BOOLEAN DEFAULT 0
+        )
+    ''')
     
-    if not table_exists:
-        # Create maintenance_requests table
-        cursor.execute('''
-            CREATE TABLE maintenance_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                description TEXT NOT NULL,
-                location TEXT NOT NULL DEFAULT "Common Area",
-                facility_type TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                status TEXT DEFAULT 'Pending',
-                created_by TEXT NOT NULL,
-                assigned_vendor TEXT,
-                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_date TIMESTAMP,
-                completion_notes TEXT,
-                job_breakdown TEXT,
-                invoice_amount REAL,
-                invoice_number TEXT,
-                requesting_dept_approval BOOLEAN DEFAULT 0,
-                facilities_manager_approval BOOLEAN DEFAULT 0
-            )
-        ''')
-    else:
-        # Check and add columns if they don't exist
-        cursor.execute("PRAGMA table_info(maintenance_requests)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        columns_to_add = [
-            ('location', 'TEXT DEFAULT "Common Area"'),
-            ('job_breakdown', 'TEXT'),
-            ('invoice_amount', 'REAL'),
-            ('invoice_number', 'TEXT'),
-            ('requesting_dept_approval', 'BOOLEAN DEFAULT 0'),
-            ('facilities_manager_approval', 'BOOLEAN DEFAULT 0')
-        ]
-        
-        for column_name, column_type in columns_to_add:
-            if column_name not in columns:
-                try:
-                    cursor.execute(f'ALTER TABLE maintenance_requests ADD COLUMN {column_name} {column_type}')
-                except:
-                    pass
+    # Create vendors table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vendors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT NOT NULL,
+            contact_person TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            vendor_type TEXT NOT NULL,
+            services_offered TEXT NOT NULL,
+            annual_turnover REAL,
+            tax_identification_number TEXT,
+            rc_number TEXT,
+            key_management_staff TEXT,
+            account_details TEXT,
+            certification TEXT,
+            address TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            certificate_incorporation BLOB,
+            tax_clearance_certificate BLOB,
+            audited_financial_statement BLOB
+        )
+    ''')
     
-    # Check if vendors table exists
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vendors'")
-    vendor_table_exists = cursor.fetchone()
-    
-    if not vendor_table_exists:
-        # Create vendors table
-        cursor.execute('''
-            CREATE TABLE vendors (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_name TEXT NOT NULL,
-                contact_person TEXT NOT NULL,
-                email TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                vendor_type TEXT NOT NULL,
-                services_offered TEXT NOT NULL,
-                annual_turnover REAL,
-                tax_identification_number TEXT,
-                rc_number TEXT,
-                key_management_staff TEXT,
-                account_details TEXT,
-                certification TEXT,
-                address TEXT NOT NULL,
-                username TEXT NOT NULL UNIQUE,
-                registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                certificate_incorporation BLOB,
-                tax_clearance_certificate BLOB,
-                audited_financial_statement BLOB
-            )
-        ''')
-    else:
-        # Add new columns to existing vendors table if they don't exist
-        cursor.execute("PRAGMA table_info(vendors)")
-        vendor_columns = [column[1] for column in cursor.fetchall()]
-        
-        vendor_columns_to_add = [
-            ('annual_turnover', 'REAL'),
-            ('tax_identification_number', 'TEXT'),
-            ('rc_number', 'TEXT'),
-            ('key_management_staff', 'TEXT'),
-            ('account_details', 'TEXT'),
-            ('certificate_incorporation', 'BLOB'),
-            ('tax_clearance_certificate', 'BLOB'),
-            ('audited_financial_statement', 'BLOB')
-        ]
-        
-        for column_name, column_type in vendor_columns_to_add:
-            if column_name not in vendor_columns:
-                try:
-                    cursor.execute(f'ALTER TABLE vendors ADD COLUMN {column_name} {column_type}')
-                except:
-                    pass
-    
-    # Check if invoices table exists
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='invoices'")
-    invoice_table_exists = cursor.fetchone()
-    
-    if not invoice_table_exists:
-        # Create invoices table with Naira currency
-        cursor.execute('''
-            CREATE TABLE invoices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_number TEXT UNIQUE NOT NULL,
-                request_id INTEGER,
-                vendor_username TEXT NOT NULL,
-                invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                details_of_work TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                unit_cost REAL NOT NULL,
-                amount REAL NOT NULL,
-                labour_charge REAL DEFAULT 0,
-                vat_applicable BOOLEAN DEFAULT 0,
-                vat_amount REAL DEFAULT 0,
-                total_amount REAL NOT NULL,
-                currency TEXT DEFAULT '₦',
-                status TEXT DEFAULT 'Pending',
-                FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
-            )
-        ''')
-    else:
-        # Check if currency column exists, add it if not
-        cursor.execute("PRAGMA table_info(invoices)")
-        invoice_columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'currency' not in invoice_columns:
-            try:
-                cursor.execute("ALTER TABLE invoices ADD COLUMN currency TEXT DEFAULT '₦'")
-            except:
-                pass
+    # Create invoices table with Naira currency
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_number TEXT UNIQUE NOT NULL,
+            request_id INTEGER,
+            vendor_username TEXT NOT NULL,
+            invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            details_of_work TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_cost REAL NOT NULL,
+            amount REAL NOT NULL,
+            labour_charge REAL DEFAULT 0,
+            vat_applicable BOOLEAN DEFAULT 0,
+            vat_amount REAL DEFAULT 0,
+            total_amount REAL NOT NULL,
+            currency TEXT DEFAULT '₦',
+            status TEXT DEFAULT 'Pending',
+            FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
+        )
+    ''')
     
     # Insert sample users
     sample_users = [
@@ -412,21 +353,23 @@ def execute_query(query, params=()):
         st.error(f"Query error: {e}")
         results = []
     finally:
-        conn.commit()
         conn.close()
     return results
 
 def execute_update(query, params=()):
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(query, params)
         conn.commit()
-        conn.close()
         return True
     except Exception as e:
         st.error(f"Database update error: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
 
 # Safe data access functions
 def safe_get(data, key, default=None):
@@ -499,7 +442,7 @@ def show_login():
         
         st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
         
-        with st.form("login_form"):
+        with st.form("login_form", clear_on_submit=True):
             st.markdown('<h3 style="color: white;">🔐 User Login</h3>', unsafe_allow_html=True)
             
             username = st.text_input("👤 Username", placeholder="Enter your username")
@@ -556,8 +499,9 @@ def show_login():
         
         st.markdown('</div>', unsafe_allow_html=True)
     
+    # Footer at bottom of page
     st.markdown("""
-        <div class="footer">
+        <div class="app-footer">
             FACILITIES MANAGEMENT SYSTEM™ © 2024 | Currency: Nigerian Naira (₦) | Developed by Abdulahi Ibrahim
         </div>
     """, unsafe_allow_html=True)
@@ -757,28 +701,31 @@ def show_create_request():
     st.title("📝 Create Maintenance Request")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    with st.form("create_request_form"):
+    with st.form("create_request_form", clear_on_submit=True):
         st.markdown('<div class="card">', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         
         with col1:
-            title = st.text_input("📌 Request Title", placeholder="Enter request title")
+            title = st.text_input("📌 Request Title", placeholder="Enter request title", key="req_title")
             location = st.selectbox(
                 "📍 Location",
                 ["Water Treatment Plant", "Finance", "HR", "Admin", "Common Area", 
-                 "Production", "Warehouse", "Office Building", "Laboratory"]
+                 "Production", "Warehouse", "Office Building", "Laboratory"],
+                key="req_location"
             )
             facility_type = st.selectbox(
                 "🏢 Facility Type",
                 ["HVAC (Cooling Systems)", "Generator Maintenance", "Fixture and Fittings", 
-                 "Building Maintenance", "HSE", "Space Management"]
+                 "Building Maintenance", "HSE", "Space Management"],
+                key="req_facility"
             )
         
         with col2:
-            priority = st.selectbox("🚨 Priority", ["Low", "Medium", "High", "Critical"])
+            priority = st.selectbox("🚨 Priority", ["Low", "Medium", "High", "Critical"], key="req_priority")
         
         description = st.text_area("📄 Description of the Request", height=100, 
-                                 placeholder="Please provide detailed description of the maintenance request...")
+                                 placeholder="Please provide detailed description of the maintenance request...",
+                                 key="req_description")
         st.markdown('</div>', unsafe_allow_html=True)
         
         submitted = st.form_submit_button("🚀 Submit Request", use_container_width=True)
@@ -793,6 +740,7 @@ def show_create_request():
                 )
                 if success:
                     st.success("✅ Maintenance request created successfully!")
+                    # Force a rerun to clear the form
                     st.rerun()
                 else:
                     st.error("❌ Failed to create request")
@@ -825,16 +773,16 @@ def show_my_requests():
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         status_options = ["All"] + list(df['Status'].unique())
-        status_filter = st.selectbox("Filter by Status", status_options)
+        status_filter = st.selectbox("Filter by Status", status_options, key="status_filter")
     with col2:
         priority_options = ["All"] + list(df['Priority'].unique())
-        priority_filter = st.selectbox("Filter by Priority", priority_options)
+        priority_filter = st.selectbox("Filter by Priority", priority_options, key="priority_filter")
     with col3:
         facility_options = ["All"] + list(df['Facility'].unique())
-        facility_filter = st.selectbox("Filter by Facility Type", facility_options)
+        facility_filter = st.selectbox("Filter by Facility Type", facility_options, key="facility_filter")
     with col4:
         location_options = ["All"] + list(df['Location'].unique())
-        location_filter = st.selectbox("Filter by Location", location_options)
+        location_filter = st.selectbox("Filter by Location", location_options, key="location_filter")
     
     filtered_df = df
     if status_filter != "All":
@@ -850,7 +798,7 @@ def show_my_requests():
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     st.subheader("📄 Request Details")
-    selected_id = st.selectbox("Select Request to View Details", [""] + [str(safe_get(req, 'id')) for req in user_requests])
+    selected_id = st.selectbox("Select Request to View Details", [""] + [str(safe_get(req, 'id')) for req in user_requests], key="request_select")
     
     if selected_id:
         request = next((r for r in user_requests if str(safe_get(r, 'id')) == selected_id), None)
@@ -893,7 +841,7 @@ def show_my_requests():
                 safe_get(request, 'created_by') == st.session_state.user['username']):
                 
                 st.markdown('<div class="card">', unsafe_allow_html=True)
-                if st.button("✅ Approve (Department)", use_container_width=True):
+                if st.button("✅ Approve (Department)", use_container_width=True, key=f"approve_{safe_get(request, 'id')}"):
                     if execute_update(
                         'UPDATE maintenance_requests SET requesting_dept_approval = 1 WHERE id = ?',
                         (safe_get(request, 'id'),)
@@ -916,18 +864,18 @@ def show_manage_requests():
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         status_options = ["All"] + ["Pending", "Assigned", "Completed", "Approved"]
-        status_filter = st.selectbox("Filter by Status", status_options)
+        status_filter = st.selectbox("Filter by Status", status_options, key="mgr_status")
     with col2:
         priority_options = ["All"] + ["Low", "Medium", "High", "Critical"]
-        priority_filter = st.selectbox("Filter by Priority", priority_options)
+        priority_filter = st.selectbox("Filter by Priority", priority_options, key="mgr_priority")
     with col3:
         facility_types = list(set(safe_str(req.get('facility_type')) for req in all_requests))
         facility_options = ["All"] + facility_types
-        facility_filter = st.selectbox("Filter by Facility Type", facility_options)
+        facility_filter = st.selectbox("Filter by Facility Type", facility_options, key="mgr_facility")
     with col4:
         locations = list(set(safe_str(req.get('location'), 'Common Area') for req in all_requests))
         location_options = ["All"] + locations
-        location_filter = st.selectbox("Filter by Location", location_options)
+        location_filter = st.selectbox("Filter by Location", location_options, key="mgr_location")
     
     filtered_requests = all_requests
     if status_filter != "All":
@@ -1240,13 +1188,14 @@ def show_reports():
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     st.subheader("📤 Export Data")
     
-    if st.button("📥 Export to CSV", use_container_width=True):
+    if st.button("📥 Export to CSV", use_container_width=True, key="export_csv"):
         csv = df.to_csv(index=False)
         st.download_button(
             label="⬇️ Download CSV",
             data=csv,
             file_name=f"facilities_management_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
+            mime="text/csv",
+            key="download_csv"
         )
 
 def show_assigned_jobs():
@@ -1279,7 +1228,7 @@ def show_assigned_jobs():
             with col2:
                 st.markdown('<div class="card">', unsafe_allow_html=True)
                 st.subheader("✅ Complete Job")
-                with st.form(f"complete_job_{safe_get(job, 'id')}"):
+                with st.form(f"complete_job_{safe_get(job, 'id')}", clear_on_submit=True):
                     completion_notes = st.text_area("📝 Completion Notes")
                     job_breakdown = st.text_area("🔧 Breakdown of Job Done", height=100, 
                                                placeholder="Provide detailed breakdown of work completed...")
@@ -1335,7 +1284,7 @@ def show_completed_jobs():
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     st.subheader("📄 Job Details")
-    selected_id = st.selectbox("Select Job to View Details", [""] + [str(safe_get(job, 'id')) for job in completed_jobs])
+    selected_id = st.selectbox("Select Job to View Details", [""] + [str(safe_get(job, 'id')) for job in completed_jobs], key="completed_select")
     
     if selected_id:
         job = next((j for j in completed_jobs if str(safe_get(j, 'id')) == selected_id), None)
@@ -1416,7 +1365,7 @@ def show_vendor_registration():
     
     st.info("📝 Please complete your vendor registration details below:")
     
-    with st.form("vendor_registration"):
+    with st.form("vendor_registration", clear_on_submit=True):
         st.markdown('<div class="card">', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         
@@ -1497,7 +1446,7 @@ def show_invoice_creation():
     
     st.subheader("📋 Select Job for Invoice Creation")
     job_options = {f"#{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')} - {safe_str(safe_get(job, 'location'), 'Common Area')}": safe_get(job, 'id') for job in vendor_jobs}
-    selected_job_key = st.selectbox("Choose a completed job", list(job_options.keys()))
+    selected_job_key = st.selectbox("Choose a completed job", list(job_options.keys()), key="invoice_job_select")
     selected_job_id = job_options[selected_job_key]
     
     selected_job = next((job for job in vendor_jobs if safe_get(job, 'id') == selected_job_id), None)
@@ -1512,7 +1461,7 @@ def show_invoice_creation():
         st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
         st.subheader("💰 Invoice Details")
         
-        with st.form("invoice_creation_form"):
+        with st.form("invoice_creation_form", clear_on_submit=True):
             st.markdown('<div class="card">', unsafe_allow_html=True)
             col1, col2 = st.columns(2)
             
@@ -1558,35 +1507,14 @@ def show_invoice_creation():
                     if existing_invoice:
                         st.error("❌ Invoice number already exists. Please use a different invoice number.")
                     else:
-                        # First, let's check what columns exist in the invoices table
-                        conn = get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("PRAGMA table_info(invoices)")
-                        columns = cursor.fetchall()
-                        conn.close()
-                        
-                        # Check if currency column exists
-                        has_currency = any(col[1] == 'currency' for col in columns)
-                        
-                        if has_currency:
-                            success = execute_update(
-                                '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
-                                details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount, currency) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                (invoice_number, selected_job_id, st.session_state.user['username'], 
-                                 invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
-                                 amount, labour_charge, vat_applicable, vat_amount, total_amount, '₦')
-                            )
-                        else:
-                            # Fallback if currency column doesn't exist
-                            success = execute_update(
-                                '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
-                                details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                (invoice_number, selected_job_id, st.session_state.user['username'], 
-                                 invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
-                                 amount, labour_charge, vat_applicable, vat_amount, total_amount)
-                            )
+                        success = execute_update(
+                            '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
+                            details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount, currency) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (invoice_number, selected_job_id, st.session_state.user['username'], 
+                             invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
+                             amount, labour_charge, vat_applicable, vat_amount, total_amount, '₦')
+                        )
                         
                         if success:
                             st.success("✅ Invoice created successfully!")
@@ -1614,12 +1542,12 @@ def show_job_invoice_reports():
     col1, col2, col3 = st.columns(3)
     with col1:
         status_options = ["All"] + list(set(safe_str(safe_get(job, 'status')) for job in completed_jobs))
-        status_filter = st.selectbox("Filter by Job Status", status_options)
+        status_filter = st.selectbox("Filter by Job Status", status_options, key="job_status")
     with col2:
         location_options = ["All"] + list(set(safe_str(safe_get(job, 'location'), 'Common Area') for job in completed_jobs))
-        location_filter = st.selectbox("Filter by Location", location_options)
+        location_filter = st.selectbox("Filter by Location", location_options, key="job_location")
     with col3:
-        has_invoice_filter = st.selectbox("Filter by Invoice", ["All", "With Invoice", "Without Invoice"])
+        has_invoice_filter = st.selectbox("Filter by Invoice", ["All", "With Invoice", "Without Invoice"], key="job_invoice")
     
     filtered_jobs = completed_jobs
     if status_filter != "All":
@@ -1730,23 +1658,22 @@ def show_main_app():
             menu_options = ["Dashboard", "Assigned Jobs", "Completed Jobs", 
                           "Vendor Registration", "Invoice Creation"]
         
-        selected_menu = st.radio("🗺️ Navigation", menu_options, label_visibility="collapsed")
+        selected_menu = st.radio("🗺️ Navigation", menu_options, key="navigation_menu", label_visibility="collapsed")
         
         st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
         
-        # Fixed logout button
-        if st.button("🚪 Logout", use_container_width=True):
+        # Fixed logout button - using kind="secondary" with custom CSS
+        if st.button("🚪 Logout", type="secondary", use_container_width=True, key="logout_button"):
             # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
         
+        # Simple copyright footer
         st.markdown("""
-            <div style="position: absolute; bottom: 20px; left: 0; right: 0; padding: 10px; 
-                     text-align: center; font-size: 10px; color: rgba(255,255,255,0.6);">
+            <div style="margin-top: 30px; padding: 10px; text-align: center; font-size: 10px; color: rgba(255,255,255,0.6);">
                 <hr style="margin: 10px 0;">
                 © 2024 FMS™<br>
-                Developed by Abdulahi Ibrahim<br>
                 All Rights Reserved
             </div>
         """, unsafe_allow_html=True)
@@ -1775,6 +1702,7 @@ def show_main_app():
         show_invoice_creation()
 
 def main():
+    # Initialize session state for user if not exists
     if 'user' not in st.session_state:
         st.session_state.user = None
     
@@ -1784,12 +1712,6 @@ def main():
         show_main_app()
 
 if __name__ == "__main__":
-    # Clear any existing database to ensure clean start
-    try:
-        os.remove('facilities_management.db')
-    except:
-        pass
-    
     # Initialize fresh database
     init_database()
     
