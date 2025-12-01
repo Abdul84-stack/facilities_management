@@ -3,12 +3,14 @@ import sqlite3
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import base64
 import io
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
+import tempfile
 import os
 
 # Page configuration with enhanced UI
@@ -124,12 +126,9 @@ st.markdown("""
     }
     
     /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2c3e50, #34495e) !important;
-    }
-    
-    [data-testid="stSidebar"] * {
-        color: white !important;
+    .sidebar .sidebar-content {
+        background: linear-gradient(180deg, #2c3e50, #34495e);
+        color: white;
     }
     
     /* Metric card styling */
@@ -162,37 +161,31 @@ st.markdown("""
         padding: 10px;
     }
     
-    /* Logout button styling */
-    .logout-button {
+    /* Fix for logout button */
+    .stButton > button[kind="secondary"] {
         background: linear-gradient(45deg, #f44336, #d32f2f) !important;
-        color: white !important;
-        border: none !important;
-        padding: 12px 24px !important;
-        border-radius: 8px !important;
-        font-weight: bold !important;
-        font-size: 16px !important;
-        width: 100% !important;
-        margin-top: 20px !important;
     }
     
-    /* Radio button styling in sidebar */
+    /* Streamlit specific fixes */
+    div[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #2c3e50, #34495e) !important;
+    }
+    
+    div[data-testid="stSidebar"] * {
+        color: white !important;
+    }
+    
     div[data-testid="stSidebar"] .stRadio > div {
         background-color: rgba(255,255,255,0.1);
         padding: 10px;
         border-radius: 10px;
-        margin-bottom: 10px;
-    }
-    
-    div[data-testid="stSidebar"] .stRadio label {
-        color: white !important;
-        font-weight: bold;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # Database setup with schema migration
 def init_database():
-    conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
+    conn = sqlite3.connect('facilities_management.db')
     cursor = conn.cursor()
     
     # Users table
@@ -207,77 +200,144 @@ def init_database():
         )
     ''')
     
-    # Maintenance requests table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS maintenance_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            location TEXT NOT NULL DEFAULT "Common Area",
-            facility_type TEXT NOT NULL,
-            priority TEXT NOT NULL,
-            status TEXT DEFAULT 'Pending',
-            created_by TEXT NOT NULL,
-            assigned_vendor TEXT,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_date TIMESTAMP,
-            completion_notes TEXT,
-            job_breakdown TEXT,
-            invoice_amount REAL DEFAULT 0,
-            invoice_number TEXT,
-            requesting_dept_approval BOOLEAN DEFAULT 0,
-            facilities_manager_approval BOOLEAN DEFAULT 0
-        )
-    ''')
+    # Check if maintenance_requests table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='maintenance_requests'")
+    table_exists = cursor.fetchone()
     
-    # Vendors table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS vendors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            company_name TEXT NOT NULL,
-            contact_person TEXT NOT NULL,
-            email TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            vendor_type TEXT NOT NULL,
-            services_offered TEXT NOT NULL,
-            annual_turnover REAL DEFAULT 0,
-            tax_identification_number TEXT,
-            rc_number TEXT,
-            key_management_staff TEXT,
-            account_details TEXT,
-            certification TEXT,
-            address TEXT NOT NULL,
-            username TEXT NOT NULL UNIQUE,
-            registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            certificate_incorporation BLOB,
-            tax_clearance_certificate BLOB,
-            audited_financial_statement BLOB
-        )
-    ''')
+    if not table_exists:
+        # Create maintenance_requests table
+        cursor.execute('''
+            CREATE TABLE maintenance_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                location TEXT NOT NULL DEFAULT "Common Area",
+                facility_type TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                status TEXT DEFAULT 'Pending',
+                created_by TEXT NOT NULL,
+                assigned_vendor TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_date TIMESTAMP,
+                completion_notes TEXT,
+                job_breakdown TEXT,
+                invoice_amount REAL,
+                invoice_number TEXT,
+                requesting_dept_approval BOOLEAN DEFAULT 0,
+                facilities_manager_approval BOOLEAN DEFAULT 0
+            )
+        ''')
+    else:
+        # Check and add columns if they don't exist
+        cursor.execute("PRAGMA table_info(maintenance_requests)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        columns_to_add = [
+            ('location', 'TEXT DEFAULT "Common Area"'),
+            ('job_breakdown', 'TEXT'),
+            ('invoice_amount', 'REAL'),
+            ('invoice_number', 'TEXT'),
+            ('requesting_dept_approval', 'BOOLEAN DEFAULT 0'),
+            ('facilities_manager_approval', 'BOOLEAN DEFAULT 0')
+        ]
+        
+        for column_name, column_type in columns_to_add:
+            if column_name not in columns:
+                try:
+                    cursor.execute(f'ALTER TABLE maintenance_requests ADD COLUMN {column_name} {column_type}')
+                except:
+                    pass
     
-    # Invoices table with Naira currency
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS invoices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            invoice_number TEXT UNIQUE NOT NULL,
-            request_id INTEGER,
-            vendor_username TEXT NOT NULL,
-            invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            details_of_work TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            unit_cost REAL NOT NULL,
-            amount REAL NOT NULL,
-            labour_charge REAL DEFAULT 0,
-            vat_applicable BOOLEAN DEFAULT 0,
-            vat_amount REAL DEFAULT 0,
-            total_amount REAL NOT NULL,
-            currency TEXT DEFAULT '₦',
-            status TEXT DEFAULT 'Pending',
-            FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
-        )
-    ''')
+    # Check if vendors table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vendors'")
+    vendor_table_exists = cursor.fetchone()
     
-    # Insert sample users if they don't exist
+    if not vendor_table_exists:
+        # Create vendors table
+        cursor.execute('''
+            CREATE TABLE vendors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name TEXT NOT NULL,
+                contact_person TEXT NOT NULL,
+                email TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                vendor_type TEXT NOT NULL,
+                services_offered TEXT NOT NULL,
+                annual_turnover REAL,
+                tax_identification_number TEXT,
+                rc_number TEXT,
+                key_management_staff TEXT,
+                account_details TEXT,
+                certification TEXT,
+                address TEXT NOT NULL,
+                username TEXT NOT NULL UNIQUE,
+                registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                certificate_incorporation BLOB,
+                tax_clearance_certificate BLOB,
+                audited_financial_statement BLOB
+            )
+        ''')
+    else:
+        # Add new columns to existing vendors table if they don't exist
+        cursor.execute("PRAGMA table_info(vendors)")
+        vendor_columns = [column[1] for column in cursor.fetchall()]
+        
+        vendor_columns_to_add = [
+            ('annual_turnover', 'REAL'),
+            ('tax_identification_number', 'TEXT'),
+            ('rc_number', 'TEXT'),
+            ('key_management_staff', 'TEXT'),
+            ('account_details', 'TEXT'),
+            ('certificate_incorporation', 'BLOB'),
+            ('tax_clearance_certificate', 'BLOB'),
+            ('audited_financial_statement', 'BLOB')
+        ]
+        
+        for column_name, column_type in vendor_columns_to_add:
+            if column_name not in vendor_columns:
+                try:
+                    cursor.execute(f'ALTER TABLE vendors ADD COLUMN {column_name} {column_type}')
+                except:
+                    pass
+    
+    # Check if invoices table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='invoices'")
+    invoice_table_exists = cursor.fetchone()
+    
+    if not invoice_table_exists:
+        # Create invoices table with Naira currency
+        cursor.execute('''
+            CREATE TABLE invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_number TEXT UNIQUE NOT NULL,
+                request_id INTEGER,
+                vendor_username TEXT NOT NULL,
+                invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                details_of_work TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_cost REAL NOT NULL,
+                amount REAL NOT NULL,
+                labour_charge REAL DEFAULT 0,
+                vat_applicable BOOLEAN DEFAULT 0,
+                vat_amount REAL DEFAULT 0,
+                total_amount REAL NOT NULL,
+                currency TEXT DEFAULT '₦',
+                status TEXT DEFAULT 'Pending',
+                FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
+            )
+        ''')
+    else:
+        # Check if currency column exists, add it if not
+        cursor.execute("PRAGMA table_info(invoices)")
+        invoice_columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'currency' not in invoice_columns:
+            try:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN currency TEXT DEFAULT '₦'")
+            except:
+                pass
+    
+    # Insert sample users
     sample_users = [
         ('facility_user', '0123456', 'facility_user', None),
         ('facility_manager', '0123456', 'facility_manager', None),
@@ -290,12 +350,15 @@ def init_database():
     ]
     
     for username, password, role, vendor_type in sample_users:
-        cursor.execute('''
-            INSERT OR IGNORE INTO users (username, password_hash, role, vendor_type) 
-            VALUES (?, ?, ?, ?)
-        ''', (username, password, role, vendor_type))
+        try:
+            cursor.execute(
+                'INSERT OR IGNORE INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
+                (username, password, role, vendor_type)
+            )
+        except sqlite3.IntegrityError:
+            pass
     
-    # Insert sample vendors
+    # Insert sample vendors with Naira amounts
     sample_vendors = [
         ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
          'HVAC installation, maintenance and repair services', 50000000.00, 'TIN123456', 'RC789012',
@@ -316,14 +379,17 @@ def init_database():
     ]
     
     for username, company_name, contact_person, email, phone, vendor_type, services_offered, annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address in sample_vendors:
-        cursor.execute('''
-            INSERT OR IGNORE INTO vendors 
-            (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
-             annual_turnover, tax_identification_number, rc_number, key_management_staff, 
-             account_details, certification, address) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (username, company_name, contact_person, email, phone, vendor_type, services_offered,
-              annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address))
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO vendors 
+                (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                 annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                 account_details, certification, address) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (username, company_name, contact_person, email, phone, vendor_type, services_offered,
+                  annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address))
+        except sqlite3.IntegrityError:
+            pass
     
     conn.commit()
     conn.close()
@@ -333,7 +399,7 @@ init_database()
 
 # Database functions
 def get_connection():
-    return sqlite3.connect('facilities_management.db', check_same_thread=False)
+    return sqlite3.connect('facilities_management.db')
 
 def execute_query(query, params=()):
     conn = get_connection()
@@ -1492,14 +1558,36 @@ def show_invoice_creation():
                     if existing_invoice:
                         st.error("❌ Invoice number already exists. Please use a different invoice number.")
                     else:
-                        success = execute_update(
-                            '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
-                            details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount, currency) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (invoice_number, selected_job_id, st.session_state.user['username'], 
-                             invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
-                             amount, labour_charge, vat_applicable, vat_amount, total_amount, '₦')
-                        )
+                        # First, let's check what columns exist in the invoices table
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("PRAGMA table_info(invoices)")
+                        columns = cursor.fetchall()
+                        conn.close()
+                        
+                        # Check if currency column exists
+                        has_currency = any(col[1] == 'currency' for col in columns)
+                        
+                        if has_currency:
+                            success = execute_update(
+                                '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
+                                details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount, currency) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (invoice_number, selected_job_id, st.session_state.user['username'], 
+                                 invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
+                                 amount, labour_charge, vat_applicable, vat_amount, total_amount, '₦')
+                            )
+                        else:
+                            # Fallback if currency column doesn't exist
+                            success = execute_update(
+                                '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
+                                details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (invoice_number, selected_job_id, st.session_state.user['username'], 
+                                 invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
+                                 amount, labour_charge, vat_applicable, vat_amount, total_amount)
+                            )
+                        
                         if success:
                             st.success("✅ Invoice created successfully!")
                             st.rerun()
@@ -1646,16 +1734,11 @@ def show_main_app():
         
         st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
         
-        # FIXED LOGOUT BUTTON - Using session state clearing method
-        if st.button("🚪 Logout", use_container_width=True, key="logout_button"):
-            # Clear all session state
-            keys_to_keep = []
-            keys_to_delete = [key for key in st.session_state.keys() if key not in keys_to_keep]
-            
-            for key in keys_to_delete:
+        # Fixed logout button
+        if st.button("🚪 Logout", use_container_width=True):
+            # Clear session state
+            for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            
-            # Force rerun to show login page
             st.rerun()
         
         st.markdown("""
@@ -1692,11 +1775,9 @@ def show_main_app():
         show_invoice_creation()
 
 def main():
-    # Initialize session state
     if 'user' not in st.session_state:
         st.session_state.user = None
     
-    # Show appropriate page based on login status
     if st.session_state.user is None:
         show_login()
     else:
