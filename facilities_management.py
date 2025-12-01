@@ -7,6 +7,14 @@ import base64
 import io
 import tempfile
 import os
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # Page configuration with enhanced UI
 st.set_page_config(
@@ -115,7 +123,7 @@ st.markdown("""
         margin-bottom: 20px;
     }
     
-    /* Currency styling */
+    /* Currency styling - FIXED FORMATTING */
     .currency-naira {
         color: #4CAF50;
         font-weight: bold;
@@ -251,6 +259,12 @@ st.markdown("""
     [data-testid="stMetricValue"], 
     [data-testid="stMetricLabel"] {
         color: #333 !important;
+    }
+    
+    /* PDF Download button styling */
+    .pdf-download-btn {
+        background: linear-gradient(45deg, #2196F3, #1976D2) !important;
+        margin-top: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -462,15 +476,12 @@ def safe_int(value, default=0):
     except (ValueError, TypeError):
         return default
 
+# FIXED CURRENCY FORMATTING FUNCTION
 def format_naira(amount, decimal_places=2):
     try:
         amount = safe_float(amount, 0)
-        if amount >= 1000000:
-            return f"₦{amount/1000000:.{decimal_places}f}M"
-        elif amount >= 1000:
-            return f"₦{amount/1000:.{decimal_places}f}K"
-        else:
-            return f"₦{amount:.{decimal_places}f}"
+        # Format as full number with comma separators
+        return f"₦{amount:,.{decimal_places}f}"
     except:
         return "₦0.00"
 
@@ -488,6 +499,392 @@ def get_vendor_requests(vendor_username):
         'SELECT * FROM maintenance_requests WHERE assigned_vendor = ? ORDER BY created_date DESC',
         (vendor_username,)
     )
+
+# PDF Generation Functions
+def generate_completion_report_pdf(job_data):
+    """Generate PDF for job completion report"""
+    try:
+        # Create a BytesIO buffer to store PDF
+        buffer = io.BytesIO()
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            alignment=1,  # Center aligned
+            spaceAfter=30
+        )
+        title = Paragraph("JOB COMPLETION REPORT", title_style)
+        elements.append(title)
+        
+        # Separator
+        elements.append(Spacer(1, 20))
+        
+        # Company Info
+        company_style = ParagraphStyle(
+            'CompanyInfo',
+            parent=styles['Normal'],
+            fontSize=10,
+            alignment=1
+        )
+        company_info = Paragraph("Facilities Management System<br/>Generated on: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"), company_style)
+        elements.append(company_info)
+        
+        elements.append(Spacer(1, 30))
+        
+        # Job Details Section
+        section_style = ParagraphStyle(
+            'SectionTitle',
+            parent=styles['Heading2'],
+            fontSize=12,
+            spaceAfter=10
+        )
+        
+        # Job Information
+        section_title = Paragraph("Job Information", section_style)
+        elements.append(section_title)
+        
+        # Create job details table
+        job_details = [
+            ["Job ID:", str(safe_get(job_data, 'id', 'N/A'))],
+            ["Title:", safe_str(safe_get(job_data, 'title', 'N/A'))],
+            ["Location:", safe_str(safe_get(job_data, 'location', 'Common Area'))],
+            ["Facility Type:", safe_str(safe_get(job_data, 'facility_type', 'N/A'))],
+            ["Priority:", safe_str(safe_get(job_data, 'priority', 'N/A'))],
+            ["Status:", safe_str(safe_get(job_data, 'status', 'N/A'))],
+            ["Created By:", safe_str(safe_get(job_data, 'created_by', 'N/A'))],
+            ["Created Date:", safe_str(safe_get(job_data, 'created_date', 'N/A'))],
+            ["Completed Date:", safe_str(safe_get(job_data, 'completed_date', 'N/A'))]
+        ]
+        
+        if safe_get(job_data, 'assigned_vendor'):
+            vendor_info = execute_query(
+                'SELECT company_name FROM vendors WHERE username = ?',
+                (safe_get(job_data, 'assigned_vendor'),)
+            )
+            vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(job_data, 'assigned_vendor')
+            job_details.append(["Assigned Vendor:", vendor_name])
+        
+        job_table = Table(job_details, colWidths=[150, 300])
+        job_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ]))
+        elements.append(job_table)
+        
+        elements.append(Spacer(1, 20))
+        
+        # Description
+        if safe_get(job_data, 'description'):
+            desc_title = Paragraph("Description", section_style)
+            elements.append(desc_title)
+            desc = Paragraph(safe_str(safe_get(job_data, 'description')), styles['Normal'])
+            elements.append(desc)
+            elements.append(Spacer(1, 10))
+        
+        # Job Breakdown
+        if safe_get(job_data, 'job_breakdown'):
+            breakdown_title = Paragraph("Job Breakdown", section_style)
+            elements.append(breakdown_title)
+            breakdown = Paragraph(safe_str(safe_get(job_data, 'job_breakdown')), styles['Normal'])
+            elements.append(breakdown)
+            elements.append(Spacer(1, 10))
+        
+        # Completion Notes
+        if safe_get(job_data, 'completion_notes'):
+            notes_title = Paragraph("Completion Notes", section_style)
+            elements.append(notes_title)
+            notes = Paragraph(safe_str(safe_get(job_data, 'completion_notes')), styles['Normal'])
+            elements.append(notes)
+            elements.append(Spacer(1, 20))
+        
+        # Financial Information
+        if safe_get(job_data, 'invoice_amount'):
+            financial_title = Paragraph("Financial Information", section_style)
+            elements.append(financial_title)
+            
+            financial_details = [
+                ["Invoice Amount:", format_naira(safe_get(job_data, 'invoice_amount'))],
+                ["Invoice Number:", safe_str(safe_get(job_data, 'invoice_number', 'N/A'))]
+            ]
+            
+            financial_table = Table(financial_details, colWidths=[150, 300])
+            financial_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+                ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+            ]))
+            elements.append(financial_table)
+            elements.append(Spacer(1, 20))
+        
+        # Approval Status
+        approval_title = Paragraph("Approval Status", section_style)
+        elements.append(approval_title)
+        
+        approval_details = [
+            ["Department Approval:", "✅ Approved" if safe_get(job_data, 'requesting_dept_approval') else "⏳ Pending"],
+            ["Manager Approval:", "✅ Approved" if safe_get(job_data, 'facilities_manager_approval') else "⏳ Pending"]
+        ]
+        
+        approval_table = Table(approval_details, colWidths=[150, 300])
+        approval_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ]))
+        elements.append(approval_table)
+        
+        # Footer
+        elements.append(Spacer(1, 50))
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=8,
+            alignment=1,
+            textColor=colors.grey
+        )
+        footer = Paragraph("Generated by Facilities Management System © 2024", footer_style)
+        elements.append(footer)
+        
+        # Build PDF
+        doc.build(elements)
+        
+        # Get PDF bytes
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return None
+
+def generate_invoice_report_pdf(invoice_data, job_data=None):
+    """Generate PDF for invoice report"""
+    try:
+        # Create a BytesIO buffer to store PDF
+        buffer = io.BytesIO()
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            alignment=1,  # Center aligned
+            spaceAfter=20,
+            textColor=colors.HexColor('#1a237e')
+        )
+        title = Paragraph("INVOICE REPORT", title_style)
+        elements.append(title)
+        
+        # Company Header
+        header_style = ParagraphStyle(
+            'Header',
+            parent=styles['Heading2'],
+            fontSize=14,
+            alignment=1,
+            spaceAfter=10
+        )
+        header = Paragraph("Facilities Management System", header_style)
+        elements.append(header)
+        
+        # Date
+        date_style = ParagraphStyle(
+            'Date',
+            parent=styles['Normal'],
+            fontSize=10,
+            alignment=1,
+            spaceAfter=30
+        )
+        date_text = Paragraph("Generated on: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"), date_style)
+        elements.append(date_text)
+        
+        elements.append(Spacer(1, 20))
+        
+        # Invoice Details Section
+        section_style = ParagraphStyle(
+            'SectionTitle',
+            parent=styles['Heading2'],
+            fontSize=12,
+            spaceAfter=10,
+            textColor=colors.HexColor('#283593')
+        )
+        
+        # Invoice Information
+        section_title = Paragraph("Invoice Information", section_style)
+        elements.append(section_title)
+        
+        # Create invoice details table
+        invoice_details = [
+            ["Invoice Number:", safe_str(safe_get(invoice_data, 'invoice_number', 'N/A'))],
+            ["Invoice Date:", safe_str(safe_get(invoice_data, 'invoice_date', 'N/A'))],
+            ["Vendor:", safe_str(safe_get(invoice_data, 'vendor_username', 'N/A'))],
+            ["Status:", safe_str(safe_get(invoice_data, 'status', 'N/A'))]
+        ]
+        
+        if job_data:
+            invoice_details.extend([
+                ["Job ID:", str(safe_get(job_data, 'id', 'N/A'))],
+                ["Job Title:", safe_str(safe_get(job_data, 'title', 'N/A'))],
+                ["Location:", safe_str(safe_get(job_data, 'location', 'Common Area'))]
+            ])
+        
+        invoice_table = Table(invoice_details, colWidths=[150, 300])
+        invoice_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e8eaf6')),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ]))
+        elements.append(invoice_table)
+        
+        elements.append(Spacer(1, 20))
+        
+        # Work Details
+        if safe_get(invoice_data, 'details_of_work'):
+            work_title = Paragraph("Work Details", section_style)
+            elements.append(work_title)
+            work_details = Paragraph(safe_str(safe_get(invoice_data, 'details_of_work')), styles['Normal'])
+            elements.append(work_details)
+            elements.append(Spacer(1, 10))
+        
+        # Financial Details Table
+        financial_title = Paragraph("Financial Breakdown", section_style)
+        elements.append(financial_title)
+        
+        financial_data = [
+            ["Description", "Quantity", "Unit Cost", "Amount"],
+            [
+                "Work Charges", 
+                str(safe_get(invoice_data, 'quantity', 0)), 
+                format_naira(safe_get(invoice_data, 'unit_cost', 0)), 
+                format_naira(safe_get(invoice_data, 'amount', 0))
+            ]
+        ]
+        
+        labour_charge = safe_get(invoice_data, 'labour_charge', 0)
+        if labour_charge > 0:
+            financial_data.append(["Labour/Service Charge", "1", format_naira(labour_charge), format_naira(labour_charge)])
+        
+        vat_applicable = safe_get(invoice_data, 'vat_applicable', False)
+        vat_amount = safe_get(invoice_data, 'vat_amount', 0)
+        if vat_applicable and vat_amount > 0:
+            financial_data.append(["VAT (7.5%)", "-", "-", format_naira(vat_amount)])
+        
+        subtotal = safe_get(invoice_data, 'amount', 0) + labour_charge
+        financial_data.append(["Subtotal", "", "", format_naira(subtotal)])
+        
+        if vat_applicable and vat_amount > 0:
+            financial_data.append(["VAT Amount", "", "", format_naira(vat_amount)])
+        
+        financial_data.append([
+            "TOTAL AMOUNT", 
+            "", 
+            "", 
+            Paragraph(format_naira(safe_get(invoice_data, 'total_amount', 0)), 
+                     ParagraphStyle('Total', parent=styles['Normal'], fontSize=12, fontWeight='bold'))
+        ])
+        
+        financial_table = Table(financial_data, colWidths=[200, 80, 100, 100])
+        financial_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5c6bc0')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8eaf6')),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.black),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, -1), (-1, -1), 12),
+            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
+            ('LINEABOVE', (0, -1), (-1, -1), 2, colors.black),
+        ]))
+        elements.append(financial_table)
+        
+        elements.append(Spacer(1, 30))
+        
+        # Notes Section
+        notes_style = ParagraphStyle(
+            'Notes',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.grey
+        )
+        
+        notes_content = """
+        <b>Payment Terms:</b> Payment due within 30 days of invoice date.<br/>
+        <b>Payment Method:</b> Bank transfer to account details provided.<br/>
+        <b>Contact:</b> For any queries regarding this invoice, please contact facilities management.<br/>
+        """
+        
+        notes = Paragraph(notes_content, notes_style)
+        elements.append(notes)
+        
+        # Footer
+        elements.append(Spacer(1, 40))
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=8,
+            alignment=1,
+            textColor=colors.grey
+        )
+        footer = Paragraph("This is an electronically generated invoice. No signature required.", footer_style)
+        elements.append(footer)
+        
+        footer2 = Paragraph("Facilities Management System © 2024 | All Rights Reserved", footer_style)
+        elements.append(footer2)
+        
+        # Build PDF
+        doc.build(elements)
+        
+        # Get PDF bytes
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except Exception as e:
+        st.error(f"Error generating invoice PDF: {e}")
+        return None
 
 # Authentication
 def authenticate_user(username, password):
@@ -1271,15 +1668,59 @@ def show_reports():
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     st.subheader("📤 Export Data")
     
-    if st.button("📥 Export to CSV", use_container_width=True, key="export_csv"):
-        csv = df.to_csv(index=False)
-        st.download_button(
-            label="⬇️ Download CSV",
-            data=csv,
-            file_name=f"facilities_management_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            key="download_csv"
-        )
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Export to CSV", use_container_width=True, key="export_csv"):
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="⬇️ Download CSV",
+                data=csv,
+                file_name=f"facilities_management_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="download_csv"
+            )
+    
+    with col2:
+        if st.button("📄 Export to PDF", use_container_width=True, key="export_pdf"):
+            # Generate a summary PDF report
+            buffer = io.BytesIO()
+            c = canvas.Canvas(buffer, pagesize=letter)
+            
+            # Add content to PDF
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(100, 750, "Facilities Management System - Report")
+            
+            c.setFont("Helvetica", 12)
+            c.drawString(100, 730, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            c.drawString(100, 710, f"Total Requests: {len(df)}")
+            c.drawString(100, 690, f"Completed: {len(df[df['status'] == 'Completed'])}")
+            c.drawString(100, 670, f"Pending: {len(df[df['status'] == 'Pending'])}")
+            c.drawString(100, 650, f"Total Invoice Amount: {format_naira(df['invoice_amount'].sum())}")
+            
+            # Add summary table
+            y_position = 600
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(100, y_position, "Summary by Status:")
+            y_position -= 20
+            
+            c.setFont("Helvetica", 10)
+            status_summary = df['status'].value_counts()
+            for status, count in status_summary.items():
+                c.drawString(120, y_position, f"{status}: {count}")
+                y_position -= 15
+            
+            c.showPage()
+            c.save()
+            
+            buffer.seek(0)
+            st.download_button(
+                label="⬇️ Download PDF Report",
+                data=buffer,
+                file_name=f"facilities_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                key="download_pdf"
+            )
 
 def show_assigned_jobs():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -1394,6 +1835,43 @@ def show_completed_jobs():
                 st.write(f"**Completed Date:** {safe_str(safe_get(job, 'completed_date'), 'N/A')}")
                 st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
                 st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
+                
+                # PDF Download Button for Job Completion Report
+                st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+                st.subheader("📄 Download Reports")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📋 Job Completion Report", key=f"job_report_{safe_get(job, 'id')}", use_container_width=True):
+                        pdf_data = generate_completion_report_pdf(job)
+                        if pdf_data:
+                            st.download_button(
+                                label="⬇️ Download PDF",
+                                data=pdf_data,
+                                file_name=f"job_completion_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"download_job_{safe_get(job, 'id')}"
+                            )
+                
+                with col2:
+                    # Check if invoice exists for this job
+                    invoice = execute_query('SELECT * FROM invoices WHERE request_id = ?', (safe_get(job, 'id'),))
+                    if invoice:
+                        invoice = invoice[0]
+                        if st.button("🧾 Invoice Report", key=f"invoice_report_{safe_get(job, 'id')}", use_container_width=True):
+                            pdf_data = generate_invoice_report_pdf(invoice, job)
+                            if pdf_data:
+                                st.download_button(
+                                    label="⬇️ Download PDF",
+                                    data=pdf_data,
+                                    file_name=f"invoice_{safe_get(invoice, 'invoice_number')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf",
+                                    key=f"download_invoice_{safe_get(job, 'id')}"
+                                )
+                    else:
+                        st.info("No invoice generated for this job yet")
+                
                 st.markdown('</div>', unsafe_allow_html=True)
 
 def show_vendor_registration():
@@ -1686,6 +2164,19 @@ def show_job_invoice_reports():
                         st.write(f"VAT Applied: {'Yes' if safe_get(invoice, 'vat_applicable') else 'No'}")
                         st.write(f"VAT Amount: {format_naira(safe_get(invoice, 'vat_amount'))}")
                         st.write(f"Total Amount: {format_naira(safe_get(invoice, 'total_amount'))}")
+                        
+                        # PDF Download Button for Invoice Report
+                        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+                        if st.button("📄 Download Invoice Report", key=f"invoice_download_{safe_get(job, 'id')}", use_container_width=True):
+                            pdf_data = generate_invoice_report_pdf(invoice, job)
+                            if pdf_data:
+                                st.download_button(
+                                    label="⬇️ Download PDF",
+                                    data=pdf_data,
+                                    file_name=f"invoice_{safe_get(invoice, 'invoice_number')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf",
+                                    key=f"download_invoice_full_{safe_get(job, 'id')}"
+                                )
                 else:
                     st.write("**No invoice created yet**")
                 
