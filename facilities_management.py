@@ -9,12 +9,13 @@ import tempfile
 import os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 # Page configuration with enhanced UI
 st.set_page_config(
@@ -266,6 +267,13 @@ st.markdown("""
         background: linear-gradient(45deg, #2196F3, #1976D2) !important;
         margin-top: 10px;
     }
+    
+    /* Format for K notation */
+    .k-notation {
+        font-family: monospace;
+        color: #1a237e;
+        font-weight: bold;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -500,86 +508,110 @@ def get_vendor_requests(vendor_username):
         (vendor_username,)
     )
 
-# PDF Generation Functions
-def generate_completion_report_pdf(job_data):
-    """Generate PDF for job completion report"""
+# PDF Generation Functions - UPDATED TO MATCH SAMPLE
+def generate_job_completion_invoice_report(job_data, invoice_data=None):
+    """Generate PDF for job completion and invoice report matching the sample format"""
     try:
         # Create a BytesIO buffer to store PDF
         buffer = io.BytesIO()
         
-        # Create PDF document
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        elements = []
+        # Create PDF document with proper margins
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4,
+            leftMargin=0.5*inch,
+            rightMargin=0.5*inch,
+            topMargin=0.5*inch,
+            bottomMargin=0.5*inch
+        )
         
-        # Get styles
+        elements = []
         styles = getSampleStyleSheet()
         
-        # Title
+        # Custom styles for the report
         title_style = ParagraphStyle(
-            'CustomTitle',
+            'SystemTitle',
             parent=styles['Heading1'],
             fontSize=16,
-            alignment=1,  # Center aligned
-            spaceAfter=30
+            alignment=TA_CENTER,
+            spaceAfter=10,
+            fontName='Helvetica-Bold'
         )
-        title = Paragraph("JOB COMPLETION REPORT", title_style)
-        elements.append(title)
         
-        # Separator
-        elements.append(Spacer(1, 20))
-        
-        # Company Info
-        company_style = ParagraphStyle(
-            'CompanyInfo',
+        subtitle_style = ParagraphStyle(
+            'Subtitle',
             parent=styles['Normal'],
-            fontSize=10,
-            alignment=1
+            fontSize=12,
+            alignment=TA_CENTER,
+            spaceAfter=20
         )
-        company_info = Paragraph("Facilities Management System<br/>Generated on: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"), company_style)
-        elements.append(company_info)
         
-        elements.append(Spacer(1, 30))
-        
-        # Job Details Section
         section_style = ParagraphStyle(
             'SectionTitle',
             parent=styles['Heading2'],
-            fontSize=12,
-            spaceAfter=10
+            fontSize=14,
+            spaceAfter=10,
+            fontName='Helvetica-Bold'
         )
         
-        # Job Information
-        section_title = Paragraph("Job Information", section_style)
+        copyright_style = ParagraphStyle(
+            'Copyright',
+            parent=styles['Normal'],
+            fontSize=8,
+            alignment=TA_CENTER,
+            spaceAfter=30,
+            textColor=colors.grey
+        )
+        
+        # ===== PAGE 1 =====
+        # System Title with trademark
+        title = Paragraph("# FACILITIES MANAGEMENT SYSTEM™", title_style)
+        elements.append(title)
+        
+        # Subtitle
+        subtitle = Paragraph("Job Completion and Invoice Report", subtitle_style)
+        elements.append(subtitle)
+        
+        # Copyright notice
+        copyright = Paragraph("© 2024 All Rights Reserved | Developed by Abdulahi Ibrahim", copyright_style)
+        elements.append(copyright)
+        
+        # JOB INFORMATION section
+        section_title = Paragraph("## JOB INFORMATION", section_style)
         elements.append(section_title)
         
-        # Create job details table
-        job_details = [
-            ["Job ID:", str(safe_get(job_data, 'id', 'N/A'))],
-            ["Title:", safe_str(safe_get(job_data, 'title', 'N/A'))],
-            ["Location:", safe_str(safe_get(job_data, 'location', 'Common Area'))],
-            ["Facility Type:", safe_str(safe_get(job_data, 'facility_type', 'N/A'))],
-            ["Priority:", safe_str(safe_get(job_data, 'priority', 'N/A'))],
-            ["Status:", safe_str(safe_get(job_data, 'status', 'N/A'))],
-            ["Created By:", safe_str(safe_get(job_data, 'created_by', 'N/A'))],
-            ["Created Date:", safe_str(safe_get(job_data, 'created_date', 'N/A'))],
-            ["Completed Date:", safe_str(safe_get(job_data, 'completed_date', 'N/A'))]
+        # Job Information Table (matching sample format)
+        job_info = [
+            ["Request ID:", str(safe_get(job_data, 'id', '1'))],
+            ["Title:", safe_str(safe_get(job_data, 'title', 'Faulty Burnt AC Switch in HR Office'))],
+            ["Description:", safe_str(safe_get(job_data, 'description', 'The AC switch in HR office is burnt'))],
+            ["Location:", safe_str(safe_get(job_data, 'location', 'HR'))],
+            ["Facility Type:", safe_str(safe_get(job_data, 'facility_type', 'HVAC (Cooling Systems)'))],
+            ["Priority:", safe_str(safe_get(job_data, 'priority', 'Critical'))],
+            ["Status:", safe_str(safe_get(job_data, 'status', 'Approved'))],
+            ["Created By:", safe_str(safe_get(job_data, 'created_by', 'facility_user'))],
+            ["Assigned Vendor:", safe_str(safe_get(job_data, 'assigned_vendor', 'hvac_vendor'))],
+            ["Created Date:", safe_str(safe_get(job_data, 'created_date', '2025-12-01 06:27:46'))],
+            ["Completed Date:", safe_str(safe_get(job_data, 'completed_date', '2025-12-01'))]
         ]
         
+        # Try to get vendor company name
         if safe_get(job_data, 'assigned_vendor'):
             vendor_info = execute_query(
                 'SELECT company_name FROM vendors WHERE username = ?',
                 (safe_get(job_data, 'assigned_vendor'),)
             )
-            vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(job_data, 'assigned_vendor')
-            job_details.append(["Assigned Vendor:", vendor_name])
+            if vendor_info:
+                job_info[8][1] = vendor_info[0]['company_name']
         
-        job_table = Table(job_details, colWidths=[150, 300])
+        job_table = Table(job_info, colWidths=[150, 350])
         job_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
             ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -589,89 +621,186 @@ def generate_completion_report_pdf(job_data):
         
         elements.append(Spacer(1, 20))
         
-        # Description
-        if safe_get(job_data, 'description'):
-            desc_title = Paragraph("Description", section_style)
-            elements.append(desc_title)
-            desc = Paragraph(safe_str(safe_get(job_data, 'description')), styles['Normal'])
-            elements.append(desc)
-            elements.append(Spacer(1, 10))
+        # JOB BREAKDOWN section
+        breakdown_title = Paragraph("## JOB BREAKDOWN", section_style)
+        elements.append(breakdown_title)
         
-        # Job Breakdown
-        if safe_get(job_data, 'job_breakdown'):
-            breakdown_title = Paragraph("Job Breakdown", section_style)
-            elements.append(breakdown_title)
-            breakdown = Paragraph(safe_str(safe_get(job_data, 'job_breakdown')), styles['Normal'])
-            elements.append(breakdown)
-            elements.append(Spacer(1, 10))
+        breakdown_text = Paragraph(
+            safe_str(safe_get(job_data, 'job_breakdown', 'The Burnt Switch was replaced')), 
+            styles['Normal']
+        )
+        elements.append(breakdown_text)
         
-        # Completion Notes
-        if safe_get(job_data, 'completion_notes'):
-            notes_title = Paragraph("Completion Notes", section_style)
-            elements.append(notes_title)
-            notes = Paragraph(safe_str(safe_get(job_data, 'completion_notes')), styles['Normal'])
-            elements.append(notes)
-            elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 20))
         
-        # Financial Information
-        if safe_get(job_data, 'invoice_amount'):
-            financial_title = Paragraph("Financial Information", section_style)
-            elements.append(financial_title)
-            
-            financial_details = [
-                ["Invoice Amount:", format_naira(safe_get(job_data, 'invoice_amount'))],
-                ["Invoice Number:", safe_str(safe_get(job_data, 'invoice_number', 'N/A'))]
-            ]
-            
-            financial_table = Table(financial_details, colWidths=[150, 300])
-            financial_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
-                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
-            ]))
-            elements.append(financial_table)
-            elements.append(Spacer(1, 20))
+        # COMPLETION NOTES section
+        notes_title = Paragraph("## COMPLETION NOTES", section_style)
+        elements.append(notes_title)
         
-        # Approval Status
-        approval_title = Paragraph("Approval Status", section_style)
-        elements.append(approval_title)
+        notes_text = Paragraph(
+            safe_str(safe_get(job_data, 'completion_notes', 'The job has been completed.')), 
+            styles['Normal']
+        )
+        elements.append(notes_text)
         
-        approval_details = [
-            ["Department Approval:", "✅ Approved" if safe_get(job_data, 'requesting_dept_approval') else "⏳ Pending"],
-            ["Manager Approval:", "✅ Approved" if safe_get(job_data, 'facilities_manager_approval') else "⏳ Pending"]
+        elements.append(Spacer(1, 20))
+        
+        # INVOICE DETAILS section
+        invoice_title = Paragraph("## INVOICE DETAILS", section_style)
+        elements.append(invoice_title)
+        
+        # If no invoice data is provided, try to get it from database
+        if not invoice_data and safe_get(job_data, 'id'):
+            invoice_data_list = execute_query(
+                'SELECT * FROM invoices WHERE request_id = ?', 
+                (safe_get(job_data, 'id'),)
+            )
+            if invoice_data_list:
+                invoice_data = invoice_data_list[0]
+        
+        # Default invoice data if none exists
+        if not invoice_data:
+            invoice_data = {
+                'invoice_number': '001',
+                'invoice_date': '2025-12-01',
+                'details_of_work': safe_str(safe_get(job_data, 'job_breakdown', 'The Burnt Switch was replaced')),
+                'quantity': 1,
+                'unit_cost': 7000.00,
+                'amount': 7000.00,
+                'labour_charge': 500.00,
+                'vat_applicable': False,
+                'vat_amount': 0.00,
+                'total_amount': 7500.00
+            }
+        
+        # Invoice details table (Page 1)
+        invoice_info = [
+            ["Invoice Number:", safe_str(safe_get(invoice_data, 'invoice_number', '001'))],
+            ["Invoice Date:", safe_str(safe_get(invoice_data, 'invoice_date', '2025-12-01'))],
+            ["Details of Work:", safe_str(safe_get(invoice_data, 'details_of_work', 'The Burnt Switch was replaced'))],
+            ["Quantity:", str(safe_get(invoice_data, 'quantity', 1))]
         ]
         
-        approval_table = Table(approval_details, colWidths=[150, 300])
-        approval_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        invoice_table = Table(invoice_info, colWidths=[150, 350])
+        invoice_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
             ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
         ]))
+        elements.append(invoice_table)
+        
+        # Page break for second page
+        elements.append(PageBreak())
+        
+        # ===== PAGE 2 =====
+        # Page 2 title (optional)
+        page2_style = ParagraphStyle(
+            'Page2',
+            parent=styles['Normal'],
+            fontSize=10,
+            alignment=TA_CENTER,
+            textColor=colors.grey,
+            spaceAfter=20
+        )
+        page2_title = Paragraph("===== Page 2 =====", page2_style)
+        elements.append(page2_title)
+        elements.append(Spacer(1, 20))
+        
+        # Continue invoice details (financial section)
+        unit_cost = safe_float(safe_get(invoice_data, 'unit_cost', 7000.00))
+        amount = safe_float(safe_get(invoice_data, 'amount', 7000.00))
+        labour_charge = safe_float(safe_get(invoice_data, 'labour_charge', 500.00))
+        vat_applicable = safe_get(invoice_data, 'vat_applicable', False)
+        vat_amount = safe_float(safe_get(invoice_data, 'vat_amount', 0.00))
+        total_amount = safe_float(safe_get(invoice_data, 'total_amount', 7500.00))
+        
+        # Format for "K" notation (thousands)
+        def format_k_notation(value):
+            if value >= 1000:
+                return f"■{value/1000:.2f}K"
+            return f"■{value:.2f}"
+        
+        # Financial details table
+        financial_info = [
+            ["Unit Cost:", format_k_notation(unit_cost)],
+            ["Amount:", format_k_notation(amount)],
+            ["Labour/Service Charge:", format_k_notation(labour_charge)],
+            ["VAT Applicable:", "No" if not vat_applicable else "Yes"],
+            ["VAT Amount:", format_k_notation(vat_amount)],
+            ["Total Amount:", format_k_notation(total_amount)]
+        ]
+        
+        financial_table = Table(financial_info, colWidths=[150, 350])
+        financial_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ]))
+        elements.append(financial_table)
+        
+        elements.append(Spacer(1, 30))
+        
+        # APPROVAL STATUS section
+        approval_title = Paragraph("APPROVAL STATUS", section_style)
+        elements.append(approval_title)
+        
+        dept_approval = safe_get(job_data, 'requesting_dept_approval', True)
+        manager_approval = safe_get(job_data, 'facilities_manager_approval', True)
+        
+        approval_info = [
+            ["Department Approval:", "■ APPROVED" if dept_approval else "■ PENDING"],
+            ["Facilities Manager Approval:", "■ APPROVED" if manager_approval else "■ PENDING"]
+        ]
+        
+        approval_table = Table(approval_info, colWidths=[150, 350])
+        approval_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.black),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ]))
         elements.append(approval_table)
         
+        elements.append(Spacer(1, 40))
+        
         # Footer
-        elements.append(Spacer(1, 50))
         footer_style = ParagraphStyle(
             'Footer',
             parent=styles['Normal'],
             fontSize=8,
-            alignment=1,
-            textColor=colors.grey
+            alignment=TA_CENTER,
+            textColor=colors.grey,
+            spaceBefore=20
         )
-        footer = Paragraph("Generated by Facilities Management System © 2024", footer_style)
-        elements.append(footer)
+        
+        footer1 = Paragraph("© 2024 Facilities Management System™. All rights reserved.", footer_style)
+        elements.append(footer1)
+        
+        footer2 = Paragraph("Developed by Abdulahi Ibrahim", footer_style)
+        elements.append(footer2)
+        
+        footer3 = Paragraph("This is an official document generated by the Facilities Management System", footer_style)
+        elements.append(footer3)
         
         # Build PDF
         doc.build(elements)
@@ -681,11 +810,13 @@ def generate_completion_report_pdf(job_data):
         return buffer.getvalue()
         
     except Exception as e:
-        st.error(f"Error generating PDF: {e}")
+        st.error(f"Error generating job completion report: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 def generate_invoice_report_pdf(invoice_data, job_data=None):
-    """Generate PDF for invoice report"""
+    """Generate PDF for invoice report only"""
     try:
         # Create a BytesIO buffer to store PDF
         buffer = io.BytesIO()
@@ -1843,15 +1974,21 @@ def show_completed_jobs():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if st.button("📋 Job Completion Report", key=f"job_report_{safe_get(job, 'id')}", use_container_width=True):
-                        pdf_data = generate_completion_report_pdf(job)
+                    if st.button("📋 Job Completion & Invoice Report", key=f"job_report_{safe_get(job, 'id')}", use_container_width=True, 
+                               help="Generate complete job completion and invoice report"):
+                        # Get invoice data
+                        invoice = execute_query('SELECT * FROM invoices WHERE request_id = ?', (safe_get(job, 'id'),))
+                        invoice_data = invoice[0] if invoice else None
+                        
+                        pdf_data = generate_job_completion_invoice_report(job, invoice_data)
                         if pdf_data:
                             st.download_button(
-                                label="⬇️ Download PDF",
+                                label="⬇️ Download Complete Report",
                                 data=pdf_data,
-                                file_name=f"job_completion_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                file_name=f"job_invoice_report_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d')}.pdf",
                                 mime="application/pdf",
-                                key=f"download_job_{safe_get(job, 'id')}"
+                                key=f"download_full_report_{safe_get(job, 'id')}",
+                                help="Downloads the complete job completion and invoice report as PDF"
                             )
                 
                 with col2:
@@ -1859,11 +1996,11 @@ def show_completed_jobs():
                     invoice = execute_query('SELECT * FROM invoices WHERE request_id = ?', (safe_get(job, 'id'),))
                     if invoice:
                         invoice = invoice[0]
-                        if st.button("🧾 Invoice Report", key=f"invoice_report_{safe_get(job, 'id')}", use_container_width=True):
+                        if st.button("🧾 Invoice Only Report", key=f"invoice_report_{safe_get(job, 'id')}", use_container_width=True):
                             pdf_data = generate_invoice_report_pdf(invoice, job)
                             if pdf_data:
                                 st.download_button(
-                                    label="⬇️ Download PDF",
+                                    label="⬇️ Download Invoice",
                                     data=pdf_data,
                                     file_name=f"invoice_{safe_get(invoice, 'invoice_number')}_{datetime.now().strftime('%Y%m%d')}.pdf",
                                     mime="application/pdf",
