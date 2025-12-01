@@ -21,7 +21,7 @@ st.set_page_config(
     }
 )
 
-# Custom CSS for enhanced UI
+# Custom CSS for enhanced UI - UPDATED WITH SIDEBAR TEXT COLOR FIX
 st.markdown("""
     <style>
     /* Main styling */
@@ -131,12 +131,12 @@ st.markdown("""
         background: transparent !important;
     }
     
-    /* Metric card styling */
-    .stMetric {
-        background: white;
-        padding: 20px;
+    /* METRIC CARD STYLING - ADDED THIS */
+    [data-testid="metric-container"] {
+        background-color: white;
+        padding: 15px;
         border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
     
     /* Custom separator */
@@ -147,25 +147,60 @@ st.markdown("""
         margin: 20px 0;
     }
     
-    /* Fix sidebar text color */
-    .sidebar-text {
+    /* FIX FOR SIDEBAR RADIO BUTTONS TEXT COLOR */
+    /* This is the key fix for making navigation text white */
+    [data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stRadio span {
+        color: white !important;
+        font-weight: 500 !important;
+        font-size: 16px !important;
+    }
+    
+    /* Make radio button circles visible */
+    [data-testid="stSidebar"] .stRadio > div > label > div:first-child {
+        background-color: white !important;
+    }
+    
+    /* Style for selected radio button */
+    [data-testid="stSidebar"] .stRadio > div > label > div:first-child > div {
+        background-color: #4CAF50 !important;
+    }
+    
+    /* Fix for all text in sidebar */
+    [data-testid="stSidebar"] * {
         color: white !important;
     }
     
-    /* Fix radio buttons in sidebar */
+    /* Specific fix for radio labels */
+    [data-testid="stSidebar"] label {
+        color: white !important;
+    }
+    
+    /* Fix for sidebar headings */
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] h5,
+    [data-testid="stSidebar"] h6,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] div,
+    [data-testid="stSidebar"] span {
+        color: white !important;
+    }
+    
+    /* Fix sidebar radio button container */
     [data-testid="stSidebar"] .stRadio > div {
         background-color: rgba(255,255,255,0.1);
         padding: 10px;
         border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.2);
     }
     
-    [data-testid="stSidebar"] .stRadio label {
-        color: white !important;
-    }
-    
-    /* Fix selectbox in sidebar */
-    [data-testid="stSidebar"] .stSelectbox label {
-        color: white !important;
+    /* Hover effect for radio buttons */
+    [data-testid="stSidebar"] .stRadio > div:hover {
+        background-color: rgba(255,255,255,0.15);
     }
     
     /* Footer styling */
@@ -187,6 +222,35 @@ st.markdown("""
         right: 0;
         padding: 20px;
         background: transparent;
+    }
+    
+    /* Metric card styling - separate class */
+    .metric-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+    
+    .metric-card h4 {
+        color: #666;
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        text-transform: uppercase;
+    }
+    
+    .metric-card h3 {
+        color: #1a237e;
+        margin: 0;
+        font-size: 24px;
+        font-weight: bold;
+    }
+    
+    /* Make sure all streamlit metric text is visible */
+    [data-testid="stMetricValue"], 
+    [data-testid="stMetricLabel"] {
+        color: #333 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -528,20 +592,23 @@ def show_user_dashboard():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
-        st.metric("📊 Total Requests", len(user_requests))
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Requests</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(user_requests)}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         pending_count = len([r for r in user_requests if safe_get(r, 'status') == 'Pending'])
-        st.metric("⏳ Pending", pending_count)
+        st.markdown('<h4>Pending</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{pending_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         completed_count = len([r for r in user_requests if safe_get(r, 'status') == 'Completed'])
-        st.metric("✅ Completed", completed_count)
+        st.markdown('<h4>Completed</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
@@ -573,26 +640,30 @@ def show_manager_dashboard():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
-        st.metric("📊 Total Requests", len(all_requests))
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Requests</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(all_requests)}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         pending_count = len([r for r in all_requests if safe_get(r, 'status') == 'Pending'])
-        st.metric("⏳ Pending", pending_count)
+        st.markdown('<h4>Pending</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{pending_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         assigned_count = len([r for r in all_requests if safe_get(r, 'status') == 'Assigned'])
-        st.metric("👷 Assigned", assigned_count)
+        st.markdown('<h4>Assigned</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{assigned_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col4:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         completed_count = len([r for r in all_requests if safe_get(r, 'status') == 'Completed'])
-        st.metric("✅ Completed", completed_count)
+        st.markdown('<h4>Completed</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
@@ -656,20 +727,23 @@ def show_vendor_dashboard():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         assigned_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Assigned'])
-        st.metric("🔧 Assigned Jobs", assigned_count)
+        st.markdown('<h4>Assigned Jobs</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{assigned_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         completed_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Completed'])
-        st.metric("✅ Completed Jobs", completed_count)
+        st.markdown('<h4>Completed Jobs</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
-        st.markdown('<div class="stMetric">', unsafe_allow_html=True)
-        st.metric("📊 Total Jobs", len(vendor_requests))
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Jobs</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(vendor_requests)}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
@@ -1059,11 +1133,20 @@ def show_vendor_management():
                 st.write("**📊 Performance Statistics**")
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Total Jobs", total_jobs)
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<h4>Total Jobs</h4>', unsafe_allow_html=True)
+                    st.markdown(f'<h3>{total_jobs}</h3>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 with col2:
-                    st.metric("Completed Jobs", completed_jobs)
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<h4>Completed Jobs</h4>', unsafe_allow_html=True)
+                    st.markdown(f'<h3>{completed_jobs}</h3>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 with col3:
-                    st.metric("Completion Rate", f"{completion_rate:.1f}%")
+                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<h4>Completion Rate</h4>', unsafe_allow_html=True)
+                    st.markdown(f'<h3>{completion_rate:.1f}%</h3>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
 def show_reports():
@@ -1103,19 +1186,19 @@ def show_reports():
     
     with col1:
         total_requests = len(df)
-        st.markdown(f'<div class="stMetric"><h4>Total Requests</h4><h3>{total_requests}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><h4>Total Requests</h4><h3>{total_requests}</h3></div>', unsafe_allow_html=True)
     
     with col2:
         completed_requests = len(df[df['status'] == 'Completed'])
-        st.markdown(f'<div class="stMetric"><h4>Completed</h4><h3>{completed_requests}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><h4>Completed</h4><h3>{completed_requests}</h3></div>', unsafe_allow_html=True)
     
     with col3:
         pending_requests = len(df[df['status'] == 'Pending'])
-        st.markdown(f'<div class="stMetric"><h4>Pending</h4><h3>{pending_requests}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><h4>Pending</h4><h3>{pending_requests}</h3></div>', unsafe_allow_html=True)
     
     with col4:
         total_invoice_amount = df['invoice_amount'].sum()
-        st.markdown(f'<div class="stMetric"><h4>Total Invoice Amount</h4><h3 class="currency-naira">{format_naira(total_invoice_amount)}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><h4>Total Invoice Amount</h4><h3 class="currency-naira">{format_naira(total_invoice_amount)}</h3></div>', unsafe_allow_html=True)
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     
@@ -1489,13 +1572,13 @@ def show_invoice_creation():
             
             calc_col1, calc_col2, calc_col3, calc_col4 = st.columns(4)
             with calc_col1:
-                st.markdown(f'<div class="stMetric"><h4>Amount</h4><h3 class="currency-naira">{format_naira(amount)}</h3></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-card"><h4>Amount</h4><h3 class="currency-naira">{format_naira(amount)}</h3></div>', unsafe_allow_html=True)
             with calc_col2:
-                st.markdown(f'<div class="stMetric"><h4>Labour Charge</h4><h3 class="currency-naira">{format_naira(labour_charge)}</h3></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-card"><h4>Labour Charge</h4><h3 class="currency-naira">{format_naira(labour_charge)}</h3></div>', unsafe_allow_html=True)
             with calc_col3:
-                st.markdown(f'<div class="stMetric"><h4>VAT Amount</h4><h3 class="currency-naira">{format_naira(vat_amount)}</h3></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-card"><h4>VAT Amount</h4><h3 class="currency-naira">{format_naira(vat_amount)}</h3></div>', unsafe_allow_html=True)
             with calc_col4:
-                st.markdown(f'<div class="stMetric"><h4>Total Amount</h4><h3 class="currency-naira">{format_naira(total_amount)}</h3></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="metric-card"><h4>Total Amount</h4><h3 class="currency-naira">{format_naira(total_amount)}</h3></div>', unsafe_allow_html=True)
             
             submitted = st.form_submit_button("📄 Create Invoice", use_container_width=True)
             
