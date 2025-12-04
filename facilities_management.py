@@ -18,7 +18,6 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.colors import HexColor
-import qrcode
 from io import BytesIO
 
 # Page configuration with enhanced UI
@@ -2040,7 +2039,7 @@ def show_hse_management():
                         st.write(f"**Severity:** <span style='color:{severity_color}; font-weight:bold;'>{severity}</span>", unsafe_allow_html=True)
                         st.write(f"**Reported By:** {incident['reported_by']}")
                         if incident.get('affected_persons'):
-                            st.write(f"**Affected Persons:** {incident['affected_persons']}")
+                            st.write(f"**Affected Persons:** {incident.get('affected_persons')}")
                         st.markdown('</div>', unsafe_allow_html=True)
                     
                     with col2:
