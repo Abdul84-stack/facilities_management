@@ -16,6 +16,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import HexColor
+import qrcode
+from io import BytesIO
 
 # Page configuration with enhanced UI
 st.set_page_config(
@@ -789,6 +793,302 @@ def get_vendor_requests(vendor_username):
         (vendor_username,)
     )
 
+# ========== PDF REPORT GENERATION FUNCTIONS ==========
+
+def generate_job_completion_pdf(job_data, invoice_data=None):
+    """Generate a PDF report for a completed job"""
+    buffer = BytesIO()
+    
+    # Create PDF
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    
+    # Add company header
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(50, height - 50, "FACILITIES MANAGEMENT SYSTEM")
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(50, height - 70, "Job Completion Report")
+    
+    # Draw a line
+    pdf.line(50, height - 80, width - 50, height - 80)
+    
+    # Report details
+    y_position = height - 100
+    
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(50, y_position, "JOB DETAILS")
+    y_position -= 20
+    
+    pdf.setFont("Helvetica", 10)
+    details = [
+        f"Job ID: #{job_data.get('id', 'N/A')}",
+        f"Title: {job_data.get('title', 'N/A')}",
+        f"Location: {job_data.get('location', 'Common Area')}",
+        f"Facility Type: {job_data.get('facility_type', 'N/A')}",
+        f"Priority: {job_data.get('priority', 'N/A')}",
+        f"Status: {job_data.get('status', 'N/A')}",
+        f"Created By: {job_data.get('created_by', 'N/A')}",
+        f"Assigned Vendor: {job_data.get('assigned_vendor', 'Not assigned')}",
+        f"Created Date: {job_data.get('created_date', 'N/A')}",
+        f"Completed Date: {job_data.get('completed_date', 'N/A')}"
+    ]
+    
+    for detail in details:
+        pdf.drawString(50, y_position, detail)
+        y_position -= 15
+    
+    # Job description
+    y_position -= 10
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(50, y_position, "JOB DESCRIPTION")
+    y_position -= 20
+    
+    pdf.setFont("Helvetica", 10)
+    description = job_data.get('description', 'No description provided')
+    # Wrap text for description
+    text_object = pdf.beginText(50, y_position)
+    text_object.setFont("Helvetica", 10)
+    text_object.setTextOrigin(50, y_position)
+    text_object.setLeading(14)
+    
+    # Split description into lines
+    words = description.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        current_line.append(word)
+        if len(' '.join(current_line)) > 80:
+            lines.append(' '.join(current_line[:-1]))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    for line in lines[:15]:  # Limit to 15 lines
+        text_object.textLine(line)
+    
+    pdf.drawText(text_object)
+    y_position -= (len(lines) * 14) + 20
+    
+    # Job breakdown if exists
+    if job_data.get('job_breakdown'):
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "WORK PERFORMED")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        breakdown = job_data.get('job_breakdown')
+        text_object = pdf.beginText(50, y_position)
+        text_object.setFont("Helvetica", 10)
+        text_object.setTextOrigin(50, y_position)
+        text_object.setLeading(14)
+        
+        words = breakdown.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            if len(' '.join(current_line)) > 80:
+                lines.append(' '.join(current_line[:-1]))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        for line in lines[:10]:  # Limit to 10 lines
+            text_object.textLine(line)
+        
+        pdf.drawText(text_object)
+        y_position -= (len(lines) * 14) + 20
+    
+    # Completion notes if exists
+    if job_data.get('completion_notes'):
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "COMPLETION NOTES")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        notes = job_data.get('completion_notes')
+        text_object = pdf.beginText(50, y_position)
+        text_object.setFont("Helvetica", 10)
+        text_object.setTextOrigin(50, y_position)
+        text_object.setLeading(14)
+        
+        words = notes.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            if len(' '.join(current_line)) > 80:
+                lines.append(' '.join(current_line[:-1]))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        for line in lines[:8]:  # Limit to 8 lines
+            text_object.textLine(line)
+        
+        pdf.drawText(text_object)
+        y_position -= (len(lines) * 14) + 20
+    
+    # Approval status
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(50, y_position, "APPROVAL STATUS")
+    y_position -= 20
+    
+    pdf.setFont("Helvetica", 10)
+    dept_approval = "✅ APPROVED" if job_data.get('requesting_dept_approval') else "⏳ PENDING"
+    manager_approval = "✅ APPROVED" if job_data.get('facilities_manager_approval') else "⏳ PENDING"
+    
+    pdf.drawString(50, y_position, f"Department Approval: {dept_approval}")
+    y_position -= 15
+    pdf.drawString(50, y_position, f"Facility Manager Approval: {manager_approval}")
+    y_position -= 30
+    
+    # If we have invoice data, add it
+    if invoice_data:
+        pdf.showPage()  # New page for invoice
+        
+        # Invoice header
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawString(50, height - 50, "INVOICE")
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(50, height - 70, f"Invoice Number: {invoice_data.get('invoice_number', 'N/A')}")
+        
+        pdf.line(50, height - 80, width - 50, height - 80)
+        
+        y_position = height - 100
+        
+        # Invoice details
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "INVOICE DETAILS")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        invoice_details = [
+            f"Invoice Date: {invoice_data.get('invoice_date', 'N/A')}",
+            f"Vendor: {invoice_data.get('vendor_username', 'N/A')}",
+            f"Status: {invoice_data.get('status', 'N/A')}",
+            f"Currency: {invoice_data.get('currency', '₦')}"
+        ]
+        
+        for detail in invoice_details:
+            pdf.drawString(50, y_position, detail)
+            y_position -= 15
+        
+        y_position -= 10
+        
+        # Work details
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "WORK DETAILS")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        work_details = invoice_data.get('details_of_work', 'No details provided')
+        text_object = pdf.beginText(50, y_position)
+        text_object.setFont("Helvetica", 10)
+        text_object.setTextOrigin(50, y_position)
+        text_object.setLeading(14)
+        
+        words = work_details.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            if len(' '.join(current_line)) > 80:
+                lines.append(' '.join(current_line[:-1]))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        for line in lines[:10]:
+            text_object.textLine(line)
+        
+        pdf.drawText(text_object)
+        y_position -= (len(lines) * 14) + 30
+        
+        # Cost breakdown
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "COST BREAKDOWN")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        
+        # Create a table-like structure
+        col1_x = 50
+        col2_x = width - 150
+        
+        # Quantity and Unit Cost
+        pdf.drawString(col1_x, y_position, f"Quantity: {invoice_data.get('quantity', 1)}")
+        pdf.drawString(col2_x, y_position, f"Unit Cost: {format_naira(invoice_data.get('unit_cost', 0))}")
+        y_position -= 15
+        
+        # Amount
+        amount = invoice_data.get('amount', 0)
+        pdf.drawString(col1_x, y_position, "Amount:")
+        pdf.drawString(col2_x, y_position, format_naira(amount))
+        y_position -= 15
+        
+        # Labour Charge
+        labour = invoice_data.get('labour_charge', 0)
+        if labour > 0:
+            pdf.drawString(col1_x, y_position, "Labour/Service Charge:")
+            pdf.drawString(col2_x, y_position, format_naira(labour))
+            y_position -= 15
+        
+        # Subtotal
+        subtotal = amount + labour
+        pdf.drawString(col1_x, y_position, "Subtotal:")
+        pdf.drawString(col2_x, y_position, format_naira(subtotal))
+        y_position -= 15
+        
+        # VAT if applicable
+        if invoice_data.get('vat_applicable'):
+            vat_amount = invoice_data.get('vat_amount', 0)
+            pdf.drawString(col1_x, y_position, "VAT (7.5%):")
+            pdf.drawString(col2_x, y_position, format_naira(vat_amount))
+            y_position -= 15
+        
+        # Total Amount
+        total = invoice_data.get('total_amount', 0)
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(col1_x, y_position - 10, "TOTAL AMOUNT:")
+        pdf.drawString(col2_x, y_position - 10, format_naira(total))
+        
+        y_position -= 40
+        
+        # Payment details
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(50, y_position, "Payment Terms: Net 30 days")
+        y_position -= 15
+        pdf.drawString(50, y_position, "Please make payment to the account details provided by vendor.")
+    
+    # Footer
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(50, 50, f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    pdf.drawString(50, 40, "Facilities Management System v3.0")
+    
+    pdf.save()
+    buffer.seek(0)
+    return buffer
+
+def get_completed_job_with_invoice(job_id):
+    """Get completed job with invoice data"""
+    query = '''
+        SELECT mr.*, i.* 
+        FROM maintenance_requests mr
+        LEFT JOIN invoices i ON mr.id = i.request_id
+        WHERE mr.id = ? AND mr.status IN ('Completed', 'Approved')
+    '''
+    result = execute_query(query, (job_id,))
+    return result[0] if result else None
+
 # ========== NEW FUNCTIONS FOR REQUESTED FEATURES ==========
 
 # Preventive Maintenance Functions
@@ -860,13 +1160,22 @@ def get_generator_records(start_date=None, end_date=None):
 
 def add_generator_record(record_date, generator_name, opening_hours, closing_hours, 
                         opening_diesel_level, closing_diesel_level, recorded_by, notes):
-    return execute_update('''
+    # Fixed validation - only check for negative values
+    if closing_hours < opening_hours:
+        return False, "Closing hours cannot be less than opening hours"
+    
+    if opening_diesel_level < 0 or closing_diesel_level < 0:
+        return False, "Diesel levels cannot be negative"
+    
+    success = execute_update('''
         INSERT INTO generator_records 
         (record_date, generator_name, opening_hours, closing_hours, 
          opening_diesel_level, closing_diesel_level, recorded_by, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (record_date.isoformat(), generator_name, opening_hours, closing_hours,
           opening_diesel_level, closing_diesel_level, recorded_by, notes))
+    
+    return success, "Record saved successfully" if success else "Failed to save record"
 
 def get_generator_summary():
     records = execute_query('''
@@ -1309,7 +1618,7 @@ def show_generator_diesel_records():
             
             with col2:
                 opening_diesel_level = st.number_input("Opening Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f")
-                closing_diesel_level = st.number_input("Closing Diesel Level (L) *", min_value=0.0, max_value=opening_diesel_level, step=0.1, format="%.1f")
+                closing_diesel_level = st.number_input("Closing Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f")
                 recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'])
                 notes = st.text_area("Notes")
             
@@ -1334,13 +1643,16 @@ def show_generator_diesel_records():
                     st.error("⚠️ Please fill in all required fields (*)")
                 elif closing_hours < opening_hours:
                     st.error("❌ Closing hours cannot be less than opening hours")
-                elif closing_diesel_level > opening_diesel_level:
-                    st.error("❌ Closing diesel level cannot be greater than opening level")
+                elif opening_diesel_level < 0 or closing_diesel_level < 0:
+                    st.error("❌ Diesel levels cannot be negative")
                 else:
-                    if add_generator_record(record_date, generator_name, opening_hours, closing_hours,
-                                          opening_diesel_level, closing_diesel_level, recorded_by, notes):
-                        st.success("✅ Generator record saved successfully!")
+                    success, message = add_generator_record(record_date, generator_name, opening_hours, closing_hours,
+                                          opening_diesel_level, closing_diesel_level, recorded_by, notes)
+                    if success:
+                        st.success("✅ " + message)
                         st.rerun()
+                    else:
+                        st.error("❌ " + message)
     
     with tab3:
         st.subheader("📈 Analysis & Reports")
@@ -2761,6 +3073,8 @@ def show_vendor_management():
                 annual_turnover = safe_get(vendor, 'annual_turnover')
                 if annual_turnover:
                     st.write(f"**Annual Turnover:** {format_naira(annual_turnover)}")
+                else:
+                    st.write("**Annual Turnover:** Not specified")
                 tax_id = safe_get(vendor, 'tax_identification_number')
                 st.write(f"**Tax ID:** {safe_str(tax_id)}" if tax_id else "**Tax ID:** Not specified")
                 rc_number = safe_get(vendor, 'rc_number')
@@ -3284,6 +3598,65 @@ def show_job_invoice_reports():
                 st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
                 st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
                 st.markdown('</div>', unsafe_allow_html=True)
+            
+            # PDF Generation Section
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+            st.subheader("📄 Generate Reports")
+            
+            col_pdf1, col_pdf2 = st.columns(2)
+            
+            with col_pdf1:
+                if st.button(f"📥 Generate Job Report (PDF)", key=f"job_pdf_{safe_get(job, 'id')}", 
+                           use_container_width=True):
+                    # Get full job data with invoice if exists
+                    full_job_data = get_completed_job_with_invoice(safe_get(job, 'id'))
+                    
+                    if full_job_data:
+                        # Check if job is approved by facility manager
+                        if safe_get(full_job_data, 'facilities_manager_approval'):
+                            # Generate PDF
+                            pdf_buffer = generate_job_completion_pdf(full_job_data)
+                            
+                            # Create download button
+                            st.download_button(
+                                label="⬇️ Download Job Report PDF",
+                                data=pdf_buffer,
+                                file_name=f"Job_Report_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"download_job_{safe_get(job, 'id')}"
+                            )
+                        else:
+                            st.warning("⚠️ Job must be approved by facility manager before generating report")
+                    else:
+                        st.error("❌ Could not retrieve job data")
+            
+            with col_pdf2:
+                if safe_get(job, 'invoice_number'):
+                    if st.button(f"🧾 Generate Invoice Report (PDF)", key=f"invoice_pdf_{safe_get(job, 'id')}", 
+                               use_container_width=True):
+                        # Get full job data with invoice
+                        full_job_data = get_completed_job_with_invoice(safe_get(job, 'id'))
+                        
+                        if full_job_data:
+                            # Check if job is approved by facility manager
+                            if safe_get(full_job_data, 'facilities_manager_approval'):
+                                # Generate PDF with invoice
+                                pdf_buffer = generate_job_completion_pdf(full_job_data, full_job_data)
+                                
+                                # Create download button
+                                st.download_button(
+                                    label="⬇️ Download Invoice Report PDF",
+                                    data=pdf_buffer,
+                                    file_name=f"Invoice_Report_{safe_get(job, 'invoice_number')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf",
+                                    key=f"download_invoice_{safe_get(job, 'id')}"
+                                )
+                            else:
+                                st.warning("⚠️ Job must be approved by facility manager before generating invoice report")
+                        else:
+                            st.error("❌ Could not retrieve invoice data")
+                else:
+                    st.info("ℹ️ No invoice available for this job")
 
 # Updated navigation menu to include new features
 def show_main_app():
@@ -3419,4 +3792,3 @@ if __name__ == "__main__":
     
     # Run the app
     main()
-
