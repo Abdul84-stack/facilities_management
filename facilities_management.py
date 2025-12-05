@@ -2278,6 +2278,475 @@ def show_invoice_creation():
                             else:
                                 st.error("❌ Failed to create invoice")
 
+# ========== GENERATOR RECORDS - FIXED ADD FUNCTION ==========
+
+def show_generator_diesel_records():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("⛽ Generator & Diesel Daily Records")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📝 Daily Records", "➕ New Record", "📈 Reports & Analysis"])
+    
+    with tab1:
+        st.subheader("📅 Daily Generator Records")
+        
+        # Date range filter
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Start Date", value=datetime.now().date() - timedelta(days=7), key="gen_start_date")
+        with col2:
+            end_date = st.date_input("End Date", value=datetime.now().date(), key="gen_end_date")
+        
+        if st.button("🔄 Refresh Records", key="refresh_generator"):
+            st.cache_data.clear()
+            st.rerun()
+        
+        with st.spinner("Loading records..."):
+            records = get_generator_records(start_date, end_date)
+        
+        if not records:
+            st.info("📭 No records found for the selected date range")
+        else:
+            display_data = []
+            total_hours = 0
+            total_diesel = 0
+            
+            for record in records[:5]:  # Show 5 records
+                net_hours = safe_float(record.get('net_hours_used', 0))
+                diesel_consumed = safe_float(record.get('diesel_consumed', 0))
+                
+                display_data.append({
+                    'Date': record.get('record_date'),
+                    'Generator': record.get('generator_name'),
+                    'Opening Hours': f"{safe_float(record.get('opening_hours', 0)):.1f}",
+                    'Closing Hours': f"{safe_float(record.get('closing_hours', 0)):.1f}",
+                    'Net Hours': f"{net_hours:.1f}",
+                    'Opening Diesel': f"{safe_float(record.get('opening_diesel_level', 0)):.1f} L",
+                    'Closing Diesel': f"{safe_float(record.get('closing_diesel_level', 0)):.1f} L",
+                    'Diesel Consumed': f"{diesel_consumed:.1f} L",
+                    'Recorded By': record.get('recorded_by')
+                })
+                
+                total_hours += net_hours
+                total_diesel += diesel_consumed
+            
+            df = pd.DataFrame(display_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Summary statistics
+            st.subheader("📊 Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Records", len(records))
+            with col2:
+                st.metric("Total Hours", f"{total_hours:.1f}")
+            with col3:
+                st.metric("Total Diesel Used", f"{total_diesel:.1f} L")
+    
+    with tab2:
+        st.subheader("➕ Add New Daily Record")
+        
+        with st.form("add_generator_record", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                record_date = st.date_input("Record Date *", value=datetime.now().date(), key="gen_record_date")
+                generator_name = st.selectbox("Generator Name *", ["Generator #1", "Generator #2", "Generator #3"], key="gen_name")
+                opening_hours = st.number_input("Opening Hours *", min_value=0.0, step=0.1, format="%.1f", key="gen_opening_hours", value=0.0)
+                closing_hours = st.number_input("Closing Hours *", min_value=0.0, step=0.1, format="%.1f", key="gen_closing_hours", value=0.0)
+            
+            with col2:
+                opening_diesel_level = st.number_input("Opening Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f", key="gen_opening_diesel", value=0.0)
+                closing_diesel_level = st.number_input("Closing Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f", key="gen_closing_diesel", value=0.0)
+                recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'], key="gen_recorded_by")
+                notes = st.text_area("Notes", key="gen_notes")
+            
+            # Calculate preview
+            net_hours = closing_hours - opening_hours if closing_hours > opening_hours else 0
+            diesel_consumed = opening_diesel_level - closing_diesel_level if opening_diesel_level > closing_diesel_level else 0
+            
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.write("**📊 Preview**")
+            col_preview1, col_preview2 = st.columns(2)
+            with col_preview1:
+                st.write(f"**Net Hours Used:** {net_hours:.1f}")
+            with col_preview2:
+                st.write(f"**Diesel Consumed:** {diesel_consumed:.1f} L")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            submitted = st.form_submit_button("💾 Save Record", use_container_width=True, key="gen_submit")
+            
+            if submitted:
+                if not all([record_date, generator_name, recorded_by]):
+                    st.error("⚠️ Please fill in all required fields (*)")
+                elif closing_hours < opening_hours:
+                    st.error("❌ Closing hours cannot be less than opening hours")
+                elif opening_diesel_level < 0 or closing_diesel_level < 0:
+                    st.error("❌ Diesel levels cannot be negative")
+                else:
+                    success, message = add_generator_record(record_date, generator_name, opening_hours, closing_hours,
+                                          opening_diesel_level, closing_diesel_level, recorded_by, notes)
+                    if success:
+                        st.success("✅ " + message)
+                        # Clear cache for fresh data
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("❌ " + message)
+    
+    with tab3:
+        st.subheader("📈 Analysis & Reports")
+        
+        # Get summary data
+        with st.spinner("Loading analysis..."):
+            summary = get_generator_summary()
+        
+        if summary:
+            for gen in summary:
+                st.markdown(f'<div class="card">', unsafe_allow_html=True)
+                st.write(f"**{gen['generator_name']}**")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Days Operated", int(gen['total_days']))
+                with col2:
+                    st.metric("Total Hours", f"{safe_float(gen['total_hours']):.1f}")
+                with col3:
+                    st.metric("Total Diesel", f"{safe_float(gen['total_diesel']):.1f} L")
+                with col4:
+                    st.metric("Avg Daily Hours", f"{safe_float(gen['avg_hours_per_day']):.1f}")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+# ========== REPORTS SECTION ==========
+
+def show_reports():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📈 Reports & Analytics")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    with st.spinner("Loading reports..."):
+        all_requests = get_all_requests()
+    
+    if not all_requests:
+        st.info("📭 No data available for reports")
+        return
+    
+    # Convert to DataFrame for analysis
+    report_data = []
+    for req in all_requests:
+        report_data.append({
+            'id': safe_get(req, 'id'),
+            'title': safe_str(safe_get(req, 'title'), 'N/A'),
+            'location': safe_str(safe_get(req, 'location'), 'Common Area'),
+            'facility_type': safe_str(safe_get(req, 'facility_type'), 'N/A'),
+            'priority': safe_str(safe_get(req, 'priority'), 'N/A'),
+            'status': safe_str(safe_get(req, 'status'), 'N/A'),
+            'created_by': safe_str(safe_get(req, 'created_by'), 'N/A'),
+            'assigned_vendor': safe_str(safe_get(req, 'assigned_vendor'), 'Not assigned'),
+            'created_date': safe_str(safe_get(req, 'created_date'), 'N/A'),
+            'completed_date': safe_str(safe_get(req, 'completed_date'), ''),
+            'invoice_amount': safe_float(safe_get(req, 'invoice_amount'))
+        })
+    
+    df = pd.DataFrame(report_data)
+    
+    if not df.empty:
+        df['created_date'] = pd.to_datetime(df['created_date'], errors='coerce')
+        df['completed_date'] = pd.to_datetime(df['completed_date'], errors='coerce')
+        df['month'] = df['created_date'].dt.to_period('M')
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_requests = len(df)
+        st.markdown(f'<div class="metric-card"><h4>Total Requests</h4><h3>{total_requests}</h3></div>', unsafe_allow_html=True)
+    
+    with col2:
+        completed_requests = len(df[df['status'] == 'Completed'])
+        st.markdown(f'<div class="metric-card"><h4>Completed</h4><h3>{completed_requests}</h3></div>', unsafe_allow_html=True)
+    
+    with col3:
+        pending_requests = len(df[df['status'] == 'Pending'])
+        st.markdown(f'<div class="metric-card"><h4>Pending</h4><h3>{pending_requests}</h3></div>', unsafe_allow_html=True)
+    
+    with col4:
+        total_invoice_amount = df['invoice_amount'].sum()
+        st.markdown(f'<div class="metric-card"><h4>Total Invoice Amount</h4><h3 class="currency-naira">{format_naira(total_invoice_amount)}</h3></div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Enhanced Graphical Analytics
+    st.subheader("📊 Graphical Analytics")
+    
+    # Row 1: Status and Priority Distribution
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            status_counts = df['status'].value_counts()
+            fig = px.pie(values=status_counts.values, names=status_counts.index, 
+                        title="📈 Request Status Distribution",
+                        color_discrete_sequence=px.colors.sequential.RdBu,
+                        hole=0.3)
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            priority_counts = df['priority'].value_counts()
+            colors = ['#FF6B6B', '#FFD166', '#06D6A0', '#118AB2']
+            fig = px.bar(x=priority_counts.index, y=priority_counts.values,
+                        title="🚨 Requests by Priority", 
+                        labels={'x': 'Priority', 'y': 'Count'},
+                        color=priority_counts.index,
+                        color_discrete_sequence=colors)
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Row 2: Facility Type and Location Analysis
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            facility_counts = df['facility_type'].value_counts().head(10)
+            fig = px.bar(y=facility_counts.index, x=facility_counts.values,
+                        title="🏢 Top 10 Facility Types", 
+                        orientation='h',
+                        labels={'x': 'Count', 'y': 'Facility Type'},
+                        color=facility_counts.values,
+                        color_continuous_scale='Viridis')
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            location_counts = df['location'].value_counts().head(10)
+            fig = px.bar(y=location_counts.index, x=location_counts.values,
+                        title="📍 Top 10 Locations", 
+                        orientation='h',
+                        labels={'x': 'Count', 'y': 'Location'},
+                        color=location_counts.values,
+                        color_continuous_scale='Plasma')
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ========== ENHANCED JOB & INVOICE REPORTS WITH PDF DOWNLOAD ==========
+
+def show_job_invoice_reports():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📋 Job & Invoice Reports")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    with st.spinner("Loading reports..."):
+        completed_jobs = execute_query('''
+            SELECT mr.*, i.invoice_number, i.invoice_date, i.total_amount as invoice_total, 
+                   i.status as invoice_status, i.details_of_work, i.vendor_username
+            FROM maintenance_requests mr
+            LEFT JOIN invoices i ON mr.id = i.request_id
+            WHERE mr.status IN ('Completed', 'Approved')
+            ORDER BY mr.completed_date DESC
+        ''')
+    
+    if not completed_jobs:
+        st.info("📭 No completed jobs with invoices found")
+        return
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_options = ["All"] + list(set(safe_str(safe_get(job, 'status')) for job in completed_jobs))
+        status_filter = st.selectbox("Filter by Job Status", status_options, key="job_status_filter")
+    with col2:
+        has_invoice_filter = st.selectbox("Filter by Invoice", ["All", "With Invoice", "Without Invoice"], key="job_invoice_filter")
+    with col3:
+        if st.button("🔄 Refresh Reports", key="refresh_job_reports"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    filtered_jobs = completed_jobs
+    if status_filter != "All":
+        filtered_jobs = [job for job in filtered_jobs if safe_str(safe_get(job, 'status')) == status_filter]
+    if has_invoice_filter == "With Invoice":
+        filtered_jobs = [job for job in filtered_jobs if safe_get(job, 'invoice_number') is not None]
+    elif has_invoice_filter == "Without Invoice":
+        filtered_jobs = [job for job in filtered_jobs if safe_get(job, 'invoice_number') is None]
+    
+    st.subheader(f"📊 Found {len(filtered_jobs)} job(s)")
+    
+    for job in filtered_jobs[:5]:  # Limit to 5 for performance
+        with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')} - {safe_str(safe_get(job, 'location'), 'Common Area')} - {safe_str(safe_get(job, 'status'), 'N/A')}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**📋 Job Information**")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'), 'N/A')}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'), 'N/A')}")
+                st.write(f"**Priority:** {safe_str(safe_get(job, 'priority'), 'N/A')}")
+                st.write(f"**Status:** {safe_str(safe_get(job, 'status'), 'N/A')}")
+                st.write(f"**Created By:** {safe_str(safe_get(job, 'created_by'), 'N/A')}")
+                st.write(f"**Assigned Vendor:** {safe_str(safe_get(job, 'assigned_vendor'), 'Not assigned')}")
+                if safe_get(job, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:** {safe_str(safe_get(job, 'job_breakdown'))}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**🧾 Invoice Information**")
+                if safe_get(job, 'invoice_number'):
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(job, 'invoice_number'))}")
+                    st.write(f"**Invoice Date:** {safe_str(safe_get(job, 'invoice_date'))}")
+                    st.write(f"**Invoice Amount:** {format_naira(safe_get(job, 'invoice_total'))}")
+                    st.write(f"**Invoice Status:** {safe_str(safe_get(job, 'invoice_status'), 'N/A')}")
+                    st.write(f"**Vendor:** {safe_str(safe_get(job, 'vendor_username'), 'N/A')}")
+                    if safe_get(job, 'details_of_work'):
+                        st.write(f"**Work Details:** {safe_str(safe_get(job, 'details_of_work'))}")
+                else:
+                    st.write("**No invoice created yet**")
+                
+                st.write("**✅ Approval Status**")
+                st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
+                st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # PDF Generation Section with Enhanced UI/UX
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+            st.subheader("📄 Generate Professional Reports")
+            
+            col_pdf1, col_pdf2 = st.columns(2)
+            
+            with col_pdf1:
+                if st.button(f"📥 Generate Job Report (PDF)", key=f"job_pdf_{safe_get(job, 'id')}", 
+                           use_container_width=True):
+                    with st.spinner("Generating professional job report..."):
+                        time.sleep(1)  # Simulate processing
+                        
+                        # Generate PDF
+                        pdf_buffer = generate_job_invoice_pdf(job)
+                        
+                        # Create download button with success message
+                        st.success("✅ Report generated successfully!")
+                        
+                        # Display download button
+                        st.download_button(
+                            label="⬇️ Download Job Report PDF",
+                            data=pdf_buffer,
+                            file_name=f"Job_Report_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            key=f"download_job_{safe_get(job, 'id')}",
+                            use_container_width=True
+                        )
+            
+            with col_pdf2:
+                if safe_get(job, 'invoice_number'):
+                    if st.button(f"🧾 Generate Invoice Report (PDF)", key=f"invoice_pdf_{safe_get(job, 'id')}", 
+                               use_container_width=True):
+                        with st.spinner("Generating professional invoice report..."):
+                            time.sleep(1)  # Simulate processing
+                            
+                            # Generate PDF with invoice
+                            pdf_buffer = generate_job_invoice_pdf(job, job)
+                            
+                            # Create download button with success message
+                            st.success("✅ Invoice report generated successfully!")
+                            
+                            # Display download button
+                            st.download_button(
+                                label="⬇️ Download Invoice Report PDF",
+                                data=pdf_buffer,
+                                file_name=f"Invoice_Report_{safe_get(job, 'invoice_number')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                                mime="application/pdf",
+                                key=f"download_invoice_{safe_get(job, 'id')}",
+                                use_container_width=True
+                            )
+                else:
+                    st.info("ℹ️ No invoice available for this job")
+
+# ========== PREVENTIVE MAINTENANCE ==========
+
+def show_preventive_maintenance():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🔧 Planned Preventive Maintenance")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["📅 Schedule", "➕ Add New"])
+    
+    with tab1:
+        st.subheader("📅 Maintenance Schedule")
+        
+        with st.spinner("Loading schedule..."):
+            maintenance_list = get_preventive_maintenance()
+        
+        if not maintenance_list:
+            st.info("📭 No maintenance schedules found")
+        else:
+            display_data = []
+            for maintenance in maintenance_list[:5]:
+                display_data.append({
+                    'ID': maintenance['id'],
+                    'Equipment': maintenance['equipment_name'],
+                    'Type': maintenance['equipment_type'],
+                    'Location': maintenance['location'],
+                    'Maintenance Type': maintenance['maintenance_type'],
+                    'Frequency': maintenance['frequency'],
+                    'Last Done': maintenance.get('last_maintenance_date', 'Never'),
+                    'Next Due': maintenance['next_maintenance_date'],
+                    'Status': maintenance.get('status', 'Upcoming'),
+                    'Assigned To': maintenance.get('assigned_to', 'Not assigned')
+                })
+            
+            df = pd.DataFrame(display_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    with tab2:
+        st.subheader("➕ Add New Maintenance Schedule")
+        
+        with st.form("add_maintenance_schedule"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                equipment_name = st.text_input("Equipment Name *", key="pm_equipment_name")
+                equipment_type = st.selectbox("Equipment Type *", 
+                                            ["HVAC", "Generator", "Fire Safety", "General"],
+                                            key="pm_equipment_type")
+                location = st.text_input("Location *", value="Common Area", key="pm_location_input")
+                maintenance_type = st.selectbox("Maintenance Type *", 
+                                              ["Routine Check", "Service", "Inspection"],
+                                              key="pm_maintenance_type")
+            
+            with col2:
+                frequency = st.selectbox("Frequency *", 
+                                       ["Weekly", "Monthly", "Quarterly", "Biannual", "Annual"],
+                                       key="pm_frequency")
+                next_maintenance_date = st.date_input("Next Maintenance Date *", 
+                                                     value=datetime.now().date() + timedelta(days=30),
+                                                     key="pm_next_date")
+                assigned_to = st.text_input("Assigned To", placeholder="Name or department", key="pm_assigned_to")
+                notes = st.text_area("Notes", key="pm_notes")
+            
+            submitted = st.form_submit_button("✅ Add to Schedule", use_container_width=True, key="pm_submit")
+            
+            if submitted:
+                if not all([equipment_name, equipment_type, location, maintenance_type, frequency]):
+                    st.error("⚠️ Please fill in all required fields (*)")
+                else:
+                    with st.spinner("Adding schedule..."):
+                        if add_preventive_maintenance(equipment_name, equipment_type, location, 
+                                                     maintenance_type, frequency, 
+                                                     None,  # last_maintenance_date
+                                                     next_maintenance_date, 
+                                                     assigned_to, notes):
+                            st.success("✅ Preventive maintenance schedule added successfully!")
+                            st.cache_data.clear()
+                            st.rerun()
+
 # ========== SPACE MANAGEMENT WITH ANALYTICS ==========
 
 def show_space_management():
@@ -2642,7 +3111,6 @@ def show_main_app():
     if selected_menu == "Dashboard":
         show_dashboard()
     elif selected_menu == "Reports":
-        from reports import show_reports
         show_reports()
     elif selected_menu == "Job & Invoice Reports":
         show_job_invoice_reports()
