@@ -1,11 +1,67 @@
-# ... (ALL THE IMPORTS REMAIN THE SAME - keep everything from the original)
+import streamlit as st
+import sqlite3
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, timedelta, date
+import base64
+import io
+import tempfile
+import os
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import HexColor
+from io import BytesIO
+import random
+import string
 
-# ========== UPDATED DATABASE SETUP WITH REDUCED MOCKED DATA ==========
+# Page configuration with enhanced UI
+st.set_page_config(
+    page_title="Facilities Management System",
+    page_icon="🏢",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': "### Facilities Management System v3.0\nDeveloped by Abdulahi Ibrahim\n© 2024 All Rights Reserved"
+    }
+)
+
+# ========== DATABASE PATH FIX FOR STREAMLIT CLOUD ==========
+import sqlite3
+import os
+
+def get_db_path():
+    """Get the correct database path for local vs Streamlit Cloud"""
+    # Check if we're on Streamlit Cloud
+    if 'STREAMLIT_SHARING' in os.environ:
+        # On Streamlit Cloud, use /tmp directory
+        return '/tmp/facilities_management.db'
+    else:
+        # Local development
+        return 'facilities_management.db'
+
+def get_connection():
+    """Get database connection with correct path"""
+    db_path = get_db_path()
+    return sqlite3.connect(db_path)
+
+# ... (ALL THE CUSTOM CSS REMAINS THE SAME - keep the entire <style> section)
+
+# Database setup with enhanced schema
 def init_database():
-    conn = sqlite3.connect('facilities_management.db')
+    conn = get_connection()
     cursor = conn.cursor()
     
-    # Users table (unchanged)
+    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,98 +73,273 @@ def init_database():
         )
     ''')
     
-    # ... (All other table creation statements remain the same)
+    # Create maintenance_requests table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS maintenance_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            location TEXT NOT NULL DEFAULT "Common Area",
+            facility_type TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            status TEXT DEFAULT 'Pending',
+            created_by TEXT NOT NULL,
+            assigned_vendor TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_date TIMESTAMP,
+            completion_notes TEXT,
+            job_breakdown TEXT,
+            invoice_amount REAL,
+            invoice_number TEXT,
+            requesting_dept_approval BOOLEAN DEFAULT 0,
+            facilities_manager_approval BOOLEAN DEFAULT 0
+        )
+    ''')
+    
+    # Create vendors table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vendors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT NOT NULL,
+            contact_person TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            vendor_type TEXT NOT NULL,
+            services_offered TEXT NOT NULL,
+            annual_turnover REAL,
+            tax_identification_number TEXT,
+            rc_number TEXT,
+            key_management_staff TEXT,
+            account_details TEXT,
+            certification TEXT,
+            address TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            certificate_incorporation BLOB,
+            tax_clearance_certificate BLOB,
+            audited_financial_statement BLOB
+        )
+    ''')
+    
+    # Create invoices table with Naira currency
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_number TEXT UNIQUE NOT NULL,
+            request_id INTEGER,
+            vendor_username TEXT NOT NULL,
+            invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            details_of_work TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_cost REAL NOT NULL,
+            amount REAL NOT NULL,
+            labour_charge REAL DEFAULT 0,
+            vat_applicable BOOLEAN DEFAULT 0,
+            vat_amount REAL DEFAULT 0,
+            total_amount REAL NOT NULL,
+            currency TEXT DEFAULT '₦',
+            status TEXT DEFAULT 'Pending',
+            FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
+        )
+    ''')
+    
+    # Planned Preventive Maintenance Schedule
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS preventive_maintenance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            equipment_name TEXT NOT NULL,
+            equipment_type TEXT NOT NULL,
+            location TEXT NOT NULL,
+            maintenance_type TEXT NOT NULL,
+            frequency TEXT NOT NULL,
+            last_maintenance_date DATE,
+            next_maintenance_date DATE NOT NULL,
+            status TEXT DEFAULT 'Upcoming',
+            assigned_to TEXT,
+            notes TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_date DATE,
+            completion_notes TEXT
+        )
+    ''')
+    
+    # Generator Diesel Daily Record
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS generator_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_date DATE NOT NULL,
+            generator_name TEXT NOT NULL,
+            opening_hours REAL NOT NULL,
+            closing_hours REAL NOT NULL,
+            opening_diesel_level REAL NOT NULL,
+            closing_diesel_level REAL NOT NULL,
+            recorded_by TEXT NOT NULL,
+            notes TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Space Management (Room Bookings)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS space_bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_name TEXT NOT NULL,
+            room_type TEXT NOT NULL,
+            booking_date DATE NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            booked_by TEXT NOT NULL,
+            department TEXT NOT NULL,
+            attendees_count INTEGER,
+            status TEXT DEFAULT 'Confirmed',
+            catering_required BOOLEAN DEFAULT 0,
+            special_requirements TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # HSE Schedule and Inspections
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hse_schedule (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_type TEXT NOT NULL,
+            area TEXT NOT NULL,
+            frequency TEXT NOT NULL,
+            last_inspection_date DATE,
+            next_inspection_date DATE NOT NULL,
+            assigned_to TEXT NOT NULL,
+            status TEXT DEFAULT 'Upcoming',
+            compliance_level TEXT DEFAULT 'Compliant',
+            findings TEXT,
+            corrective_actions TEXT,
+            follow_up_date DATE,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # HSE Incidents
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hse_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_date DATE NOT NULL,
+            incident_time TEXT NOT NULL,
+            location TEXT NOT NULL,
+            incident_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            description TEXT NOT NULL,
+            reported_by TEXT NOT NULL,
+            affected_persons TEXT,
+            immediate_actions TEXT,
+            investigation_status TEXT DEFAULT 'Open',
+            corrective_measures TEXT,
+            status TEXT DEFAULT 'Open',
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
     # ========== REDUCED SAMPLE DATA INSERTION ==========
     
-    # Insert sample users (unchanged)
-    sample_users = [
-        ('facility_user', '0123456', 'facility_user', None),
-        ('facility_manager', '0123456', 'facility_manager', None),
-        ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
-        ('generator_vendor', '0123456', 'vendor', 'Generator'),
-        ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
-        ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
-        ('hse_vendor', '0123456', 'vendor', 'HSE'),
-        ('space_vendor', '0123456', 'vendor', 'Space Management'),
-        ('hse_officer', '0123456', 'hse_officer', None),
-        ('space_manager', '0123456', 'space_manager', None)
-    ]
+    # Check if users already exist to avoid duplicates
+    cursor.execute('SELECT COUNT(*) FROM users')
+    user_count = cursor.fetchone()[0]
     
-    for username, password, role, vendor_type in sample_users:
-        try:
+    if user_count == 0:
+        # Insert sample users
+        sample_users = [
+            ('facility_user', '0123456', 'facility_user', None),
+            ('facility_manager', '0123456', 'facility_manager', None),
+            ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
+            ('generator_vendor', '0123456', 'vendor', 'Generator'),
+            ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
+            ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
+            ('hse_vendor', '0123456', 'vendor', 'HSE'),
+            ('space_vendor', '0123456', 'vendor', 'Space Management'),
+            ('hse_officer', '0123456', 'hse_officer', None),
+            ('space_manager', '0123456', 'space_manager', None)
+        ]
+        
+        for username, password, role, vendor_type in sample_users:
             cursor.execute(
-                'INSERT OR IGNORE INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
+                'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
                 (username, password, role, vendor_type)
             )
-        except sqlite3.IntegrityError:
-            pass
     
-    # Insert sample vendors (unchanged)
-    sample_vendors = [
-        ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
-         'HVAC installation, maintenance and repair services', 50000000.00, 'TIN123456', 'RC789012',
-         'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: Zenith Bank, Acc: 1234567890', 
-         'HVAC Certified', '123 HVAC Street, Lagos'),
-        ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
-         'Generator installation and maintenance', 30000000.00, 'TIN123457', 'RC789013',
-         'Mike Johnson (Director)', 'Bank: First Bank, Acc: 9876543210', 
-         'Generator Specialist', '456 Power Ave, Abuja'),
-        ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
-         'Fixture installation and repairs', 25000000.00, 'TIN123458', 'RC789014',
-         'Sarah Wilson (Owner)', 'Bank: GTBank, Acc: 4561237890', 
-         'Fixture Expert', '789 Fixture Road, Port Harcourt'),
-        ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
-         'General building maintenance and repairs', 40000000.00, 'TIN123459', 'RC789015',
-         'David Brown (Manager)', 'Bank: Access Bank, Acc: 7894561230', 
-         'Building Maintenance Certified', '321 Builders Lane, Kano')
-    ]
+    # Check if vendors already exist
+    cursor.execute('SELECT COUNT(*) FROM vendors')
+    vendor_count = cursor.fetchone()[0]
     
-    for username, company_name, contact_person, email, phone, vendor_type, services_offered, annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address in sample_vendors:
-        try:
+    if vendor_count == 0:
+        # Insert sample vendors
+        sample_vendors = [
+            ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
+             'HVAC installation, maintenance and repair services', 50000000.00, 'TIN123456', 'RC789012',
+             'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: Zenith Bank, Acc: 1234567890', 
+             'HVAC Certified', '123 HVAC Street, Lagos'),
+            ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
+             'Generator installation and maintenance', 30000000.00, 'TIN123457', 'RC789013',
+             'Mike Johnson (Director)', 'Bank: First Bank, Acc: 9876543210', 
+             'Generator Specialist', '456 Power Ave, Abuja'),
+            ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
+             'Fixture installation and repairs', 25000000.00, 'TIN123458', 'RC789014',
+             'Sarah Wilson (Owner)', 'Bank: GTBank, Acc: 4561237890', 
+             'Fixture Expert', '789 Fixture Road, Port Harcourt'),
+            ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
+             'General building maintenance and repairs', 40000000.00, 'TIN123459', 'RC789015',
+             'David Brown (Manager)', 'Bank: Access Bank, Acc: 7894561230', 
+             'Building Maintenance Certified', '321 Builders Lane, Kano')
+        ]
+        
+        for username, company_name, contact_person, email, phone, vendor_type, services_offered, annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address in sample_vendors:
             cursor.execute('''
-                INSERT OR IGNORE INTO vendors 
+                INSERT INTO vendors 
                 (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
                  annual_turnover, tax_identification_number, rc_number, key_management_staff, 
                  account_details, certification, address) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (username, company_name, contact_person, email, phone, vendor_type, services_offered,
                   annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address))
-        except sqlite3.IntegrityError:
-            pass
     
-    # ========== UPDATED: REDUCED PREVENTIVE MAINTENANCE DATA (from 7000+ to 5) ==========
-    today = datetime.now().date()
-    sample_maintenance = [
-        ('Main HVAC System', 'HVAC', 'Main Building', 'Routine Check', 'Monthly', 
-         (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(), 'HVAC Team', 'Regular maintenance check'),
-        ('Fire Extinguishers', 'Fire Safety', 'All Floors', 'Inspection', 'Biannual',
-         (today - timedelta(days=60)).isoformat(), (today + timedelta(days=120)).isoformat(), 'Safety Officer', 'Fire safety inspection'),
-        ('Smoke Detectors', 'Fire Safety', 'All Floors', 'Testing', 'Quarterly',
-         (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), 'Maintenance Team', 'System testing'),
-        ('Generator Set #1', 'Generator', 'Generator Room', 'Service', '200 hours',
-         (today - timedelta(days=10)).isoformat(), (today + timedelta(days=10)).isoformat(), 'Generator Team', 'Regular service'),
-        ('Pest Control', 'General', 'Entire Facility', 'Fumigation', 'Quarterly',
-         (today - timedelta(days=30)).isoformat(), (today + timedelta(days=60)).isoformat(), 'Pest Control Vendor', 'Full facility fumigation')
-    ]
+    # Check if preventive maintenance data already exists
+    cursor.execute('SELECT COUNT(*) FROM preventive_maintenance')
+    pm_count = cursor.fetchone()[0]
     
-    for equipment_name, equipment_type, location, maintenance_type, frequency, last_date, next_date, assigned_to, notes in sample_maintenance:
-        try:
+    if pm_count == 0:
+        # Reduced preventive maintenance data (5 records)
+        today = datetime.now().date()
+        sample_maintenance = [
+            ('Main HVAC System', 'HVAC', 'Main Building', 'Routine Check', 'Monthly', 
+             (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(), 'HVAC Team', 'Regular maintenance check'),
+            ('Fire Extinguishers', 'Fire Safety', 'All Floors', 'Inspection', 'Biannual',
+             (today - timedelta(days=60)).isoformat(), (today + timedelta(days=120)).isoformat(), 'Safety Officer', 'Fire safety inspection'),
+            ('Smoke Detectors', 'Fire Safety', 'All Floors', 'Testing', 'Quarterly',
+             (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), 'Maintenance Team', 'System testing'),
+            ('Generator Set #1', 'Generator', 'Generator Room', 'Service', '200 hours',
+             (today - timedelta(days=10)).isoformat(), (today + timedelta(days=10)).isoformat(), 'Generator Team', 'Regular service'),
+            ('Pest Control', 'General', 'Entire Facility', 'Fumigation', 'Quarterly',
+             (today - timedelta(days=30)).isoformat(), (today + timedelta(days=60)).isoformat(), 'Pest Control Vendor', 'Full facility fumigation')
+        ]
+        
+        for equipment_name, equipment_type, location, maintenance_type, frequency, last_date, next_date, assigned_to, notes in sample_maintenance:
             cursor.execute('''
-                INSERT OR IGNORE INTO preventive_maintenance 
+                INSERT INTO preventive_maintenance 
                 (equipment_name, equipment_type, location, maintenance_type, frequency, 
                  last_maintenance_date, next_maintenance_date, assigned_to, notes) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (equipment_name, equipment_type, location, maintenance_type, frequency, last_date, next_date, assigned_to, notes))
-        except sqlite3.IntegrityError:
-            pass
     
-    # ========== UPDATED: REDUCED GENERATOR RECORDS (from 9833 to 3) ==========
-    for i in range(3):  # Changed from 7 to 3
-        record_date = today - timedelta(days=i)
-        try:
+    # Check if generator records already exist
+    cursor.execute('SELECT COUNT(*) FROM generator_records')
+    gen_count = cursor.fetchone()[0]
+    
+    if gen_count == 0:
+        # Reduced generator records (3 records)
+        today = datetime.now().date()
+        for i in range(3):
+            record_date = today - timedelta(days=i)
             cursor.execute('''
-                INSERT OR IGNORE INTO generator_records 
+                INSERT INTO generator_records 
                 (record_date, generator_name, opening_hours, closing_hours, 
                  opening_diesel_level, closing_diesel_level, recorded_by, notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -116,58 +347,64 @@ def init_database():
                   1000 + i*8, 1008 + i*8,
                   500 - i*50, 450 - i*50, 
                   'facility_user', f'Daily operation - Day {i+1}'))
-        except sqlite3.IntegrityError:
-            pass
     
-    # ========== UPDATED: REDUCED SPACE BOOKINGS (to 2 as requested) ==========
-    sample_bookings = [
-        ('Conference Room A', 'Conference', today.isoformat(), '09:00', '12:00', 
-         'Management Meeting', 'facility_manager', 'Management', 10, 'Confirmed', 0, None),
-        ('Meeting Room B', 'Meeting', (today + timedelta(days=1)).isoformat(), '14:00', '16:00', 
-         'Team Brainstorming', 'facility_user', 'Operations', 6, 'Confirmed', 0, None)
-    ]
+    # Check if space bookings already exist
+    cursor.execute('SELECT COUNT(*) FROM space_bookings')
+    space_count = cursor.fetchone()[0]
     
-    for booking in sample_bookings:
-        try:
+    if space_count == 0:
+        # Reduced space bookings (2 records)
+        today = datetime.now().date()
+        sample_bookings = [
+            ('Conference Room A', 'Conference', today.isoformat(), '09:00', '12:00', 
+             'Management Meeting', 'facility_manager', 'Management', 10, 'Confirmed', 0, None),
+            ('Meeting Room B', 'Meeting', (today + timedelta(days=1)).isoformat(), '14:00', '16:00', 
+             'Team Brainstorming', 'facility_user', 'Operations', 6, 'Confirmed', 0, None)
+        ]
+        
+        for booking in sample_bookings:
             cursor.execute('''
-                INSERT OR IGNORE INTO space_bookings 
+                INSERT INTO space_bookings 
                 (room_name, room_type, booking_date, start_time, end_time, purpose, 
                  booked_by, department, attendees_count, status, catering_required, special_requirements)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', booking)
-        except sqlite3.IntegrityError:
-            pass
     
-    # ========== UPDATED: REDUCED HSE SCHEDULE DATA (to 3 as requested) ==========
-    sample_hse_schedule = [
-        ('Fire Safety Inspection', 'All Buildings', 'Quarterly', 
-         (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), 
-         'hse_officer', 'Compliant', None, None, None),
-        ('First Aid Kit Check', 'All Floors', 'Monthly',
-         (today - timedelta(days=20)).isoformat(), (today + timedelta(days=10)).isoformat(),
-         'hse_officer', 'Non-Compliant', 'Some kits missing bandages', 'Restock bandages', (today + timedelta(days=7)).isoformat()),
-        ('Emergency Exit Inspection', 'Main Building', 'Monthly',
-         (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(),
-         'hse_officer', 'Compliant', None, None, None)
-    ]
+    # Check if HSE schedule already exists
+    cursor.execute('SELECT COUNT(*) FROM hse_schedule')
+    hse_count = cursor.fetchone()[0]
     
-    for inspection in sample_hse_schedule:
-        try:
+    if hse_count == 0:
+        # Reduced HSE schedule (3 records)
+        today = datetime.now().date()
+        sample_hse_schedule = [
+            ('Fire Safety Inspection', 'All Buildings', 'Quarterly', 
+             (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), 
+             'hse_officer', 'Compliant', None, None, None),
+            ('First Aid Kit Check', 'All Floors', 'Monthly',
+             (today - timedelta(days=20)).isoformat(), (today + timedelta(days=10)).isoformat(),
+             'hse_officer', 'Non-Compliant', 'Some kits missing bandages', 'Restock bandages', (today + timedelta(days=7)).isoformat()),
+            ('Emergency Exit Inspection', 'Main Building', 'Monthly',
+             (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(),
+             'hse_officer', 'Compliant', None, None, None)
+        ]
+        
+        for inspection in sample_hse_schedule:
             cursor.execute('''
-                INSERT OR IGNORE INTO hse_schedule 
+                INSERT INTO hse_schedule 
                 (inspection_type, area, frequency, last_inspection_date, next_inspection_date,
                  assigned_to, compliance_level, findings, corrective_actions, follow_up_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', inspection)
-        except sqlite3.IntegrityError:
-            pass
     
     conn.commit()
     conn.close()
 
-# ... (ALL OTHER FUNCTIONS REMAIN THE SAME UNTIL VENDOR REGISTRATION FUNCTIONS)
+# ... (ALL OTHER FUNCTIONS REMAIN THE SAME - keep all the existing code)
 
-# ========== UPDATED VENDOR REGISTRATION FUNCTION WITH LOGIN DETAILS GENERATION ==========
+# ... (Continue with all the other functions like execute_query, execute_update, etc.)
+
+# ========== UPDATED VENDOR REGISTRATION FUNCTION ==========
 def show_vendor_registration():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.title("🏢 Vendor Registration")
@@ -253,11 +490,9 @@ def show_vendor_registration():
         # Generate vendor-specific username and password
         if company_name:
             # Generate username from company name (lowercase, no spaces)
-            vendor_username = company_name.lower().replace(' ', '_') + "_vendor"
+            vendor_username = company_name.lower().replace(' ', '_').replace('.', '').replace(',', '') + "_vendor"
             # Generate a random password
-            import random
-            import string
-            vendor_password = ''.join(random.choices(string.digits, k=7))
+            vendor_password = '0123456'  # Default password for consistency
             
             st.write(f"**Generated Username:** `{vendor_username}`")
             st.write(f"**Generated Password:** `{vendor_password}`")
@@ -271,7 +506,7 @@ def show_vendor_registration():
                 st.error("⚠️ Please fill in all required fields (*)")
             else:
                 # First, create a user account for the vendor
-                vendor_username = company_name.lower().replace(' ', '_') + "_vendor"
+                vendor_username = company_name.lower().replace(' ', '_').replace('.', '').replace(',', '') + "_vendor"
                 vendor_password = '0123456'  # Default password for all vendors
                 
                 # Check if username already exists
@@ -310,414 +545,20 @@ def show_vendor_registration():
                     else:
                         st.error("❌ Failed to create user account for vendor")
 
-# ========== UPDATED DASHBOARD FUNCTIONS WITH WORKING QUICK ACTIONS ==========
+# ... (ALL OTHER FUNCTIONS REMAIN THE SAME - make sure you keep all the existing code)
 
-def show_dashboard():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("📊 Dashboard Overview")
-    st.markdown('</div>', unsafe_allow_html=True)
+def main():
+    # Initialize session state for user if not exists
+    if 'user' not in st.session_state:
+        st.session_state.user = None
     
-    user = st.session_state.user
-    role = user['role']
-    
-    if role == 'facility_user':
-        show_user_dashboard()
-    elif role == 'facility_manager':
-        show_manager_dashboard()
-    elif role == 'hse_officer':
-        show_hse_dashboard()
-    elif role == 'space_manager':
-        show_space_dashboard()
+    if st.session_state.user is None:
+        show_login()
     else:
-        show_vendor_dashboard()
-
-def show_user_dashboard():
-    user_requests = get_user_requests(st.session_state.user['username'])
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Total Requests</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{len(user_requests)}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        pending_count = len([r for r in user_requests if safe_get(r, 'status') == 'Pending'])
-        st.markdown('<h4>Pending</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{pending_count}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        completed_count = len([r for r in user_requests if safe_get(r, 'status') == 'Completed'])
-        st.markdown('<h4>Completed</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    
-    # FIXED: Working Quick Access buttons
-    st.subheader("🚀 Quick Access")
-    
-    col_q1, col_q2, col_q3 = st.columns(3)
-    
-    with col_q1:
-        # Fixed: This button now correctly updates session state
-        if st.button("📅 Book a Room", key="quick_space", use_container_width=True):
-            st.session_state.navigation_menu = "Space Management"
-            st.rerun()
-    
-    with col_q2:
-        # Fixed: This button now correctly updates session state
-        if st.button("⛽ Generator Records", key="quick_generator", use_container_width=True):
-            st.session_state.navigation_menu = "Generator Records"
-            st.rerun()
-    
-    with col_q3:
-        # Fixed: This button now correctly updates session state
-        if st.button("🚨 Report Incident", key="quick_hse", use_container_width=True):
-            st.session_state.navigation_menu = "HSE Management"
-            st.rerun()
-    
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("📋 Recent Requests")
-    if user_requests:
-        display_data = []
-        for req in user_requests[:10]:
-            display_data.append({
-                'ID': safe_get(req, 'id'),
-                'Title': safe_str(safe_get(req, 'title'), 'N/A'),
-                'Location': safe_str(safe_get(req, 'location'), 'Common Area'),
-                'Facility': safe_str(safe_get(req, 'facility_type'), 'N/A'),
-                'Priority': safe_str(safe_get(req, 'priority'), 'N/A'),
-                'Status': safe_str(safe_get(req, 'status'), 'N/A'),
-                'Created': safe_str(safe_get(req, 'created_date'), 'N/A')[:10]
-            })
-        
-        df = pd.DataFrame(display_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("📭 No maintenance requests found")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def show_manager_dashboard():
-    all_requests = get_all_requests()
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Total Requests</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{len(all_requests)}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        pending_count = len([r for r in all_requests if safe_get(r, 'status') == 'Pending'])
-        st.markdown('<h4>Pending</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{pending_count}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        assigned_count = len([r for r in all_requests if safe_get(r, 'status') == 'Assigned'])
-        st.markdown('<h4>Assigned</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{assigned_count}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        completed_count = len([r for r in all_requests if safe_get(r, 'status') == 'Completed'])
-        st.markdown('<h4>Completed</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    
-    # FIXED: Working Quick Access buttons for managers
-    st.subheader("🚀 Management Quick Access")
-    
-    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
-    
-    with col_q1:
-        # Fixed: This button now correctly updates session state
-        if st.button("📅 Maintenance Schedule", key="manager_quick_pm", use_container_width=True):
-            st.session_state.navigation_menu = "Preventive Maintenance"
-            st.rerun()
-    
-    with col_q2:
-        # Fixed: This button now correctly updates session state
-        if st.button("🏢 Space Management", key="manager_quick_space", use_container_width=True):
-            st.session_state.navigation_menu = "Space Management"
-            st.rerun()
-    
-    with col_q3:
-        # Fixed: This button now correctly updates session state
-        if st.button("🚨 HSE Dashboard", key="manager_quick_hse", use_container_width=True):
-            st.session_state.navigation_menu = "HSE Management"
-            st.rerun()
-    
-    with col_q4:
-        # Fixed: This button now correctly updates session state
-        if st.button("⛽ Generator Reports", key="manager_quick_gen", use_container_width=True):
-            st.session_state.navigation_menu = "Generator Records"
-            st.rerun()
-    
-    # ... (rest of the manager dashboard function remains the same)
-
-def show_hse_dashboard():
-    st.subheader("🚨 HSE Officer Dashboard")
-    
-    # Get HSE data
-    hse_schedule_data = get_hse_schedule()
-    hse_incidents = get_hse_incidents()
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Total Inspections</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{len(hse_schedule_data)}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        overdue = len([i for i in hse_schedule_data if i.get('status') != 'Completed' 
-                      and safe_date(i.get('next_inspection_date')) 
-                      and safe_date(i.get('next_inspection_date')) < datetime.now().date()])
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Overdue Inspections</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3 style="color: #F44336;">{overdue}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Total Incidents</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{len(hse_incidents)}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col4:
-        open_incidents = len([i for i in hse_incidents if i.get('status') == 'Open'])
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Open Incidents</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3 style="color: #FF9800;">{open_incidents}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    
-    # FIXED: Working Quick Actions for HSE Officer
-    st.subheader("⚡ Quick Actions")
-    
-    col_q1, col_q2, col_q3 = st.columns(3)
-    
-    with col_q1:
-        # Fixed: This button now correctly updates session state
-        if st.button("➕ Schedule Inspection", key="hse_quick_schedule", use_container_width=True):
-            st.session_state.navigation_menu = "HSE Management"
-            st.session_state.hse_tab = "📅 HSE Schedule"  # Optional: Set specific tab
-            st.rerun()
-    
-    with col_q2:
-        # Fixed: This button now correctly updates session state
-        if st.button("🚨 Report Incident", key="hse_quick_incident", use_container_width=True):
-            st.session_state.navigation_menu = "HSE Management"
-            st.session_state.hse_tab = "🚨 Incident Reports"  # Optional: Set specific tab
-            st.rerun()
-    
-    with col_q3:
-        # Fixed: This button now correctly updates session state
-        if st.button("📊 View Compliance", key="hse_quick_compliance", use_container_width=True):
-            st.session_state.navigation_menu = "HSE Management"
-            st.session_state.hse_tab = "📊 Compliance Dashboard"  # Optional: Set specific tab
-            st.rerun()
-    
-    # ... (rest of the HSE dashboard function remains the same)
-
-def show_space_dashboard():
-    st.subheader("🏢 Space Manager Dashboard")
-    
-    # Get space booking data
-    bookings = get_space_bookings()
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Total Bookings</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{len(bookings)}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        today_bookings = len([b for b in bookings if b.get('booking_date') == datetime.now().date().isoformat()])
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Today\'s Bookings</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{today_bookings}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        confirmed_bookings = len([b for b in bookings if b.get('status') == 'Confirmed'])
-        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Confirmed</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{confirmed_bookings}</h3>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    
-    # FIXED: Working Quick Actions for Space Manager
-    st.subheader("⚡ Quick Actions")
-    
-    col_q1, col_q2 = st.columns(2)
-    
-    with col_q1:
-        # Fixed: This button now correctly updates session state
-        if st.button("➕ New Booking", key="space_quick_new", use_container_width=True):
-            st.session_state.navigation_menu = "Space Management"
-            st.session_state.space_tab = "➕ New Booking"  # Optional: Set specific tab
-            st.rerun()
-    
-    with col_q2:
-        # Fixed: This button now correctly updates session state
-        if st.button("📅 View All Bookings", key="space_quick_view", use_container_width=True):
-            st.session_state.navigation_menu = "Space Management"
-            st.session_state.space_tab = "📅 View Bookings"  # Optional: Set specific tab
-            st.rerun()
-    
-    # ... (rest of the space dashboard function remains the same)
-
-# ========== UPDATED MAIN APP FUNCTION ==========
-
-def show_main_app():
-    user = st.session_state.user
-    role = user['role']
-    
-    st.markdown(f"""
-        <div class="header-container">
-            <h1 style="margin: 0; display: flex; align-items: center; gap: 10px;">
-                🏢 FACILITIES MANAGEMENT SYSTEM™
-                <span style="font-size: 14px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
-                    v3.0
-                </span>
-            </h1>
-            <p style="margin: 5px 0 0 0; opacity: 0.9;">
-                Welcome, <strong>{user['username']}</strong> | Role: {role.replace('_', ' ').title()} | 
-                Currency: Nigerian Naira (₦) | © 2024 Developed by Abdulahi Ibrahim
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    with st.sidebar:
-        st.markdown(f"""
-            <div style="text-align: center; padding: 10px; background: linear-gradient(45deg, #4CAF50, #2E7D32); 
-                     border-radius: 10px; margin-bottom: 20px;">
-                <h3 style="color: white; margin: 0;">👋 Welcome</h3>
-                <p style="color: white; margin: 5px 0;">{user['username']}</p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-            <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-                <p style="margin: 0;"><strong>Role:</strong> {role.replace('_', ' ').title()}</p>
-                {f'<p style="margin: 0;"><strong>Vendor Type:</strong> {user["vendor_type"]}</p>' if user.get('vendor_type') else ''}
-                <p style="margin: 0;"><strong>Currency:</strong> Nigerian Naira (₦)</p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-        
-        # Navigation menu based on role
-        if role == 'facility_user':
-            menu_options = ["Dashboard", "Create Request", "My Requests", 
-                          "Space Management", "Generator Records", "HSE Management"]
-        elif role == 'facility_manager':
-            menu_options = ["Dashboard", "Manage Requests", "Vendor Management", 
-                          "Reports", "Job & Invoice Reports", "Preventive Maintenance",
-                          "Space Management", "Generator Records", "HSE Management"]
-        elif role == 'hse_officer':
-            menu_options = ["Dashboard", "HSE Management"]
-        elif role == 'space_manager':
-            menu_options = ["Dashboard", "Space Management"]
-        else:  # vendor
-            menu_options = ["Dashboard", "Assigned Jobs", "Completed Jobs", 
-                          "Vendor Registration", "Invoice Creation"]
-        
-        # Initialize navigation_menu in session state if not exists
-        if 'navigation_menu' not in st.session_state:
-            st.session_state.navigation_menu = "Dashboard"
-        
-        selected_menu = st.radio("🗺️ Navigation", menu_options, 
-                               key="navigation_menu_radio", 
-                               index=menu_options.index(st.session_state.navigation_menu)
-                               if st.session_state.navigation_menu in menu_options else 0,
-                               label_visibility="collapsed")
-        
-        # Update session state - FIXED: This ensures navigation works properly
-        if selected_menu != st.session_state.navigation_menu:
-            st.session_state.navigation_menu = selected_menu
-            # Clear any tab-specific states
-            if 'hse_tab' in st.session_state:
-                del st.session_state.hse_tab
-            if 'space_tab' in st.session_state:
-                del st.session_state.space_tab
-        
-        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-        
-        # Fixed logout button
-        if st.button("🚪 Logout", type="secondary", use_container_width=True, key="logout_button"):
-            # Clear session state
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-        
-        # Simple copyright footer
-        st.markdown("""
-            <div style="margin-top: 30px; padding: 10px; text-align: center; font-size: 10px; color: rgba(255,255,255,0.6);">
-                <hr style="margin: 10px 0;">
-                © 2024 FMS™ v3.0<br>
-                All Rights Reserved
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # Route to the selected menu - FIXED: Uses session state navigation_menu
-    selected_menu = st.session_state.navigation_menu
-    
-    if selected_menu == "Dashboard":
-        show_dashboard()
-    elif selected_menu == "Create Request":
-        show_create_request()
-    elif selected_menu == "My Requests":
-        show_my_requests()
-    elif selected_menu == "Manage Requests":
-        show_manage_requests()
-    elif selected_menu == "Vendor Management":
-        show_vendor_management()
-    elif selected_menu == "Reports":
-        show_reports()
-    elif selected_menu == "Job & Invoice Reports":
-        show_job_invoice_reports()
-    elif selected_menu == "Assigned Jobs":
-        show_assigned_jobs()
-    elif selected_menu == "Completed Jobs":
-        show_completed_jobs()
-    elif selected_menu == "Vendor Registration":
-        show_vendor_registration()
-    elif selected_menu == "Invoice Creation":
-        show_invoice_creation()
-    elif selected_menu == "Preventive Maintenance":
-        show_preventive_maintenance()
-    elif selected_menu == "Space Management":
-        show_space_management()
-    elif selected_menu == "Generator Records":
-        show_generator_diesel_records()
-    elif selected_menu == "HSE Management":
-        show_hse_management()
-
-# ... (THE REST OF THE CODE REMAINS THE SAME - main() function and if __name__)
+        show_main_app()
 
 if __name__ == "__main__":
-    # Initialize fresh database with reduced data
+    # Initialize database (only creates tables if they don't exist)
     init_database()
     
     # Run the app
