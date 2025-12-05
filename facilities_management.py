@@ -21,6 +21,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.lib.colors import HexColor
 from io import BytesIO
 import time
+import numpy as np
 
 # Page configuration with enhanced UI
 st.set_page_config(
@@ -134,6 +135,11 @@ st.markdown("""
         color: #4CAF50;
         font-weight: bold;
         font-size: 1.1em;
+    }
+    
+    .currency-symbol {
+        font-weight: bold;
+        color: #4CAF50;
     }
     
     /* Sidebar styling */
@@ -403,6 +409,49 @@ st.markdown("""
         border-radius: 8px;
         margin: 10px 0;
     }
+    
+    /* Dataframe styling */
+    .dataframe {
+        font-size: 14px;
+    }
+    
+    /* Spinner container */
+    .stSpinner > div {
+        border-color: #4CAF50 !important;
+    }
+    
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f0f2f6;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #4CAF50 !important;
+        color: white !important;
+    }
+    
+    /* Form improvements */
+    .stForm {
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 20px;
+        background: white;
+    }
+    
+    /* Loading improvements */
+    .stProgress > div > div > div > div {
+        background-color: #4CAF50;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -425,7 +474,7 @@ def init_database():
         )
     ''')
     
-    # Create maintenance_requests table
+    # Create maintenance_requests table with approval workflow
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS maintenance_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -444,7 +493,8 @@ def init_database():
             invoice_amount REAL,
             invoice_number TEXT,
             requesting_dept_approval BOOLEAN DEFAULT 0,
-            facilities_manager_approval BOOLEAN DEFAULT 0
+            facilities_manager_approval BOOLEAN DEFAULT 0,
+            vendor_completion_approval BOOLEAN DEFAULT 0
         )
     ''')
     
@@ -469,7 +519,8 @@ def init_database():
             registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             certificate_incorporation BLOB,
             tax_clearance_certificate BLOB,
-            audited_financial_statement BLOB
+            audited_financial_statement BLOB,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -552,7 +603,7 @@ def init_database():
         )
     ''')
     
-    # HSE Schedule and Inspections
+    # HSE Schedule and Inspections - Reduced to 5
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS hse_schedule (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -571,7 +622,7 @@ def init_database():
         )
     ''')
     
-    # HSE Incidents
+    # HSE Incidents - Optimized for performance
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS hse_incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -698,7 +749,7 @@ def init_database():
         except sqlite3.IntegrityError:
             pass
     
-    # Insert sample HSE schedule
+    # Insert sample HSE schedule - Reduced to 5
     sample_hse_schedule = [
         ('Fire Safety Inspection', 'All Buildings', 'Quarterly', 
          (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), 
@@ -709,6 +760,12 @@ def init_database():
         ('Emergency Exit Inspection', 'Main Building', 'Monthly',
          (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(),
          'hse_officer', 'Compliant', None, None, None),
+        ('Electrical Safety Check', 'Generator Room', 'Monthly',
+         (today - timedelta(days=10)).isoformat(), (today + timedelta(days=20)).isoformat(),
+         'hse_officer', 'Compliant', None, None, None),
+        ('PPE Inspection', 'Workshop Area', 'Weekly',
+         (today - timedelta(days=3)).isoformat(), (today + timedelta(days=4)).isoformat(),
+         'hse_officer', 'Non-Compliant', 'Some PPE missing', 'Order new PPE', (today + timedelta(days=2)).isoformat()),
     ]
     
     for inspection in sample_hse_schedule:
@@ -721,6 +778,12 @@ def init_database():
             ''', inspection)
         except sqlite3.IntegrityError:
             pass
+    
+    # Create indexes for performance optimization
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_maintenance_requests_status ON maintenance_requests(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_hse_incidents_date ON hse_incidents(incident_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_space_bookings_date ON space_bookings(booking_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_generator_records_date ON generator_records(record_date)')
     
     conn.commit()
     conn.close()
@@ -807,7 +870,12 @@ def safe_date(value, default=None):
 def format_naira(amount, decimal_places=2):
     try:
         amount = safe_float(amount, 0)
-        return f"₦{amount:,.{decimal_places}f}"
+        if amount >= 1000000:
+            return f"₦{amount/1000000:.{decimal_places}f}M"
+        elif amount >= 1000:
+            return f"₦{amount/1000:.{decimal_places}f}K"
+        else:
+            return f"₦{amount:,.{decimal_places}f}"
     except:
         return "₦0.00"
 
@@ -831,6 +899,109 @@ def get_vendor_requests(vendor_username):
     )
 
 # ========== NEW FEATURES FUNCTIONS ==========
+
+# Vendor Management Functions
+@st.cache_data(ttl=300)
+def get_vendor_details(username):
+    result = execute_query('SELECT * FROM vendors WHERE username = ?', (username,))
+    return result[0] if result else None
+
+def update_vendor_details(username, updates):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Build update query dynamically
+    update_fields = []
+    update_values = []
+    
+    for key, value in updates.items():
+        if value is not None:
+            update_fields.append(f"{key} = ?")
+            update_values.append(value)
+    
+    update_values.append(username)  # For WHERE clause
+    
+    if update_fields:
+        query = f"UPDATE vendors SET {', '.join(update_fields)}, updated_at = CURRENT_TIMESTAMP WHERE username = ?"
+        try:
+            cursor.execute(query, update_values)
+            conn.commit()
+            return True
+        except Exception as e:
+            st.error(f"Error updating vendor: {e}")
+            return False
+    
+    return False
+
+# Request Management Functions
+def create_maintenance_request(title, description, location, facility_type, priority, created_by):
+    return execute_update('''
+        INSERT INTO maintenance_requests 
+        (title, description, location, facility_type, priority, created_by, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'Pending')
+    ''', (title, description, location, facility_type, priority, created_by))
+
+@st.cache_data(ttl=300)
+def get_assigned_jobs(vendor_username):
+    return execute_query('''
+        SELECT * FROM maintenance_requests 
+        WHERE assigned_vendor = ? AND status IN ('Assigned', 'In Progress')
+        ORDER BY created_date DESC
+    ''', (vendor_username,))
+
+def complete_job(job_id, completion_notes):
+    return execute_update('''
+        UPDATE maintenance_requests 
+        SET status = 'Completed', 
+            completed_date = CURRENT_TIMESTAMP,
+            completion_notes = ?,
+            vendor_completion_approval = 1
+        WHERE id = ?
+    ''', (completion_notes, job_id))
+
+def approve_job_completion(job_id):
+    return execute_update('''
+        UPDATE maintenance_requests 
+        SET facilities_manager_approval = 1,
+            status = 'Approved'
+        WHERE id = ?
+    ''', (job_id,))
+
+def get_jobs_for_approval():
+    return execute_query('''
+        SELECT * FROM maintenance_requests 
+        WHERE vendor_completion_approval = 1 
+        AND (requesting_dept_approval = 0 OR facilities_manager_approval = 0)
+        ORDER BY completed_date DESC
+    ''')
+
+# Invoice Creation Functions
+def create_invoice(request_id, vendor_username, details_of_work, quantity, unit_cost, labour_charge=0, vat_applicable=False):
+    amount = quantity * unit_cost
+    subtotal = amount + labour_charge
+    vat_amount = subtotal * 0.075 if vat_applicable else 0
+    total_amount = subtotal + vat_amount
+    
+    # Generate invoice number
+    invoice_number = f"INV-{datetime.now().strftime('%Y%m%d')}-{request_id:04d}"
+    
+    return execute_update('''
+        INSERT INTO invoices 
+        (invoice_number, request_id, vendor_username, details_of_work, quantity, 
+         unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount, currency)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '₦')
+    ''', (invoice_number, request_id, vendor_username, details_of_work, quantity,
+          unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount))
+
+@st.cache_data(ttl=300)
+def get_vendor_invoices(vendor_username):
+    return execute_query('''
+        SELECT i.*, mr.title, mr.location 
+        FROM invoices i
+        JOIN maintenance_requests mr ON i.request_id = mr.id
+        WHERE i.vendor_username = ?
+        ORDER BY i.invoice_date DESC
+    ''', (vendor_username,))
 
 # Preventive Maintenance Functions
 @st.cache_data(ttl=300)
@@ -863,7 +1034,7 @@ def add_preventive_maintenance(equipment_name, equipment_type, location, mainten
           last_maintenance_date.isoformat() if last_maintenance_date else None, 
           next_maintenance_date.isoformat(), assigned_to, notes))
 
-# Generator Records Functions - FIXED ADD FUNCTION
+# Generator Records Functions
 @st.cache_data(ttl=300)
 def get_generator_records(start_date=None, end_date=None):
     query = '''
@@ -926,7 +1097,7 @@ def get_generator_summary():
     ''')
     return records
 
-# Space Management Functions
+# Space Management Functions with Analytics
 @st.cache_data(ttl=300)
 def get_space_bookings(filters=None):
     base_query = '''
@@ -952,6 +1123,20 @@ def get_space_bookings(filters=None):
     base_query += ' ORDER BY booking_date DESC, start_time ASC LIMIT 50'
     return execute_query(base_query, params)
 
+@st.cache_data(ttl=300)
+def get_space_analytics():
+    return execute_query('''
+        SELECT 
+            room_type,
+            COUNT(*) as total_bookings,
+            SUM(attendees_count) as total_attendees,
+            AVG(attendees_count) as avg_attendees,
+            SUM(CASE WHEN catering_required = 1 THEN 1 ELSE 0 END) as catering_requests
+        FROM space_bookings 
+        WHERE booking_date >= date('now', '-30 days')
+        GROUP BY room_type
+    ''')
+
 def add_space_booking(room_name, room_type, booking_date, start_time, end_time, purpose,
                      booked_by, department, attendees_count, catering_required, special_requirements):
     return execute_update('''
@@ -962,7 +1147,7 @@ def add_space_booking(room_name, room_type, booking_date, start_time, end_time, 
     ''', (room_name, room_type, booking_date.isoformat(), start_time, end_time, purpose,
           booked_by, department, attendees_count, catering_required, special_requirements))
 
-# HSE Schedule Functions
+# HSE Schedule Functions - Optimized for performance
 @st.cache_data(ttl=300)
 def get_hse_schedule(filters=None):
     base_query = 'SELECT * FROM hse_schedule WHERE 1=1'
@@ -982,34 +1167,34 @@ def get_hse_schedule(filters=None):
     base_query += ' ORDER BY next_inspection_date ASC LIMIT 50'
     return execute_query(base_query, params)
 
+@st.cache_data(ttl=300)
+def get_hse_incidents_optimized(limit=50):
+    return execute_query('''
+        SELECT * FROM hse_incidents 
+        ORDER BY incident_date DESC 
+        LIMIT ?
+    ''', (limit,))
+
+@st.cache_data(ttl=300)
+def get_hse_compliance_dashboard():
+    return execute_query('''
+        SELECT 
+            inspection_type,
+            COUNT(*) as total_inspections,
+            SUM(CASE WHEN compliance_level = 'Compliant' THEN 1 ELSE 0 END) as compliant_count,
+            SUM(CASE WHEN compliance_level = 'Non-Compliant' THEN 1 ELSE 0 END) as non_compliant_count,
+            AVG(CASE WHEN compliance_level = 'Compliant' THEN 100 ELSE 0 END) as compliance_rate
+        FROM hse_schedule 
+        WHERE last_inspection_date >= date('now', '-90 days')
+        GROUP BY inspection_type
+    ''')
+
 def add_hse_schedule(inspection_type, area, frequency, next_inspection_date, assigned_to):
     return execute_update('''
         INSERT INTO hse_schedule 
         (inspection_type, area, frequency, next_inspection_date, assigned_to)
         VALUES (?, ?, ?, ?, ?)
     ''', (inspection_type, area, frequency, next_inspection_date.isoformat(), assigned_to))
-
-@st.cache_data(ttl=300)
-def get_hse_incidents(filters=None):
-    base_query = 'SELECT * FROM hse_incidents WHERE 1=1'
-    params = []
-    
-    if filters:
-        if filters.get('severity'):
-            base_query += ' AND severity = ?'
-            params.append(filters['severity'])
-        if filters.get('status'):
-            base_query += ' AND status = ?'
-            params.append(filters['status'])
-        if filters.get('start_date'):
-            base_query += ' AND incident_date >= ?'
-            params.append(filters['start_date'].isoformat())
-        if filters.get('end_date'):
-            base_query += ' AND incident_date <= ?'
-            params.append(filters['end_date'].isoformat())
-    
-    base_query += ' ORDER BY incident_date DESC LIMIT 50'
-    return execute_query(base_query, params)
 
 def add_hse_incident(incident_date, incident_time, location, incident_type, severity, 
                     description, reported_by, affected_persons, immediate_actions):
@@ -1130,6 +1315,30 @@ def generate_job_invoice_pdf(job_data, invoice_data=None):
         story.append(Paragraph(notes, normal_style))
         story.append(Spacer(1, 20))
     
+    # Approval Status
+    story.append(Paragraph("APPROVAL STATUS", subtitle_style))
+    approval_data = [
+        ["Department Approval:", "✅ Approved" if job_data.get('requesting_dept_approval') else "⏳ Pending"],
+        ["Facilities Manager Approval:", "✅ Approved" if job_data.get('facilities_manager_approval') else "⏳ Pending"],
+        ["Vendor Completion:", "✅ Approved" if job_data.get('vendor_completion_approval') else "⏳ Pending"]
+    ]
+    
+    approval_table = Table(approval_data, colWidths=[200, 300])
+    approval_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f5f5f5')),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#424242')),
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('TOPPADDING', (0, 0), (-1, -1), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e0e0e0'))
+    ]))
+    
+    story.append(approval_table)
+    story.append(Spacer(1, 20))
+    
     # If we have invoice data, add invoice section
     if invoice_data:
         story.append(PageBreak())
@@ -1144,7 +1353,7 @@ def generate_job_invoice_pdf(job_data, invoice_data=None):
             ["Invoice Date:", invoice_data.get('invoice_date', 'N/A')],
             ["Vendor:", invoice_data.get('vendor_username', 'N/A')],
             ["Status:", invoice_data.get('status', 'N/A')],
-            ["Currency:", invoice_data.get('currency', '₦')]
+            ["Currency:", "₦ (Nigerian Naira)"]
         ]
         
         invoice_info_table = Table(invoice_info_data, colWidths=[200, 300])
@@ -1254,14 +1463,16 @@ def show_login():
             
             if login_button:
                 if username and password:
-                    user = authenticate_user(username, password)
-                    if user:
-                        st.session_state.user = user
-                        st.session_state.navigation_menu = "Dashboard"
-                        st.success("Login successful! Redirecting...")
-                        st.rerun()
-                    else:
-                        st.error("❌ Invalid username or password")
+                    with st.spinner("Authenticating..."):
+                        user = authenticate_user(username, password)
+                        if user:
+                            st.session_state.user = user
+                            st.session_state.navigation_menu = "Dashboard"
+                            st.success("Login successful! Redirecting...")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid username or password")
                 else:
                     st.warning("⚠️ Please enter both username and password")
         
@@ -1321,7 +1532,8 @@ def show_dashboard():
         st.warning("Unknown role")
 
 def show_user_dashboard():
-    user_requests = get_user_requests(st.session_state.user['username'])
+    with st.spinner("Loading dashboard..."):
+        user_requests = get_user_requests(st.session_state.user['username'])
     
     col1, col2, col3 = st.columns(3)
     
@@ -1348,21 +1560,26 @@ def show_user_dashboard():
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     
     # WORKING QUICK ACCESS BUTTONS
-    st.subheader("🚀 Quick Access")
+    st.subheader("🚀 Quick Actions")
     
-    col_q1, col_q2, col_q3 = st.columns(3)
+    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
     
     with col_q1:
+        if st.button("📋 Create Request", key="quick_create_request", use_container_width=True):
+            st.session_state.navigation_menu = "Create Request"
+            st.rerun()
+    
+    with col_q2:
         if st.button("📅 Book a Room", key="quick_book_room", use_container_width=True):
             st.session_state.navigation_menu = "Space Management"
             st.rerun()
     
-    with col_q2:
+    with col_q3:
         if st.button("⛽ Generator Records", key="quick_generator", use_container_width=True):
             st.session_state.navigation_menu = "Generator Records"
             st.rerun()
     
-    with col_q3:
+    with col_q4:
         if st.button("🚨 Report Incident", key="quick_incident", use_container_width=True):
             st.session_state.navigation_menu = "HSE Management"
             st.rerun()
@@ -1390,7 +1607,8 @@ def show_user_dashboard():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def show_manager_dashboard():
-    all_requests = get_all_requests()
+    with st.spinner("Loading dashboard..."):
+        all_requests = get_all_requests()
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1424,28 +1642,28 @@ def show_manager_dashboard():
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
     
     # WORKING QUICK ACCESS BUTTONS FOR MANAGERS
-    st.subheader("🚀 Management Quick Access")
+    st.subheader("🚀 Management Quick Actions")
     
     col_q1, col_q2, col_q3, col_q4 = st.columns(4)
     
     with col_q1:
-        if st.button("📅 Maintenance Schedule", key="quick_maintenance", use_container_width=True):
-            st.session_state.navigation_menu = "Preventive Maintenance"
+        if st.button("📋 Manage Requests", key="quick_manage_requests", use_container_width=True):
+            st.session_state.navigation_menu = "Manage Requests"
             st.rerun()
     
     with col_q2:
+        if st.button("🔧 Maintenance Schedule", key="quick_maintenance", use_container_width=True):
+            st.session_state.navigation_menu = "Preventive Maintenance"
+            st.rerun()
+    
+    with col_q3:
         if st.button("🏢 Space Management", key="quick_space", use_container_width=True):
             st.session_state.navigation_menu = "Space Management"
             st.rerun()
     
-    with col_q3:
+    with col_q4:
         if st.button("🚨 HSE Dashboard", key="quick_hse", use_container_width=True):
             st.session_state.navigation_menu = "HSE Management"
-            st.rerun()
-    
-    with col_q4:
-        if st.button("⛽ Generator Reports", key="quick_gen_reports", use_container_width=True):
-            st.session_state.navigation_menu = "Generator Records"
             st.rerun()
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
@@ -1504,10 +1722,9 @@ def show_manager_dashboard():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def show_hse_dashboard():
-    st.subheader("🚨 HSE Officer Dashboard")
-    
-    hse_schedule_data = get_hse_schedule()
-    hse_incidents = get_hse_incidents()
+    with st.spinner("Loading HSE dashboard..."):
+        hse_schedule_data = get_hse_schedule()
+        hse_incidents = get_hse_incidents_optimized()
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1564,9 +1781,8 @@ def show_hse_dashboard():
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
 
 def show_space_dashboard():
-    st.subheader("🏢 Space Manager Dashboard")
-    
-    bookings = get_space_bookings()
+    with st.spinner("Loading space dashboard..."):
+        bookings = get_space_bookings()
     
     col1, col2, col3 = st.columns(3)
     
@@ -1610,11 +1826,11 @@ def show_space_dashboard():
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
 
 def show_vendor_dashboard():
-    st.subheader("🔧 Vendor Dashboard")
+    with st.spinner("Loading vendor dashboard..."):
+        vendor_requests = get_vendor_requests(st.session_state.user['username'])
+        invoices = get_vendor_invoices(st.session_state.user['username'])
     
-    vendor_requests = get_vendor_requests(st.session_state.user['username'])
-    
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         assigned_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Assigned'])
@@ -1624,615 +1840,462 @@ def show_vendor_dashboard():
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
+        in_progress_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'In Progress'])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>In Progress</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{in_progress_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
         completed_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Completed'])
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.markdown('<h4>Completed Jobs</h4>', unsafe_allow_html=True)
         st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    with col3:
+    with col4:
+        total_invoice_amount = sum([safe_float(inv.get('total_amount', 0)) for inv in invoices])
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        st.markdown('<h4>Total Jobs</h4>', unsafe_allow_html=True)
-        st.markdown(f'<h3>{len(vendor_requests)}</h3>', unsafe_allow_html=True)
+        st.markdown('<h4>Total Invoices</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3 class="currency-naira">{format_naira(total_invoice_amount)}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # WORKING QUICK ACTIONS FOR VENDORS
+    st.subheader("⚡ Vendor Quick Actions")
+    
+    col_q1, col_q2, col_q3 = st.columns(3)
+    
+    with col_q1:
+        if st.button("🛠️ Update Profile", key="vendor_update_profile", use_container_width=True):
+            st.session_state.navigation_menu = "Vendor Management"
+            st.rerun()
+    
+    with col_q2:
+        if st.button("📋 Assigned Jobs", key="vendor_assigned_jobs", use_container_width=True):
+            st.session_state.navigation_menu = "Assigned Jobs"
+            st.rerun()
+    
+    with col_q3:
+        if st.button("🧾 Create Invoice", key="vendor_create_invoice", use_container_width=True):
+            st.session_state.navigation_menu = "Invoice Creation"
+            st.rerun()
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
 
-# ========== GENERATOR RECORDS - FIXED ADD FUNCTION ==========
+# ========== NEW FEATURE: VENDOR MANAGEMENT ==========
 
-def show_generator_diesel_records():
+def show_vendor_management():
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("⛽ Generator & Diesel Daily Records")
+    st.title("🏢 Vendor Management")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📝 Daily Records", "➕ New Record", "📈 Reports & Analysis"])
+    user = st.session_state.user
+    vendor_details = get_vendor_details(user['username'])
+    
+    if not vendor_details:
+        st.error("❌ Vendor profile not found")
+        return
+    
+    tab1, tab2 = st.tabs(["📋 View/Update Profile", "📊 Performance"])
     
     with tab1:
-        st.subheader("📅 Daily Generator Records")
+        st.subheader("📋 Vendor Profile Information")
         
-        # Date range filter
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input("Start Date", value=datetime.now().date() - timedelta(days=7), key="gen_start_date")
-        with col2:
-            end_date = st.date_input("End Date", value=datetime.now().date(), key="gen_end_date")
-        
-        if st.button("🔄 Refresh Records", key="refresh_generator"):
-            st.cache_data.clear()
-            st.rerun()
-        
-        records = get_generator_records(start_date, end_date)
-        
-        if not records:
-            st.info("📭 No records found for the selected date range")
-        else:
-            display_data = []
-            total_hours = 0
-            total_diesel = 0
-            
-            for record in records[:5]:  # Show 5 records
-                net_hours = safe_float(record.get('net_hours_used', 0))
-                diesel_consumed = safe_float(record.get('diesel_consumed', 0))
-                
-                display_data.append({
-                    'Date': record.get('record_date'),
-                    'Generator': record.get('generator_name'),
-                    'Opening Hours': f"{safe_float(record.get('opening_hours', 0)):.1f}",
-                    'Closing Hours': f"{safe_float(record.get('closing_hours', 0)):.1f}",
-                    'Net Hours': f"{net_hours:.1f}",
-                    'Opening Diesel': f"{safe_float(record.get('opening_diesel_level', 0)):.1f} L",
-                    'Closing Diesel': f"{safe_float(record.get('closing_diesel_level', 0)):.1f} L",
-                    'Diesel Consumed': f"{diesel_consumed:.1f} L",
-                    'Recorded By': record.get('recorded_by')
-                })
-                
-                total_hours += net_hours
-                total_diesel += diesel_consumed
-            
-            df = pd.DataFrame(display_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            
-            # Summary statistics
-            st.subheader("📊 Summary")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Records", len(records))
-            with col2:
-                st.metric("Total Hours", f"{total_hours:.1f}")
-            with col3:
-                st.metric("Total Diesel Used", f"{total_diesel:.1f} L")
-    
-    with tab2:
-        st.subheader("➕ Add New Daily Record")
-        
-        with st.form("add_generator_record", clear_on_submit=True):
+        with st.form("vendor_update_form"):
             col1, col2 = st.columns(2)
             
             with col1:
-                record_date = st.date_input("Record Date *", value=datetime.now().date(), key="gen_record_date")
-                generator_name = st.selectbox("Generator Name *", ["Generator #1", "Generator #2", "Generator #3"], key="gen_name")
-                opening_hours = st.number_input("Opening Hours *", min_value=0.0, step=0.1, format="%.1f", key="gen_opening_hours", value=0.0)
-                closing_hours = st.number_input("Closing Hours *", min_value=0.0, step=0.1, format="%.1f", key="gen_closing_hours", value=0.0)
+                company_name = st.text_input("Company Name *", value=vendor_details.get('company_name', ''))
+                contact_person = st.text_input("Contact Person *", value=vendor_details.get('contact_person', ''))
+                email = st.text_input("Email *", value=vendor_details.get('email', ''))
+                phone = st.text_input("Phone *", value=vendor_details.get('phone', ''))
+                vendor_type = st.selectbox("Vendor Type *", 
+                                         ["HVAC", "Generator", "Fixture and Fittings", 
+                                          "Building Maintenance", "HSE", "Space Management"],
+                                         index=["HVAC", "Generator", "Fixture and Fittings", 
+                                                "Building Maintenance", "HSE", "Space Management"].index(vendor_details.get('vendor_type', 'HVAC')))
             
             with col2:
-                opening_diesel_level = st.number_input("Opening Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f", key="gen_opening_diesel", value=0.0)
-                closing_diesel_level = st.number_input("Closing Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f", key="gen_closing_diesel", value=0.0)
-                recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'], key="gen_recorded_by")
-                notes = st.text_area("Notes", key="gen_notes")
+                services_offered = st.text_area("Services Offered *", value=vendor_details.get('services_offered', ''))
+                tax_identification_number = st.text_input("Tax ID", value=vendor_details.get('tax_identification_number', ''))
+                rc_number = st.text_input("RC Number", value=vendor_details.get('rc_number', ''))
+                account_details = st.text_area("Account Details", value=vendor_details.get('account_details', ''))
+                address = st.text_area("Address *", value=vendor_details.get('address', ''))
             
-            # Calculate preview
-            net_hours = closing_hours - opening_hours if closing_hours > opening_hours else 0
-            diesel_consumed = opening_diesel_level - closing_diesel_level if opening_diesel_level > closing_diesel_level else 0
-            
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.write("**📊 Preview**")
-            col_preview1, col_preview2 = st.columns(2)
-            with col_preview1:
-                st.write(f"**Net Hours Used:** {net_hours:.1f}")
-            with col_preview2:
-                st.write(f"**Diesel Consumed:** {diesel_consumed:.1f} L")
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            submitted = st.form_submit_button("💾 Save Record", use_container_width=True, key="gen_submit")
+            submitted = st.form_submit_button("💾 Update Profile", use_container_width=True)
             
             if submitted:
-                if not all([record_date, generator_name, recorded_by]):
+                if not all([company_name, contact_person, email, phone, vendor_type, services_offered, address]):
                     st.error("⚠️ Please fill in all required fields (*)")
-                elif closing_hours < opening_hours:
-                    st.error("❌ Closing hours cannot be less than opening hours")
-                elif opening_diesel_level < 0 or closing_diesel_level < 0:
-                    st.error("❌ Diesel levels cannot be negative")
                 else:
-                    success, message = add_generator_record(record_date, generator_name, opening_hours, closing_hours,
-                                          opening_diesel_level, closing_diesel_level, recorded_by, notes)
-                    if success:
-                        st.success("✅ " + message)
-                        # Clear cache for fresh data
+                    updates = {
+                        'company_name': company_name,
+                        'contact_person': contact_person,
+                        'email': email,
+                        'phone': phone,
+                        'vendor_type': vendor_type,
+                        'services_offered': services_offered,
+                        'tax_identification_number': tax_identification_number,
+                        'rc_number': rc_number,
+                        'account_details': account_details,
+                        'address': address
+                    }
+                    
+                    if update_vendor_details(user['username'], updates):
+                        st.success("✅ Vendor profile updated successfully!")
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.error("❌ " + message)
-    
-    with tab3:
-        st.subheader("📈 Analysis & Reports")
-        
-        # Get summary data
-        summary = get_generator_summary()
-        
-        if summary:
-            for gen in summary:
-                st.markdown(f'<div class="card">', unsafe_allow_html=True)
-                st.write(f"**{gen['generator_name']}**")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Days Operated", int(gen['total_days']))
-                with col2:
-                    st.metric("Total Hours", f"{safe_float(gen['total_hours']):.1f}")
-                with col3:
-                    st.metric("Total Diesel", f"{safe_float(gen['total_diesel']):.1f} L")
-                with col4:
-                    st.metric("Avg Daily Hours", f"{safe_float(gen['avg_hours_per_day']):.1f}")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-# ========== ENHANCED REPORTS WITH GRAPHICAL ANALYTICS ==========
-
-def show_reports():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("📈 Reports & Analytics")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    all_requests = get_all_requests()
-    
-    if not all_requests:
-        st.info("📭 No data available for reports")
-        return
-    
-    # Convert to DataFrame for analysis
-    report_data = []
-    for req in all_requests:
-        report_data.append({
-            'id': safe_get(req, 'id'),
-            'title': safe_str(safe_get(req, 'title'), 'N/A'),
-            'location': safe_str(safe_get(req, 'location'), 'Common Area'),
-            'facility_type': safe_str(safe_get(req, 'facility_type'), 'N/A'),
-            'priority': safe_str(safe_get(req, 'priority'), 'N/A'),
-            'status': safe_str(safe_get(req, 'status'), 'N/A'),
-            'created_by': safe_str(safe_get(req, 'created_by'), 'N/A'),
-            'assigned_vendor': safe_str(safe_get(req, 'assigned_vendor'), 'Not assigned'),
-            'created_date': safe_str(safe_get(req, 'created_date'), 'N/A'),
-            'completed_date': safe_str(safe_get(req, 'completed_date'), ''),
-            'invoice_amount': safe_float(safe_get(req, 'invoice_amount'))
-        })
-    
-    df = pd.DataFrame(report_data)
-    
-    if not df.empty:
-        df['created_date'] = pd.to_datetime(df['created_date'], errors='coerce')
-        df['completed_date'] = pd.to_datetime(df['completed_date'], errors='coerce')
-        df['month'] = df['created_date'].dt.to_period('M')
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_requests = len(df)
-        st.markdown(f'<div class="metric-card"><h4>Total Requests</h4><h3>{total_requests}</h3></div>', unsafe_allow_html=True)
-    
-    with col2:
-        completed_requests = len(df[df['status'] == 'Completed'])
-        st.markdown(f'<div class="metric-card"><h4>Completed</h4><h3>{completed_requests}</h3></div>', unsafe_allow_html=True)
-    
-    with col3:
-        pending_requests = len(df[df['status'] == 'Pending'])
-        st.markdown(f'<div class="metric-card"><h4>Pending</h4><h3>{pending_requests}</h3></div>', unsafe_allow_html=True)
-    
-    with col4:
-        total_invoice_amount = df['invoice_amount'].sum()
-        st.markdown(f'<div class="metric-card"><h4>Total Invoice Amount</h4><h3 class="currency-naira">{format_naira(total_invoice_amount)}</h3></div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    
-    # Enhanced Graphical Analytics
-    st.subheader("📊 Graphical Analytics")
-    
-    # Row 1: Status and Priority Distribution
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        if not df.empty:
-            status_counts = df['status'].value_counts()
-            fig = px.pie(values=status_counts.values, names=status_counts.index, 
-                        title="📈 Request Status Distribution",
-                        color_discrete_sequence=px.colors.sequential.RdBu,
-                        hole=0.3)
-            fig.update_traces(textposition='inside', textinfo='percent+label')
-            fig.update_layout(showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        if not df.empty:
-            priority_counts = df['priority'].value_counts()
-            colors = ['#FF6B6B', '#FFD166', '#06D6A0', '#118AB2']
-            fig = px.bar(x=priority_counts.index, y=priority_counts.values,
-                        title="🚨 Requests by Priority", 
-                        labels={'x': 'Priority', 'y': 'Count'},
-                        color=priority_counts.index,
-                        color_discrete_sequence=colors)
-            fig.update_layout(showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Row 2: Facility Type and Location Analysis
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        if not df.empty:
-            facility_counts = df['facility_type'].value_counts().head(10)
-            fig = px.bar(y=facility_counts.index, x=facility_counts.values,
-                        title="🏢 Top 10 Facility Types", 
-                        orientation='h',
-                        labels={'x': 'Count', 'y': 'Facility Type'},
-                        color=facility_counts.values,
-                        color_continuous_scale='Viridis')
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        if not df.empty:
-            location_counts = df['location'].value_counts().head(10)
-            fig = px.bar(y=location_counts.index, x=location_counts.values,
-                        title="📍 Top 10 Locations", 
-                        orientation='h',
-                        labels={'x': 'Count', 'y': 'Location'},
-                        color=location_counts.values,
-                        color_continuous_scale='Plasma')
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Row 3: Monthly Trends and Completion Time Analysis
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("📅 Monthly Trends & Performance")
-    
-    col5, col6 = st.columns(2)
-    
-    with col5:
-        if not df.empty and 'month' in df.columns:
-            monthly_trends = df.groupby('month').size().reset_index(name='count')
-            monthly_trends['month'] = monthly_trends['month'].astype(str)
-            
-            fig = px.line(monthly_trends, x='month', y='count', 
-                         title="📈 Monthly Request Trends", 
-                         markers=True,
-                         line_shape='spline')
-            fig.update_layout(xaxis_title="Month", yaxis_title="Number of Requests")
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with col6:
-        if not df.empty and 'created_date' in df.columns and 'completed_date' in df.columns:
-            # Calculate completion times for completed requests
-            completed_df = df[df['status'] == 'Completed'].copy()
-            if not completed_df.empty:
-                completed_df['completion_days'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
-                avg_completion = completed_df['completion_days'].mean()
-                
-                fig = go.Figure()
-                fig.add_trace(go.Indicator(
-                    mode="number+delta",
-                    value=avg_completion,
-                    title={"text": "Avg Completion Time (days)"},
-                    delta={'reference': 14, 'relative': False},
-                    domain={'x': [0, 1], 'y': [0, 1]}
-                ))
-                fig.update_layout(height=200)
-                st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Export Section
-    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-    st.subheader("📤 Export Data & Reports")
-    
-    col_exp1, col_exp2, col_exp3 = st.columns(3)
-    
-    with col_exp1:
-        if st.button("📊 Export Analytics Dashboard", use_container_width=True, key="export_dashboard"):
-            # Create a comprehensive analytics report
-            with st.spinner("Generating analytics report..."):
-                summary_report = f"""
-                FACILITIES MANAGEMENT ANALYTICS REPORT
-                Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                
-                SUMMARY STATISTICS:
-                • Total Requests: {total_requests}
-                • Completed Requests: {completed_requests}
-                • Pending Requests: {pending_requests}
-                • Total Invoice Amount: {format_naira(total_invoice_amount)}
-                
-                STATUS DISTRIBUTION:
-                """
-                
-                for status, count in status_counts.items():
-                    summary_report += f"• {status}: {count} ({count/total_requests*100:.1f}%)\n"
-                
-                st.download_button(
-                    label="📥 Download Analytics Summary",
-                    data=summary_report,
-                    file_name=f"analytics_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain",
-                    key="download_analytics"
-                )
-    
-    with col_exp2:
-        if st.button("📄 Export to PDF Report", use_container_width=True, key="export_pdf_report"):
-            # Generate a PDF report
-            buffer = BytesIO()
-            c = canvas.Canvas(buffer, pagesize=letter)
-            
-            # Add content to PDF
-            c.setFont("Helvetica-Bold", 16)
-            c.drawString(100, 750, "Facilities Management Analytics Report")
-            
-            c.setFont("Helvetica", 12)
-            c.drawString(100, 730, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            c.drawString(100, 710, f"Total Requests: {total_requests}")
-            c.drawString(100, 690, f"Completed: {completed_requests}")
-            c.drawString(100, 670, f"Pending: {pending_requests}")
-            c.drawString(100, 650, f"Total Invoice Amount: {format_naira(total_invoice_amount)}")
-            
-            c.showPage()
-            c.save()
-            
-            buffer.seek(0)
-            st.download_button(
-                label="📥 Download PDF Report",
-                data=buffer,
-                file_name=f"analytics_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                mime="application/pdf",
-                key="download_pdf_report"
-            )
-    
-    with col_exp3:
-        if st.button("📈 Export Raw Data (CSV)", use_container_width=True, key="export_csv"):
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"facilities_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="download_csv"
-            )
-
-# ========== ENHANCED JOB & INVOICE REPORTS WITH PDF DOWNLOAD ==========
-
-def show_job_invoice_reports():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("📋 Job & Invoice Reports")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    completed_jobs = execute_query('''
-        SELECT mr.*, i.invoice_number, i.invoice_date, i.total_amount as invoice_total, 
-               i.status as invoice_status, i.details_of_work, i.vendor_username
-        FROM maintenance_requests mr
-        LEFT JOIN invoices i ON mr.id = i.request_id
-        WHERE mr.status IN ('Completed', 'Approved')
-        ORDER BY mr.completed_date DESC
-    ''')
-    
-    if not completed_jobs:
-        st.info("📭 No completed jobs with invoices found")
-        return
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        status_options = ["All"] + list(set(safe_str(safe_get(job, 'status')) for job in completed_jobs))
-        status_filter = st.selectbox("Filter by Job Status", status_options, key="job_status_filter")
-    with col2:
-        has_invoice_filter = st.selectbox("Filter by Invoice", ["All", "With Invoice", "Without Invoice"], key="job_invoice_filter")
-    with col3:
-        if st.button("🔄 Refresh Reports", key="refresh_job_reports"):
-            st.cache_data.clear()
-            st.rerun()
-    
-    filtered_jobs = completed_jobs
-    if status_filter != "All":
-        filtered_jobs = [job for job in filtered_jobs if safe_str(safe_get(job, 'status')) == status_filter]
-    if has_invoice_filter == "With Invoice":
-        filtered_jobs = [job for job in filtered_jobs if safe_get(job, 'invoice_number') is not None]
-    elif has_invoice_filter == "Without Invoice":
-        filtered_jobs = [job for job in filtered_jobs if safe_get(job, 'invoice_number') is None]
-    
-    st.subheader(f"📊 Found {len(filtered_jobs)} job(s)")
-    
-    for job in filtered_jobs[:5]:  # Limit to 5 for performance
-        with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')} - {safe_str(safe_get(job, 'location'), 'Common Area')} - {safe_str(safe_get(job, 'status'), 'N/A')}"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown('<div class="card">', unsafe_allow_html=True)
-                st.write("**📋 Job Information**")
-                st.write(f"**Title:** {safe_str(safe_get(job, 'title'), 'N/A')}")
-                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
-                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'), 'N/A')}")
-                st.write(f"**Priority:** {safe_str(safe_get(job, 'priority'), 'N/A')}")
-                st.write(f"**Status:** {safe_str(safe_get(job, 'status'), 'N/A')}")
-                st.write(f"**Created By:** {safe_str(safe_get(job, 'created_by'), 'N/A')}")
-                st.write(f"**Assigned Vendor:** {safe_str(safe_get(job, 'assigned_vendor'), 'Not assigned')}")
-                if safe_get(job, 'job_breakdown'):
-                    st.write(f"**Job Breakdown:** {safe_str(safe_get(job, 'job_breakdown'))}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown('<div class="card">', unsafe_allow_html=True)
-                st.write("**🧾 Invoice Information**")
-                if safe_get(job, 'invoice_number'):
-                    st.write(f"**Invoice Number:** {safe_str(safe_get(job, 'invoice_number'))}")
-                    st.write(f"**Invoice Date:** {safe_str(safe_get(job, 'invoice_date'))}")
-                    st.write(f"**Invoice Amount:** {format_naira(safe_get(job, 'invoice_total'))}")
-                    st.write(f"**Invoice Status:** {safe_str(safe_get(job, 'invoice_status'), 'N/A')}")
-                    st.write(f"**Vendor:** {safe_str(safe_get(job, 'vendor_username'), 'N/A')}")
-                    if safe_get(job, 'details_of_work'):
-                        st.write(f"**Work Details:** {safe_str(safe_get(job, 'details_of_work'))}")
-                else:
-                    st.write("**No invoice created yet**")
-                
-                st.write("**✅ Approval Status**")
-                st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
-                st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            # PDF Generation Section with Enhanced UI/UX
-            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
-            st.subheader("📄 Generate Professional Reports")
-            
-            col_pdf1, col_pdf2 = st.columns(2)
-            
-            with col_pdf1:
-                if st.button(f"📥 Generate Job Report (PDF)", key=f"job_pdf_{safe_get(job, 'id')}", 
-                           use_container_width=True):
-                    with st.spinner("Generating professional job report..."):
-                        time.sleep(1)  # Simulate processing
-                        
-                        # Generate PDF
-                        pdf_buffer = generate_job_invoice_pdf(job)
-                        
-                        # Create download button with success message
-                        st.success("✅ Report generated successfully!")
-                        
-                        # Display download button
-                        st.download_button(
-                            label="⬇️ Download Job Report PDF",
-                            data=pdf_buffer,
-                            file_name=f"Job_Report_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                            mime="application/pdf",
-                            key=f"download_job_{safe_get(job, 'id')}",
-                            use_container_width=True
-                        )
-            
-            with col_pdf2:
-                if safe_get(job, 'invoice_number'):
-                    if st.button(f"🧾 Generate Invoice Report (PDF)", key=f"invoice_pdf_{safe_get(job, 'id')}", 
-                               use_container_width=True):
-                        with st.spinner("Generating professional invoice report..."):
-                            time.sleep(1)  # Simulate processing
-                            
-                            # Generate PDF with invoice
-                            pdf_buffer = generate_job_invoice_pdf(job, job)
-                            
-                            # Create download button with success message
-                            st.success("✅ Invoice report generated successfully!")
-                            
-                            # Display download button
-                            st.download_button(
-                                label="⬇️ Download Invoice Report PDF",
-                                data=pdf_buffer,
-                                file_name=f"Invoice_Report_{safe_get(job, 'invoice_number')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                                mime="application/pdf",
-                                key=f"download_invoice_{safe_get(job, 'id')}",
-                                use_container_width=True
-                            )
-                else:
-                    st.info("ℹ️ No invoice available for this job")
-
-# ========== PREVENTIVE MAINTENANCE ==========
-
-def show_preventive_maintenance():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("🔧 Planned Preventive Maintenance")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["📅 Schedule", "➕ Add New"])
-    
-    with tab1:
-        st.subheader("📅 Maintenance Schedule")
-        
-        maintenance_list = get_preventive_maintenance()
-        
-        if not maintenance_list:
-            st.info("📭 No maintenance schedules found")
-        else:
-            display_data = []
-            for maintenance in maintenance_list[:5]:
-                display_data.append({
-                    'ID': maintenance['id'],
-                    'Equipment': maintenance['equipment_name'],
-                    'Type': maintenance['equipment_type'],
-                    'Location': maintenance['location'],
-                    'Maintenance Type': maintenance['maintenance_type'],
-                    'Frequency': maintenance['frequency'],
-                    'Last Done': maintenance.get('last_maintenance_date', 'Never'),
-                    'Next Due': maintenance['next_maintenance_date'],
-                    'Status': maintenance.get('status', 'Upcoming'),
-                    'Assigned To': maintenance.get('assigned_to', 'Not assigned')
-                })
-            
-            df = pd.DataFrame(display_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+                        st.error("❌ Failed to update vendor profile")
     
     with tab2:
-        st.subheader("➕ Add New Maintenance Schedule")
+        st.subheader("📊 Vendor Performance")
         
-        with st.form("add_maintenance_schedule"):
+        vendor_requests = get_vendor_requests(user['username'])
+        invoices = get_vendor_invoices(user['username'])
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_jobs = len(vendor_requests)
+            st.metric("Total Jobs", total_jobs)
+        
+        with col2:
+            completed_jobs = len([r for r in vendor_requests if r.get('status') == 'Completed'])
+            st.metric("Completed Jobs", completed_jobs)
+        
+        with col3:
+            total_invoices = len(invoices)
+            st.metric("Total Invoices", total_invoices)
+        
+        with col4:
+            total_revenue = sum([safe_float(inv.get('total_amount', 0)) for inv in invoices])
+            st.metric("Total Revenue", format_naira(total_revenue))
+
+# ========== NEW FEATURE: CREATE REQUEST ==========
+
+def show_create_request():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📋 Create Maintenance Request")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    with st.form("create_request_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            title = st.text_input("Request Title *", placeholder="e.g., Leaking pipe in restroom")
+            location = st.text_input("Location *", value="Common Area", 
+                                   placeholder="e.g., Main Building, Floor 3, Room 301")
+            facility_type = st.selectbox("Facility Type *", 
+                                       ["HVAC", "Plumbing", "Electrical", "Generator", 
+                                        "Building", "Security", "Other"])
+        
+        with col2:
+            priority = st.selectbox("Priority *", ["Low", "Medium", "High", "Critical"])
+            description = st.text_area("Description *", height=100,
+                                     placeholder="Please provide detailed description of the issue...")
+        
+        submitted = st.form_submit_button("📤 Submit Request", use_container_width=True)
+        
+        if submitted:
+            if not all([title, location, facility_type, priority, description]):
+                st.error("⚠️ Please fill in all required fields (*)")
+            else:
+                with st.spinner("Submitting request..."):
+                    if create_maintenance_request(title, description, location, facility_type, 
+                                                 priority, st.session_state.user['username']):
+                        st.success("✅ Maintenance request submitted successfully!")
+                        time.sleep(2)
+                        st.session_state.navigation_menu = "Dashboard"
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to submit request")
+
+# ========== NEW FEATURE: MANAGE REQUESTS ==========
+
+def show_manage_requests():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📋 Manage Maintenance Requests")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["📋 All Requests", "✅ Approval Workflow"])
+    
+    with tab1:
+        with st.spinner("Loading requests..."):
+            all_requests = get_all_requests()
+        
+        if not all_requests:
+            st.info("📭 No maintenance requests found")
+        else:
+            # Filters
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                status_filter = st.selectbox("Filter by Status", 
+                                           ["All", "Pending", "Assigned", "In Progress", "Completed", "Approved"])
+            with col2:
+                priority_filter = st.selectbox("Filter by Priority", ["All", "Low", "Medium", "High", "Critical"])
+            with col3:
+                if st.button("🔄 Refresh", key="refresh_requests"):
+                    st.cache_data.clear()
+                    st.rerun()
+            
+            # Filter requests
+            filtered_requests = all_requests
+            if status_filter != "All":
+                filtered_requests = [r for r in filtered_requests if safe_get(r, 'status') == status_filter]
+            if priority_filter != "All":
+                filtered_requests = [r for r in filtered_requests if safe_get(r, 'priority') == priority_filter]
+            
+            st.subheader(f"📊 Found {len(filtered_requests)} request(s)")
+            
+            for req in filtered_requests[:10]:  # Limit to 10 for performance
+                with st.expander(f"Request #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write("**📋 Request Information**")
+                        st.write(f"**Title:** {safe_str(safe_get(req, 'title'))}")
+                        st.write(f"**Location:** {safe_str(safe_get(req, 'location'))}")
+                        st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
+                        st.write(f"**Priority:** {safe_str(safe_get(req, 'priority'))}")
+                        st.write(f"**Status:** {safe_str(safe_get(req, 'status'))}")
+                        st.write(f"**Created By:** {safe_str(safe_get(req, 'created_by'))}")
+                        st.write(f"**Description:** {safe_str(safe_get(req, 'description'))}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write("**🛠️ Actions**")
+                        
+                        if st.session_state.user['role'] == 'facility_manager':
+                            # Manager actions
+                            if safe_get(req, 'status') == 'Pending':
+                                if st.button("Assign Vendor", key=f"assign_{safe_get(req, 'id')}"):
+                                    # Logic to assign vendor
+                                    st.success("Vendor assignment feature coming soon!")
+                            
+                            if safe_get(req, 'status') == 'Completed' and not safe_get(req, 'facilities_manager_approval'):
+                                if st.button("✅ Approve Completion", key=f"approve_{safe_get(req, 'id')}"):
+                                    if approve_job_completion(safe_get(req, 'id')):
+                                        st.success("✅ Job completion approved!")
+                                        st.cache_data.clear()
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Failed to approve job completion")
+                        
+                        elif st.session_state.user['role'] == 'facility_user':
+                            # User actions
+                            if safe_get(req, 'status') == 'Completed' and not safe_get(req, 'requesting_dept_approval'):
+                                if st.button("✅ Approve Completion", key=f"dept_approve_{safe_get(req, 'id')}"):
+                                    # Logic for department approval
+                                    st.success("Department approval feature coming soon!")
+                        
+                        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        st.subheader("✅ Approval Workflow")
+        
+        jobs_for_approval = get_jobs_for_approval()
+        
+        if not jobs_for_approval:
+            st.info("📭 No jobs pending approval")
+        else:
+            for job in jobs_for_approval:
+                with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                        st.write(f"**Location:** {safe_str(safe_get(job, 'location'))}")
+                        st.write(f"**Assigned Vendor:** {safe_str(safe_get(job, 'assigned_vendor'))}")
+                        if safe_get(job, 'completion_notes'):
+                            st.write(f"**Completion Notes:** {safe_str(safe_get(job, 'completion_notes'))}")
+                    
+                    with col2:
+                        st.write("**Approval Status**")
+                        st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
+                        st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
+                        st.write(f"**Vendor Completion:** {'✅ Submitted' if safe_get(job, 'vendor_completion_approval') else '⏳ Pending'}")
+                        
+                        # Approval buttons for manager
+                        if st.session_state.user['role'] == 'facility_manager':
+                            if not safe_get(job, 'facilities_manager_approval'):
+                                if st.button("✅ Approve Job", key=f"final_approve_{safe_get(job, 'id')}"):
+                                    if approve_job_completion(safe_get(job, 'id')):
+                                        st.success("✅ Job approved successfully!")
+                                        st.cache_data.clear()
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Failed to approve job")
+
+# ========== NEW FEATURE: ASSIGNED JOBS ==========
+
+def show_assigned_jobs():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🛠️ Assigned Jobs")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    user = st.session_state.user
+    assigned_jobs = get_assigned_jobs(user['username'])
+    
+    if not assigned_jobs:
+        st.info("📭 No assigned jobs found")
+        return
+    
+    for job in assigned_jobs:
+        with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))} - Status: {safe_str(safe_get(job, 'status'))}"):
             col1, col2 = st.columns(2)
             
             with col1:
-                equipment_name = st.text_input("Equipment Name *", key="pm_equipment_name")
-                equipment_type = st.selectbox("Equipment Type *", 
-                                            ["HVAC", "Generator", "Fire Safety", "General"],
-                                            key="pm_equipment_type")
-                location = st.text_input("Location *", value="Common Area", key="pm_location_input")
-                maintenance_type = st.selectbox("Maintenance Type *", 
-                                              ["Routine Check", "Service", "Inspection"],
-                                              key="pm_maintenance_type")
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**📋 Job Details**")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'))}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'))}")
+                st.write(f"**Priority:** {safe_str(safe_get(job, 'priority'))}")
+                st.write(f"**Created By:** {safe_str(safe_get(job, 'created_by'))}")
+                st.write(f"**Description:** {safe_str(safe_get(job, 'description'))}")
+                st.markdown('</div>', unsafe_allow_html=True)
             
             with col2:
-                frequency = st.selectbox("Frequency *", 
-                                       ["Weekly", "Monthly", "Quarterly", "Biannual", "Annual"],
-                                       key="pm_frequency")
-                next_maintenance_date = st.date_input("Next Maintenance Date *", 
-                                                     value=datetime.now().date() + timedelta(days=30),
-                                                     key="pm_next_date")
-                assigned_to = st.text_input("Assigned To", placeholder="Name or department", key="pm_assigned_to")
-                notes = st.text_area("Notes", key="pm_notes")
-            
-            submitted = st.form_submit_button("✅ Add to Schedule", use_container_width=True, key="pm_submit")
-            
-            if submitted:
-                if not all([equipment_name, equipment_type, location, maintenance_type, frequency]):
-                    st.error("⚠️ Please fill in all required fields (*)")
-                else:
-                    if add_preventive_maintenance(equipment_name, equipment_type, location, 
-                                                 maintenance_type, frequency, 
-                                                 None,  # last_maintenance_date
-                                                 next_maintenance_date, 
-                                                 assigned_to, notes):
-                        st.success("✅ Preventive maintenance schedule added successfully!")
-                        st.cache_data.clear()
-                        st.rerun()
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**✅ Job Completion**")
+                
+                if safe_get(job, 'status') in ['Assigned', 'In Progress']:
+                    completion_notes = st.text_area("Completion Notes", 
+                                                   placeholder="Describe work completed, materials used, etc.",
+                                                   key=f"notes_{safe_get(job, 'id')}")
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.button("🔄 Mark as In Progress", key=f"progress_{safe_get(job, 'id')}"):
+                            if execute_update("UPDATE maintenance_requests SET status = 'In Progress' WHERE id = ?", 
+                                            (safe_get(job, 'id'),)):
+                                st.success("✅ Job marked as In Progress!")
+                                st.cache_data.clear()
+                                st.rerun()
+                    
+                    with col_btn2:
+                        if completion_notes and st.button("✅ Mark as Completed", key=f"complete_{safe_get(job, 'id')}"):
+                            if complete_job(safe_get(job, 'id'), completion_notes):
+                                st.success("✅ Job marked as completed! Awaiting approval.")
+                                st.cache_data.clear()
+                                st.rerun()
+                elif safe_get(job, 'status') == 'Completed':
+                    st.success("✅ Job completed and awaiting approval")
+                    if safe_get(job, 'completion_notes'):
+                        st.write(f"**Your Completion Notes:** {safe_str(safe_get(job, 'completion_notes'))}")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
 
-# ========== SPACE MANAGEMENT ==========
+# ========== NEW FEATURE: INVOICE CREATION ==========
+
+def show_invoice_creation():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🧾 Create Invoice")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    user = st.session_state.user
+    
+    # Get completed jobs by this vendor
+    completed_jobs = execute_query('''
+        SELECT * FROM maintenance_requests 
+        WHERE assigned_vendor = ? AND status = 'Completed' 
+        AND id NOT IN (SELECT request_id FROM invoices WHERE vendor_username = ?)
+        ORDER BY completed_date DESC
+    ''', (user['username'], user['username']))
+    
+    if not completed_jobs:
+        st.info("📭 No completed jobs available for invoicing")
+        return
+    
+    job_selection = st.selectbox(
+        "Select Job to Invoice",
+        options=[f"#{j['id']}: {j['title']} - {j['location']}" for j in completed_jobs],
+        key="invoice_job_select"
+    )
+    
+    if job_selection:
+        job_id = int(job_selection.split("#")[1].split(":")[0])
+        selected_job = next((j for j in completed_jobs if j['id'] == job_id), None)
+        
+        if selected_job:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.write(f"**Job:** {selected_job['title']}")
+            st.write(f"**Location:** {selected_job['location']}")
+            st.write(f"**Description:** {selected_job['description']}")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            with st.form("create_invoice_form"):
+                st.subheader("📝 Invoice Details")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    details_of_work = st.text_area("Details of Work *", 
+                                                  value=f"Completed: {selected_job['title']}",
+                                                  height=100)
+                    quantity = st.number_input("Quantity *", min_value=1, value=1, step=1)
+                    unit_cost = st.number_input("Unit Cost (₦) *", min_value=0.0, value=0.0, step=100.0)
+                
+                with col2:
+                    labour_charge = st.number_input("Labour/Service Charge (₦)", min_value=0.0, value=0.0, step=100.0)
+                    vat_applicable = st.checkbox("Apply VAT (7.5%)", value=True)
+                
+                # Calculate preview
+                amount = quantity * unit_cost
+                subtotal = amount + labour_charge
+                vat_amount = subtotal * 0.075 if vat_applicable else 0
+                total_amount = subtotal + vat_amount
+                
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**💰 Invoice Preview**")
+                st.write(f"**Amount:** {format_naira(amount)}")
+                if labour_charge > 0:
+                    st.write(f"**Labour Charge:** {format_naira(labour_charge)}")
+                st.write(f"**Subtotal:** {format_naira(subtotal)}")
+                if vat_applicable:
+                    st.write(f"**VAT (7.5%):** {format_naira(vat_amount)}")
+                st.write(f"**Total Amount:** {format_naira(total_amount)}")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                submitted = st.form_submit_button("🧾 Create Invoice", use_container_width=True)
+                
+                if submitted:
+                    if not details_of_work or unit_cost <= 0:
+                        st.error("⚠️ Please fill in all required fields (*)")
+                    else:
+                        with st.spinner("Creating invoice..."):
+                            if create_invoice(job_id, user['username'], details_of_work, quantity, 
+                                            unit_cost, labour_charge, vat_applicable):
+                                st.success("✅ Invoice created successfully!")
+                                time.sleep(2)
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to create invoice")
+
+# ========== SPACE MANAGEMENT WITH ANALYTICS ==========
 
 def show_space_management():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.title("🏢 Space Management")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["📅 View Bookings", "➕ New Booking"])
+    tab1, tab2, tab3 = st.tabs(["📅 View Bookings", "➕ New Booking", "📊 Analytics"])
     
     with tab1:
-        st.subheader("📅 Current Bookings")
-        
-        bookings = get_space_bookings()
+        with st.spinner("Loading bookings..."):
+            bookings = get_space_bookings()
         
         if not bookings:
             st.info("📭 No bookings found")
         else:
             display_data = []
-            for booking in bookings[:5]:
+            for booking in bookings[:10]:
                 display_data.append({
                     'ID': booking['id'],
                     'Room': booking['room_name'],
@@ -2248,8 +2311,6 @@ def show_space_management():
             st.dataframe(df, use_container_width=True, hide_index=True)
     
     with tab2:
-        st.subheader("➕ Book a Room")
-        
         with st.form("new_booking_form"):
             col1, col2 = st.columns(2)
             
@@ -2284,29 +2345,82 @@ def show_space_management():
                 elif end_time <= start_time:
                     st.error("❌ End time must be after start time")
                 else:
-                    if add_space_booking(room_name, room_type, booking_date, 
-                                       start_time.strftime("%H:%M"), 
-                                       end_time.strftime("%H:%M"), 
-                                       purpose, st.session_state.user['username'],
-                                       department, attendees_count, catering_required, 
-                                       special_requirements):
-                        st.success("✅ Room booked successfully!")
-                        st.cache_data.clear()
-                        st.rerun()
+                    with st.spinner("Booking room..."):
+                        if add_space_booking(room_name, room_type, booking_date, 
+                                           start_time.strftime("%H:%M"), 
+                                           end_time.strftime("%H:%M"), 
+                                           purpose, st.session_state.user['username'],
+                                           department, attendees_count, catering_required, 
+                                           special_requirements):
+                            st.success("✅ Room booked successfully!")
+                            st.cache_data.clear()
+                            time.sleep(2)
+                            st.rerun()
+    
+    with tab3:
+        st.subheader("📊 Space Management Analytics")
+        
+        with st.spinner("Loading analytics..."):
+            analytics = get_space_analytics()
+        
+        if analytics:
+            df_analytics = pd.DataFrame(analytics)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                fig = px.bar(df_analytics, x='room_type', y='total_bookings',
+                            title="📈 Bookings by Room Type",
+                            color='room_type',
+                            color_discrete_sequence=px.colors.sequential.Viridis)
+                st.plotly_chart(fig, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                fig = px.pie(df_analytics, values='total_attendees', names='room_type',
+                            title="👥 Attendees Distribution",
+                            hole=0.4)
+                st.plotly_chart(fig, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Statistics
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+            
+            total_bookings = df_analytics['total_bookings'].sum()
+            total_attendees = df_analytics['total_attendees'].sum()
+            avg_attendees = df_analytics['avg_attendees'].mean()
+            catering_requests = df_analytics['catering_requests'].sum()
+            
+            with col_stats1:
+                st.metric("Total Bookings", total_bookings)
+            with col_stats2:
+                st.metric("Total Attendees", total_attendees)
+            with col_stats3:
+                st.metric("Avg Attendees", f"{avg_attendees:.1f}")
+            with col_stats4:
+                st.metric("Catering Requests", catering_requests)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("📭 No analytics data available")
 
-# ========== HSE MANAGEMENT ==========
+# ========== HSE MANAGEMENT - OPTIMIZED ==========
 
 def show_hse_management():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.title("🚨 HSE Management")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📅 Schedule", "🚨 Incidents", "➕ New Inspection"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 Schedule", "🚨 Incidents", "➕ New Inspection", "📊 Compliance Dashboard"])
     
     with tab1:
         st.subheader("📅 HSE Inspection Schedule")
         
-        hse_schedule = get_hse_schedule()
+        with st.spinner("Loading schedule..."):
+            hse_schedule = get_hse_schedule()
         
         if not hse_schedule:
             st.info("📭 No HSE inspections scheduled")
@@ -2330,13 +2444,14 @@ def show_hse_management():
     with tab2:
         st.subheader("🚨 Incident Reports")
         
-        incidents = get_hse_incidents()
+        with st.spinner("Loading incidents..."):
+            incidents = get_hse_incidents_optimized(limit=20)
         
         if not incidents:
             st.info("📭 No incident reports found")
         else:
             display_data = []
-            for incident in incidents[:5]:
+            for incident in incidents[:10]:
                 display_data.append({
                     'ID': incident['id'],
                     'Date': incident['incident_date'],
@@ -2377,10 +2492,63 @@ def show_hse_management():
                 if not all([inspection_type, area, frequency, next_inspection_date, assigned_to]):
                     st.error("⚠️ Please fill in all required fields (*)")
                 else:
-                    if add_hse_schedule(inspection_type, area, frequency, next_inspection_date, assigned_to):
-                        st.success("✅ Inspection scheduled successfully!")
-                        st.cache_data.clear()
-                        st.rerun()
+                    with st.spinner("Scheduling inspection..."):
+                        if add_hse_schedule(inspection_type, area, frequency, next_inspection_date, assigned_to):
+                            st.success("✅ Inspection scheduled successfully!")
+                            st.cache_data.clear()
+                            time.sleep(2)
+                            st.rerun()
+    
+    with tab4:
+        st.subheader("📊 HSE Compliance Dashboard")
+        
+        with st.spinner("Loading compliance data..."):
+            compliance_data = get_hse_compliance_dashboard()
+        
+        if compliance_data:
+            df_compliance = pd.DataFrame(compliance_data)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                fig = px.bar(df_compliance, x='inspection_type', y='compliance_rate',
+                            title="📈 Compliance Rate by Inspection Type",
+                            color='compliance_rate',
+                            color_continuous_scale='RdYlGn')
+                st.plotly_chart(fig, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                compliant_total = df_compliance['compliant_count'].sum()
+                non_compliant_total = df_compliance['non_compliant_count'].sum()
+                
+                fig = go.Figure(data=[go.Pie(labels=['Compliant', 'Non-Compliant'],
+                                           values=[compliant_total, non_compliant_total],
+                                           hole=.3,
+                                           marker_colors=['#4CAF50', '#F44336'])])
+                fig.update_layout(title_text="Overall Compliance Status")
+                st.plotly_chart(fig, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Summary statistics
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            col_stats1, col_stats2, col_stats3 = st.columns(3)
+            
+            total_inspections = df_compliance['total_inspections'].sum()
+            overall_compliance_rate = df_compliance['compliance_rate'].mean()
+            
+            with col_stats1:
+                st.metric("Total Inspections", total_inspections)
+            with col_stats2:
+                st.metric("Overall Compliance", f"{overall_compliance_rate:.1f}%")
+            with col_stats3:
+                st.metric("Non-Compliant", non_compliant_total)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("📭 No compliance data available")
 
 # ========== MAIN APP ROUTING ==========
 
@@ -2398,7 +2566,7 @@ def show_main_app():
             </h1>
             <p style="margin: 5px 0 0 0; opacity: 0.9;">
                 Welcome, <strong>{user['username']}</strong> | Role: {role.replace('_', ' ').title()} | 
-                Currency: Nigerian Naira (₦) | © 2024 Developed by Abdulahi Ibrahim
+                Currency: <strong class="currency-symbol">₦ (Nigerian Naira)</strong> | © 2024 Developed by Abdulahi Ibrahim
             </p>
         </div>
     """, unsafe_allow_html=True)
@@ -2416,7 +2584,7 @@ def show_main_app():
             <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
                 <p style="margin: 0;"><strong>Role:</strong> {role.replace('_', ' ').title()}</p>
                 {f'<p style="margin: 0;"><strong>Vendor Type:</strong> {user["vendor_type"]}</p>' if user.get('vendor_type') else ''}
-                <p style="margin: 0;"><strong>Currency:</strong> Nigerian Naira (₦)</p>
+                <p style="margin: 0;"><strong>Currency:</strong> <span class="currency-symbol">₦ (Nigerian Naira)</span></p>
             </div>
         """, unsafe_allow_html=True)
         
@@ -2424,16 +2592,21 @@ def show_main_app():
         
         # Navigation menu based on role
         if role == 'facility_user':
-            menu_options = ["Dashboard", "Generator Records", "Space Management", "HSE Management"]
+            menu_options = ["Dashboard", "Create Request", "Manage Requests", "Generator Records", 
+                          "Space Management", "HSE Management", "Job & Invoice Reports"]
         elif role == 'facility_manager':
-            menu_options = ["Dashboard", "Reports", "Job & Invoice Reports", "Preventive Maintenance",
-                          "Space Management", "Generator Records", "HSE Management"]
+            menu_options = ["Dashboard", "Manage Requests", "Reports", "Job & Invoice Reports", 
+                          "Preventive Maintenance", "Space Management", "Generator Records", 
+                          "HSE Management"]
         elif role == 'hse_officer':
             menu_options = ["Dashboard", "HSE Management"]
         elif role == 'space_manager':
             menu_options = ["Dashboard", "Space Management"]
-        else:  # vendor
-            menu_options = ["Dashboard", "Generator Records"]
+        elif role == 'vendor':
+            menu_options = ["Dashboard", "Vendor Management", "Assigned Jobs", "Invoice Creation",
+                          "Generator Records", "Job & Invoice Reports"]
+        else:
+            menu_options = ["Dashboard"]
         
         # Initialize navigation_menu in session state if not exists
         if 'navigation_menu' not in st.session_state:
@@ -2469,6 +2642,7 @@ def show_main_app():
     if selected_menu == "Dashboard":
         show_dashboard()
     elif selected_menu == "Reports":
+        from reports import show_reports
         show_reports()
     elif selected_menu == "Job & Invoice Reports":
         show_job_invoice_reports()
@@ -2480,6 +2654,16 @@ def show_main_app():
         show_generator_diesel_records()
     elif selected_menu == "HSE Management":
         show_hse_management()
+    elif selected_menu == "Vendor Management":
+        show_vendor_management()
+    elif selected_menu == "Create Request":
+        show_create_request()
+    elif selected_menu == "Manage Requests":
+        show_manage_requests()
+    elif selected_menu == "Assigned Jobs":
+        show_assigned_jobs()
+    elif selected_menu == "Invoice Creation":
+        show_invoice_creation()
 
 # ========== MAIN FUNCTION ==========
 
