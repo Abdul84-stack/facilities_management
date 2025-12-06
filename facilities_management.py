@@ -441,309 +441,356 @@ st.markdown("""
 
 # Database setup with enhanced schema
 def init_database():
-    conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
-    cursor = conn.cursor()
-    
-    # Users table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL,
-            vendor_type TEXT,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Maintenance requests table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS maintenance_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            location TEXT NOT NULL DEFAULT "Common Area",
-            facility_type TEXT NOT NULL,
-            priority TEXT NOT NULL,
-            status TEXT DEFAULT 'Pending',
-            created_by TEXT NOT NULL,
-            assigned_vendor TEXT,
-            assigned_vendor_username TEXT,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_date TIMESTAMP,
-            completion_notes TEXT,
-            job_breakdown TEXT,
-            invoice_amount REAL,
-            invoice_number TEXT,
-            requesting_dept_approval BOOLEAN DEFAULT 0,
-            facilities_manager_approval BOOLEAN DEFAULT 0
-        )
-    ''')
-    
-    # Vendors table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS vendors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            company_name TEXT NOT NULL,
-            contact_person TEXT NOT NULL,
-            email TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            vendor_type TEXT NOT NULL,
-            services_offered TEXT NOT NULL,
-            annual_turnover REAL,
-            tax_identification_number TEXT,
-            rc_number TEXT,
-            key_management_staff TEXT,
-            account_details TEXT,
-            certification TEXT,
-            address TEXT NOT NULL,
-            username TEXT NOT NULL UNIQUE,
-            registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            certificate_incorporation BLOB,
-            tax_clearance_certificate BLOB,
-            audited_financial_statement BLOB
-        )
-    ''')
-    
-    # Invoices table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS invoices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            invoice_number TEXT UNIQUE NOT NULL,
-            request_id INTEGER,
-            vendor_username TEXT NOT NULL,
-            invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            details_of_work TEXT NOT NULL,
-            quantity INTEGER NOT NULL,
-            unit_cost REAL NOT NULL,
-            amount REAL NOT NULL,
-            labour_charge REAL DEFAULT 0,
-            vat_applicable BOOLEAN DEFAULT 0,
-            vat_amount REAL DEFAULT 0,
-            total_amount REAL NOT NULL,
-            currency TEXT DEFAULT '₦',
-            status TEXT DEFAULT 'Pending',
-            FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
-        )
-    ''')
-    
-    # Space Management - Bookings table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS space_bookings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            room_name TEXT NOT NULL,
-            room_type TEXT NOT NULL,
-            booking_date DATE NOT NULL,
-            start_time TIME NOT NULL,
-            end_time TIME NOT NULL,
-            booked_by TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            attendees_count INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'Confirmed',
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Preventive Maintenance Schedule table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS preventive_maintenance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            service_code TEXT NOT NULL,
-            service_description TEXT NOT NULL,
-            category TEXT NOT NULL,
-            frequency TEXT NOT NULL,
-            last_performed DATE,
-            next_due DATE,
-            assigned_vendor TEXT,
-            assigned_vendor_username TEXT,
-            status TEXT DEFAULT 'Scheduled',
-            notes TEXT
-        )
-    ''')
-    
-    # Generator Records table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS generator_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            generator_id TEXT NOT NULL,
-            record_date DATE NOT NULL,
-            start_time TIME,
-            end_time TIME,
-            runtime_hours REAL,
-            fuel_consumed_liters REAL,
-            oil_level TEXT,
-            coolant_level TEXT,
-            battery_status TEXT,
-            load_percentage REAL,
-            issues_noted TEXT,
-            recorded_by TEXT,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # HSE Management table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hse_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            record_type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            location TEXT NOT NULL,
-            date_occurred DATE NOT NULL,
-            severity TEXT NOT NULL,
-            reported_by TEXT NOT NULL,
-            assigned_to TEXT,
-            status TEXT DEFAULT 'Open',
-            corrective_actions TEXT,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Compliance table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS compliance_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            requirement TEXT NOT NULL,
-            category TEXT NOT NULL,
-            due_date DATE NOT NULL,
-            status TEXT NOT NULL,
-            responsible_party TEXT,
-            notes TEXT,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Insert sample users including new vendors
-    sample_users = [
-        ('facility_user', '0123456', 'facility_user', None),
-        ('facility_manager', '0123456', 'facility_manager', None),
-        ('provas_vendor', '123456', 'vendor', 'AIR CONDITIONING SYSTEM'),
-        ('power_vendor', '123456', 'vendor', 'ELECTRICAL SYSTEMS INSPECTIONS'),
-        ('fire_vendor', '123456', 'vendor', 'FIRE FIGHTING AND ALARM SYSTEMS'),
-        ('env_vendor', '123456', 'vendor', 'ENVIRONMENTAL / CLEANING CARE'),
-        ('water_vendor', '123456', 'vendor', 'WATER SYSTEM MAINTENANCE'),
-        ('generator_vendor', '123456', 'vendor', 'GENERATOR MAINTENANCE AND REPAIRS')
-    ]
-    
-    for username, password, role, vendor_type in sample_users:
-        try:
-            cursor.execute(
-                'INSERT OR IGNORE INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
-                (username, password, role, vendor_type)
+    try:
+        conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # Users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                vendor_type TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        except sqlite3.IntegrityError:
-            pass
-    
-    # Insert sample vendors
-    sample_vendors = [
-        ('provas_vendor', 'Provas Limited', 'John HVAC', 'provas@example.com', '080-1234-5678', 'AIR CONDITIONING SYSTEM', 
-         'HVAC installation, maintenance and repair services', 50000000.00, 'TIN123456', 'RC789012',
-         'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: Zenith Bank, Acc: 1234567890', 
-         'HVAC Certified', '123 HVAC Street, Lagos'),
-        ('power_vendor', 'Power Solutions Ltd', 'Mike Power', 'power@example.com', '080-2345-6789', 'ELECTRICAL SYSTEMS INSPECTIONS',
-         'Electrical systems inspection and maintenance', 30000000.00, 'TIN123457', 'RC789013',
-         'Mike Johnson (Director)', 'Bank: First Bank, Acc: 9876543210', 
-         'Electrical Engineer Certified', '456 Power Ave, Abuja'),
-        ('fire_vendor', 'Fire Safety Limited', 'Sarah Fire', 'fire@example.com', '080-3456-7890', 'FIRE FIGHTING AND ALARM SYSTEMS',
-         'Fire fighting equipment and alarm systems maintenance', 25000000.00, 'TIN123458', 'RC789014',
-         'Sarah Wilson (Owner)', 'Bank: GTBank, Acc: 4561237890', 
-         'Fire Safety Expert', '789 Fire Road, Port Harcourt'),
-        ('env_vendor', 'Environmental Solutions Ltd', 'David Clean', 'env@example.com', '080-4567-8901', 'ENVIRONMENTAL / CLEANING CARE',
-         'Environmental cleaning and pest control', 40000000.00, 'TIN123459', 'RC789015',
-         'David Brown (Manager)', 'Bank: Access Bank, Acc: 7894561230', 
-         'Environmental Certified', '321 Cleaners Lane, Kano'),
-        ('water_vendor', 'Watreatment Lab Solutions', 'Peter Water', 'water@example.com', '080-5678-9012', 'WATER SYSTEM MAINTENANCE',
-         'Water system maintenance and treatment', 35000000.00, 'TIN123460', 'RC789016',
-         'Peter Miller (Director)', 'Bank: UBA, Acc: 6543219870', 
-         'Water Treatment Expert', '654 Water Street, Ibadan'),
-        ('generator_vendor', 'Generator Limited', 'James Generator', 'generator@example.com', '080-6789-0123', 'GENERATOR MAINTENANCE AND REPAIRS',
-         'Generator maintenance and repairs', 45000000.00, 'TIN123461', 'RC789017',
-         'James Wilson (Owner)', 'Bank: Sterling Bank, Acc: 3216549870', 
-         'Generator Specialist', '987 Power Road, Benin')
-    ]
-    
-    for vendor_data in sample_vendors:
+        ''')
+        
+        # Maintenance requests table - check and add missing columns
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS maintenance_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                location TEXT NOT NULL DEFAULT "Common Area",
+                facility_type TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                status TEXT DEFAULT 'Pending',
+                created_by TEXT NOT NULL,
+                assigned_vendor TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_date TIMESTAMP,
+                completion_notes TEXT,
+                job_breakdown TEXT,
+                invoice_amount REAL,
+                invoice_number TEXT,
+                requesting_dept_approval BOOLEAN DEFAULT 0,
+                facilities_manager_approval BOOLEAN DEFAULT 0
+            )
+        ''')
+        
+        # Check if assigned_vendor_username column exists, add if not
+        cursor.execute("PRAGMA table_info(maintenance_requests)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'assigned_vendor_username' not in columns:
+            cursor.execute('ALTER TABLE maintenance_requests ADD COLUMN assigned_vendor_username TEXT')
+            print("Added assigned_vendor_username column to maintenance_requests")
+        
+        # Vendors table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vendors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name TEXT NOT NULL,
+                contact_person TEXT NOT NULL,
+                email TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                vendor_type TEXT NOT NULL,
+                services_offered TEXT NOT NULL,
+                annual_turnover REAL,
+                tax_identification_number TEXT,
+                rc_number TEXT,
+                key_management_staff TEXT,
+                account_details TEXT,
+                certification TEXT,
+                address TEXT NOT NULL,
+                username TEXT NOT NULL UNIQUE,
+                registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                certificate_incorporation BLOB,
+                tax_clearance_certificate BLOB,
+                audited_financial_statement BLOB
+            )
+        ''')
+        
+        # Invoices table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_number TEXT UNIQUE NOT NULL,
+                request_id INTEGER,
+                vendor_username TEXT NOT NULL,
+                invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                details_of_work TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_cost REAL NOT NULL,
+                amount REAL NOT NULL,
+                labour_charge REAL DEFAULT 0,
+                vat_applicable BOOLEAN DEFAULT 0,
+                vat_amount REAL DEFAULT 0,
+                total_amount REAL NOT NULL,
+                currency TEXT DEFAULT '₦',
+                status TEXT DEFAULT 'Pending',
+                FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
+            )
+        ''')
+        
+        # Space Management - Bookings table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS space_bookings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_name TEXT NOT NULL,
+                room_type TEXT NOT NULL,
+                booking_date DATE NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                booked_by TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                attendees_count INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'Confirmed',
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Preventive Maintenance Schedule table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS preventive_maintenance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service_code TEXT NOT NULL,
+                service_description TEXT NOT NULL,
+                category TEXT NOT NULL,
+                frequency TEXT NOT NULL,
+                last_performed DATE,
+                next_due DATE,
+                assigned_vendor TEXT,
+                status TEXT DEFAULT 'Scheduled',
+                notes TEXT
+            )
+        ''')
+        
+        # Check if assigned_vendor_username column exists, add if not
+        cursor.execute("PRAGMA table_info(preventive_maintenance)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'assigned_vendor_username' not in columns:
+            cursor.execute('ALTER TABLE preventive_maintenance ADD COLUMN assigned_vendor_username TEXT')
+            print("Added assigned_vendor_username column to preventive_maintenance")
+        
+        # Generator Records table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS generator_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                generator_id TEXT NOT NULL,
+                record_date DATE NOT NULL,
+                start_time TIME,
+                end_time TIME,
+                runtime_hours REAL,
+                fuel_consumed_liters REAL,
+                oil_level TEXT,
+                coolant_level TEXT,
+                battery_status TEXT,
+                load_percentage REAL,
+                issues_noted TEXT,
+                recorded_by TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # HSE Management table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS hse_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                location TEXT NOT NULL,
+                date_occurred DATE NOT NULL,
+                severity TEXT NOT NULL,
+                reported_by TEXT NOT NULL,
+                assigned_to TEXT,
+                status TEXT DEFAULT 'Open',
+                corrective_actions TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Compliance table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS compliance_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                requirement TEXT NOT NULL,
+                category TEXT NOT NULL,
+                due_date DATE NOT NULL,
+                status TEXT NOT NULL,
+                responsible_party TEXT,
+                notes TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Insert sample users including new vendors
+        sample_users = [
+            ('facility_user', '0123456', 'facility_user', None),
+            ('facility_manager', '0123456', 'facility_manager', None),
+            ('provas_vendor', '123456', 'vendor', 'AIR CONDITIONING SYSTEM'),
+            ('power_vendor', '123456', 'vendor', 'ELECTRICAL SYSTEMS INSPECTIONS'),
+            ('fire_vendor', '123456', 'vendor', 'FIRE FIGHTING AND ALARM SYSTEMS'),
+            ('env_vendor', '123456', 'vendor', 'ENVIRONMENTAL / CLEANING CARE'),
+            ('water_vendor', '123456', 'vendor', 'WATER SYSTEM MAINTENANCE'),
+            ('generator_vendor', '123456', 'vendor', 'GENERATOR MAINTENANCE AND REPAIRS')
+        ]
+        
+        for username, password, role, vendor_type in sample_users:
+            try:
+                cursor.execute(
+                    'INSERT OR IGNORE INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
+                    (username, password, role, vendor_type)
+                )
+            except sqlite3.IntegrityError as e:
+                print(f"User {username} already exists: {e}")
+                continue
+        
+        # Insert sample vendors
+        sample_vendors = [
+            ('provas_vendor', 'Provas Limited', 'John HVAC', 'provas@example.com', '080-1234-5678', 'AIR CONDITIONING SYSTEM', 
+             'HVAC installation, maintenance and repair services', 50000000.00, 'TIN123456', 'RC789012',
+             'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: Zenith Bank, Acc: 1234567890', 
+             'HVAC Certified', '123 HVAC Street, Lagos'),
+            ('power_vendor', 'Power Solutions Ltd', 'Mike Power', 'power@example.com', '080-2345-6789', 'ELECTRICAL SYSTEMS INSPECTIONS',
+             'Electrical systems inspection and maintenance', 30000000.00, 'TIN123457', 'RC789013',
+             'Mike Johnson (Director)', 'Bank: First Bank, Acc: 9876543210', 
+             'Electrical Engineer Certified', '456 Power Ave, Abuja'),
+            ('fire_vendor', 'Fire Safety Limited', 'Sarah Fire', 'fire@example.com', '080-3456-7890', 'FIRE FIGHTING AND ALARM SYSTEMS',
+             'Fire fighting equipment and alarm systems maintenance', 25000000.00, 'TIN123458', 'RC789014',
+             'Sarah Wilson (Owner)', 'Bank: GTBank, Acc: 4561237890', 
+             'Fire Safety Expert', '789 Fire Road, Port Harcourt'),
+            ('env_vendor', 'Environmental Solutions Ltd', 'David Clean', 'env@example.com', '080-4567-8901', 'ENVIRONMENTAL / CLEANING CARE',
+             'Environmental cleaning and pest control', 40000000.00, 'TIN123459', 'RC789015',
+             'David Brown (Manager)', 'Bank: Access Bank, Acc: 7894561230', 
+             'Environmental Certified', '321 Cleaners Lane, Kano'),
+            ('water_vendor', 'Watreatment Lab Solutions', 'Peter Water', 'water@example.com', '080-5678-9012', 'WATER SYSTEM MAINTENANCE',
+             'Water system maintenance and treatment', 35000000.00, 'TIN123460', 'RC789016',
+             'Peter Miller (Director)', 'Bank: UBA, Acc: 6543219870', 
+             'Water Treatment Expert', '654 Water Street, Ibadan'),
+            ('generator_vendor', 'Generator Limited', 'James Generator', 'generator@example.com', '080-6789-0123', 'GENERATOR MAINTENANCE AND REPAIRS',
+             'Generator maintenance and repairs', 45000000.00, 'TIN123461', 'RC789017',
+             'James Wilson (Owner)', 'Bank: Sterling Bank, Acc: 3216549870', 
+             'Generator Specialist', '987 Power Road, Benin')
+        ]
+        
+        for vendor_data in sample_vendors:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO vendors 
+                    (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                     annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                     account_details, certification, address) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', vendor_data)
+            except sqlite3.IntegrityError as e:
+                print(f"Vendor {vendor_data[0]} already exists: {e}")
+                continue
+        
+        # Insert sample preventive maintenance data
+        preventive_maintenance_data = [
+            # AIR CONDITIONING SYSTEM
+            ('PPM/AC/001', 'Routine Inspection of all AC units in the main block and common areas.', 'AIR CONDITIONING SYSTEM', 'MONTHLY'),
+            ('PPM/AC/002', 'Routine Servicing of all split units in the common areas', 'AIR CONDITIONING SYSTEM', 'QUARTERLY'),
+            ('PPM/AC/003', 'Routine Servicing of all standing AC Units', 'AIR CONDITIONING SYSTEM', 'QUARTERLY'),
+            ('PPM/AC/004', 'Routine Servicing of all Central air-conditioning units in the main building', 'AIR CONDITIONING SYSTEM', 'QUARTERLY'),
+            
+            # ELECTRICAL SYSTEMS INSPECTIONS
+            ('PPM/ELECT/001', 'Inspection of bulbs and lighting systems in offices and common areas / Cleaning of extractor fans', 'ELECTRICAL SYSTEMS INSPECTIONS', 'DAILY'),
+            ('PPM/ELECT/002', 'Inspection, checks and cleaning of lighting systems in the common area, stairways,service buildings and perimeter fence', 'ELECTRICAL SYSTEMS INSPECTIONS', 'MONTHLY'),
+            ('PPM/ELECT/003', 'Inspection/check performance of the generators (Connecting Hoses, Battery Status, Liquid Levels, Fuel, Lube Oil, Coolant Water, and Battery Distil Water Level, load, amperage.', 'ELECTRICAL SYSTEMS INSPECTIONS', 'WEEKLY'),
+            
+            # FIRE FIGHTING AND ALARM SYSTEMS
+            ('PPM/FIRE/001', 'Check performances of the smoke detectors,heat detectors and break glasses', 'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY'),
+            ('PPM/FIRE/002', 'Routine servicing of the fire alarm systems', 'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY'),
+            ('PPM/FIRE/003', 'Routine servicing of the fire extinguishers in the main block & common areas', 'FIRE FIGHTING AND ALARM SYSTEMS', 'BI-ANNUALLY'),
+            ('PPM/FIRE/004', 'Routine servicing of fire hose reels & equipments', 'FIRE FIGHTING AND ALARM SYSTEMS', 'BI-ANNUALLY'),
+            ('PPM/FIRE/005', 'Inspection of fire fighting equipment', 'FIRE FIGHTING AND ALARM SYSTEMS', 'WEEKLY'),
+            ('PPM/FIRE/006', 'Routine servicing of FM 200', 'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY'),
+            
+            # ENVIRONMENTAL / CLEANING CARE
+            ('PPM/CLEAN/001', 'Perform fumigation and rodent control exercise (external)', 'ENVIRONMENTAL / CLEANING CARE', 'QUARTERLY'),
+            ('PPM/CLEAN/002', 'Perform fumigation and rodent control exercise (internal)', 'ENVIRONMENTAL / CLEANING CARE', 'QUARTERLY'),
+            ('PPM/CLEAN/003', 'Daily cleaning of the premises', 'ENVIRONMENTAL / CLEANING CARE', 'DAILY'),
+            ('PPM/CLEAN/004', 'Daily cleaning of the annex building', 'ENVIRONMENTAL / CLEANING CARE', 'DAILY'),
+            ('PPM/CLEAN/005', 'Daily cleaning of the car park', 'ENVIRONMENTAL / CLEANING CARE', 'DAILY'),
+            ('PPM/CLEAN/006', 'Inspection and cleaning of the rooftop gutters / Clearing of weeds around the building', 'ENVIRONMENTAL / CLEANING CARE', 'MONTHLY'),
+            ('PPM/CLEAN/007', 'Pressure washing of granite tiles at the front of Cornation House and Stamp concrete floors at the car park basement', 'ENVIRONMENTAL / CLEANING CARE', 'ANNUALLY'),
+            
+            # WATER SYSTEM MAINTENANCE
+            ('PPM/WSM/001', 'Daily check on water pumps and submersible pumps', 'WATER SYSTEM MAINTENANCE', 'DAILY'),
+            ('PPM/WSM/002', 'Dosing of chemicals for water treatment plant', 'WATER SYSTEM MAINTENANCE', 'DAILY'),
+            ('PPM/WSM/003', 'Chemicals for water treatment plant', 'WATER SYSTEM MAINTENANCE', 'MONTHLY'),
+            ('PPM/WSM/004', 'Servicing of water pumps', 'WATER SYSTEM MAINTENANCE', 'QUARTERLY'),
+            ('PPM/WSM/005', 'Routine Servicing of Borehole', 'WATER SYSTEM MAINTENANCE', 'ANNUALLY')
+        ]
+        
+        for service_code, description, category, frequency in preventive_maintenance_data:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO preventive_maintenance 
+                    (service_code, service_description, category, frequency, status) 
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (service_code, description, category, frequency, 'Scheduled'))
+            except sqlite3.IntegrityError as e:
+                print(f"PM schedule {service_code} already exists: {e}")
+                continue
+        
+        # Check if we have any existing maintenance requests
+        cursor.execute('SELECT COUNT(*) FROM maintenance_requests')
+        count = cursor.fetchone()[0]
+        
+        # Only insert sample requests if table is empty
+        if count == 0:
+            sample_requests = [
+                ('Faulty AC in HR Office', 'AC not cooling properly in HR office', 'HR', 'HVAC (Cooling Systems)', 'High', 'Assigned', 'facility_user', 'Provas Limited', 'provas_vendor'),
+                ('Generator Maintenance Needed', 'Generator making unusual noise', 'Generator Room', 'Generator Maintenance', 'Critical', 'Assigned', 'facility_user', 'Generator Limited', 'generator_vendor'),
+                ('Electrical Fault in Admin', 'Lights flickering in admin building', 'Admin', 'ELECTRICAL SYSTEMS INSPECTIONS', 'Medium', 'Assigned', 'facility_user', 'Power Solutions Ltd', 'power_vendor'),
+                ('Fire Extinguisher Check', 'Monthly fire extinguisher inspection', 'Common Area', 'FIRE FIGHTING AND ALARM SYSTEMS', 'Low', 'Assigned', 'facility_user', 'Fire Safety Limited', 'fire_vendor'),
+                ('Cleaning Services Required', 'Deep cleaning needed in common areas', 'Common Area', 'ENVIRONMENTAL / CLEANING CARE', 'Medium', 'Assigned', 'facility_user', 'Environmental Solutions Ltd', 'env_vendor'),
+                ('Water Pump Issue', 'Water pressure low in main building', 'Water Treatment Plant', 'WATER SYSTEM MAINTENANCE', 'High', 'Assigned', 'facility_user', 'Watreatment Lab Solutions', 'water_vendor'),
+            ]
+            
+            for title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username in sample_requests:
+                try:
+                    cursor.execute('''
+                        INSERT INTO maintenance_requests 
+                        (title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username))
+                except Exception as e:
+                    print(f"Error inserting sample request: {e}")
+                    # Try without assigned_vendor_username if column doesn't exist yet
+                    try:
+                        cursor.execute('''
+                            INSERT INTO maintenance_requests 
+                            (title, description, location, facility_type, priority, status, created_by, assigned_vendor) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (title, description, location, facility_type, priority, status, created_by, assigned_vendor))
+                    except Exception as e2:
+                        print(f"Error with fallback insert: {e2}")
+        
+        conn.commit()
+        print("Database initialized successfully!")
+        
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+        st.error(f"Database initialization error: {e}")
+        # Try to create a fresh database if there's an error
         try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO vendors 
-                (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
-                 annual_turnover, tax_identification_number, rc_number, key_management_staff, 
-                 account_details, certification, address) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', vendor_data)
-        except sqlite3.IntegrityError:
+            if 'conn' in locals():
+                conn.close()
+            os.remove('facilities_management.db') if os.path.exists('facilities_management.db') else None
+            print("Created fresh database")
+        except:
             pass
-    
-    # Insert sample preventive maintenance data
-    preventive_maintenance_data = [
-        # AIR CONDITIONING SYSTEM
-        ('PPM/AC/001', 'Routine Inspection of all AC units in the main block and common areas.', 'AIR CONDITIONING SYSTEM', 'MONTHLY'),
-        ('PPM/AC/002', 'Routine Servicing of all split units in the common areas', 'AIR CONDITIONING SYSTEM', 'QUARTERLY'),
-        ('PPM/AC/003', 'Routine Servicing of all standing AC Units', 'AIR CONDITIONING SYSTEM', 'QUARTERLY'),
-        ('PPM/AC/004', 'Routine Servicing of all Central air-conditioning units in the main building', 'AIR CONDITIONING SYSTEM', 'QUARTERLY'),
-        
-        # ELECTRICAL SYSTEMS INSPECTIONS
-        ('PPM/ELECT/001', 'Inspection of bulbs and lighting systems in offices and common areas / Cleaning of extractor fans', 'ELECTRICAL SYSTEMS INSPECTIONS', 'DAILY'),
-        ('PPM/ELECT/002', 'Inspection, checks and cleaning of lighting systems in the common area, stairways,service buildings and perimeter fence', 'ELECTRICAL SYSTEMS INSPECTIONS', 'MONTHLY'),
-        ('PPM/ELECT/003', 'Inspection/check performance of the generators (Connecting Hoses, Battery Status, Liquid Levels, Fuel, Lube Oil, Coolant Water, and Battery Distil Water Level, load, amperage.', 'ELECTRICAL SYSTEMS INSPECTIONS', 'WEEKLY'),
-        
-        # FIRE FIGHTING AND ALARM SYSTEMS
-        ('PPM/FIRE/001', 'Check performances of the smoke detectors,heat detectors and break glasses', 'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY'),
-        ('PPM/FIRE/002', 'Routine servicing of the fire alarm systems', 'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY'),
-        ('PPM/FIRE/003', 'Routine servicing of the fire extinguishers in the main block & common areas', 'FIRE FIGHTING AND ALARM SYSTEMS', 'BI-ANNUALLY'),
-        ('PPM/FIRE/004', 'Routine servicing of fire hose reels & equipments', 'FIRE FIGHTING AND ALARM SYSTEMS', 'BI-ANNUALLY'),
-        ('PPM/FIRE/005', 'Inspection of fire fighting equipment', 'FIRE FIGHTING AND ALARM SYSTEMS', 'WEEKLY'),
-        ('PPM/FIRE/006', 'Routine servicing of FM 200', 'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY'),
-        
-        # ENVIRONMENTAL / CLEANING CARE
-        ('PPM/CLEAN/001', 'Perform fumigation and rodent control exercise (external)', 'ENVIRONMENTAL / CLEANING CARE', 'QUARTERLY'),
-        ('PPM/CLEAN/002', 'Perform fumigation and rodent control exercise (internal)', 'ENVIRONMENTAL / CLEANING CARE', 'QUARTERLY'),
-        ('PPM/CLEAN/003', 'Daily cleaning of the premises', 'ENVIRONMENTAL / CLEANING CARE', 'DAILY'),
-        ('PPM/CLEAN/004', 'Daily cleaning of the annex building', 'ENVIRONMENTAL / CLEANING CARE', 'DAILY'),
-        ('PPM/CLEAN/005', 'Daily cleaning of the car park', 'ENVIRONMENTAL / CLEANING CARE', 'DAILY'),
-        ('PPM/CLEAN/006', 'Inspection and cleaning of the rooftop gutters / Clearing of weeds around the building', 'ENVIRONMENTAL / CLEANING CARE', 'MONTHLY'),
-        ('PPM/CLEAN/007', 'Pressure washing of granite tiles at the front of Cornation House and Stamp concrete floors at the car park basement', 'ENVIRONMENTAL / CLEANING CARE', 'ANNUALLY'),
-        
-        # WATER SYSTEM MAINTENANCE
-        ('PPM/WSM/001', 'Daily check on water pumps and submersible pumps', 'WATER SYSTEM MAINTENANCE', 'DAILY'),
-        ('PPM/WSM/002', 'Dosing of chemicals for water treatment plant', 'WATER SYSTEM MAINTENANCE', 'DAILY'),
-        ('PPM/WSM/003', 'Chemicals for water treatment plant', 'WATER SYSTEM MAINTENANCE', 'MONTHLY'),
-        ('PPM/WSM/004', 'Servicing of water pumps', 'WATER SYSTEM MAINTENANCE', 'QUARTERLY'),
-        ('PPM/WSM/005', 'Routine Servicing of Borehole', 'WATER SYSTEM MAINTENANCE', 'ANNUALLY')
-    ]
-    
-    for service_code, description, category, frequency in preventive_maintenance_data:
-        try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO preventive_maintenance 
-                (service_code, service_description, category, frequency, status) 
-                VALUES (?, ?, ?, ?, ?)
-            ''', (service_code, description, category, frequency, 'Scheduled'))
-        except sqlite3.IntegrityError:
-            pass
-    
-    # Insert sample maintenance requests for testing
-    sample_requests = [
-        ('Faulty AC in HR Office', 'AC not cooling properly in HR office', 'HR', 'HVAC (Cooling Systems)', 'High', 'Assigned', 'facility_user', 'Provas Limited', 'provas_vendor'),
-        ('Generator Maintenance Needed', 'Generator making unusual noise', 'Generator Room', 'Generator Maintenance', 'Critical', 'Assigned', 'facility_user', 'Generator Limited', 'generator_vendor'),
-        ('Electrical Fault in Admin', 'Lights flickering in admin building', 'Admin', 'ELECTRICAL SYSTEMS INSPECTIONS', 'Medium', 'Assigned', 'facility_user', 'Power Solutions Ltd', 'power_vendor'),
-        ('Fire Extinguisher Check', 'Monthly fire extinguisher inspection', 'Common Area', 'FIRE FIGHTING AND ALARM SYSTEMS', 'Low', 'Assigned', 'facility_user', 'Fire Safety Limited', 'fire_vendor'),
-        ('Cleaning Services Required', 'Deep cleaning needed in common areas', 'Common Area', 'ENVIRONMENTAL / CLEANING CARE', 'Medium', 'Assigned', 'facility_user', 'Environmental Solutions Ltd', 'env_vendor'),
-        ('Water Pump Issue', 'Water pressure low in main building', 'Water Treatment Plant', 'WATER SYSTEM MAINTENANCE', 'High', 'Assigned', 'facility_user', 'Watreatment Lab Solutions', 'water_vendor'),
-    ]
-    
-    for title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username in sample_requests:
-        try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO maintenance_requests 
-                (title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username))
-        except sqlite3.IntegrityError:
-            pass
-    
-    conn.commit()
-    conn.close()
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 # Initialize database
 init_database()
@@ -804,10 +851,25 @@ def get_cached_all_requests():
 @st.cache_data(ttl=60)
 def get_cached_vendor_requests(vendor_username):
     """Get jobs assigned to vendor by username"""
-    return execute_query(
-        'SELECT * FROM maintenance_requests WHERE assigned_vendor_username = ? ORDER BY created_date DESC',
-        (vendor_username,)
-    )
+    # Try with new column first, fall back to old column
+    try:
+        result = execute_query(
+            'SELECT * FROM maintenance_requests WHERE assigned_vendor_username = ? ORDER BY created_date DESC',
+            (vendor_username,)
+        )
+        if not result:
+            # Fallback to checking assigned_vendor field for company name
+            vendor_info = get_vendor_by_username(vendor_username)
+            if vendor_info:
+                company_name = vendor_info.get('company_name')
+                if company_name:
+                    result = execute_query(
+                        'SELECT * FROM maintenance_requests WHERE assigned_vendor = ? ORDER BY created_date DESC',
+                        (company_name,)
+                    )
+        return result
+    except:
+        return []
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_cached_vendors():
@@ -1506,6 +1568,87 @@ def show_quick_actions(role):
                 st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
+
+# ==================== SIMPLIFIED FEATURES (for performance) ====================
+
+def show_space_management():
+    with st.spinner('Loading space management...'):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("🏢 Space Management")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.subheader("📅 Conference Room Bookings")
+        st.info("Space Management feature is available. More details coming soon!")
+
+def show_preventive_maintenance():
+    with st.spinner('Loading preventive maintenance...'):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("🔧 Preventive Maintenance")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.subheader("📅 Preventive Maintenance Schedule")
+        st.info("Preventive Maintenance feature is available. More details coming soon!")
+
+def show_generator_records():
+    with st.spinner('Loading generator records...'):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("⚡ Generator Records")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.subheader("📅 Daily Generator Records")
+        st.info("Generator Records feature is available. More details coming soon!")
+
+def show_hse_management():
+    with st.spinner('Loading HSE management...'):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("🛡️ HSE Management")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.subheader("📅 HSE Inspection Schedule")
+        st.info("HSE Management feature is available. More details coming soon!")
+
+def show_compliance_dashboard():
+    with st.spinner('Loading compliance dashboard...'):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("📊 Compliance Dashboard")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.subheader("Overall Compliance Status")
+        st.info("Compliance Dashboard feature is available. More details coming soon!")
+
+def show_management_requests():
+    with st.spinner('Loading management requests...'):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("👨‍💼 Management Requests")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.subheader("Assign & Approve Jobs")
+        st.info("Management Requests feature is available. More details coming soon!")
+
+def show_assigned_preventive_maintenance():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🔧 Assigned Preventive Maintenance")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.subheader("Your Preventive Maintenance Tasks")
+    st.info("Assigned Preventive Maintenance feature is available. More details coming soon!")
+
+def show_vendor_login_info():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🔐 Vendor Login Information")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    vendor_credentials = [
+        {"SERVICE": "AIR CONDITIONING SYSTEM", "VENDOR": "Provas Limited", "USERNAME": "provas_vendor", "PASSWORD": "123456"},
+        {"SERVICE": "ELECTRICAL SYSTEMS INSPECTIONS", "VENDOR": "Power Solutions Ltd", "USERNAME": "power_vendor", "PASSWORD": "123456"},
+        {"SERVICE": "FIRE FIGHTING AND ALARM SYSTEMS", "VENDOR": "Fire Safety Limited", "USERNAME": "fire_vendor", "PASSWORD": "123456"},
+        {"SERVICE": "ENVIRONMENTAL / CLEANING CARE", "VENDOR": "Environmental Solutions Ltd", "USERNAME": "env_vendor", "PASSWORD": "123456"},
+        {"SERVICE": "WATER SYSTEM MAINTENANCE", "VENDOR": "Watreatment Lab Solutions", "USERNAME": "water_vendor", "PASSWORD": "123456"},
+        {"SERVICE": "GENERATOR MAINTENANCE AND REPAIRS", "VENDOR": "Generator Limited", "USERNAME": "generator_vendor", "PASSWORD": "123456"}
+    ]
+    
+    df = pd.DataFrame(vendor_credentials)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==================== MAIN APP FUNCTION ====================
 
