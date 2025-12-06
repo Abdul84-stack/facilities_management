@@ -697,12 +697,12 @@ def show_login():
         with st.form("login_form", clear_on_submit=True):
             st.markdown('<h3 style="color: white;">🔐 User Login</h3>', unsafe_allow_html=True)
             
-            username = st.text_input("👤 Username", placeholder="Enter your username")
-            password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
+            username = st.text_input("👤 Username", placeholder="Enter your username", key="login_username")
+            password = st.text_input("🔑 Password", type="password", placeholder="Enter your password", key="login_password")
             
             login_col1, login_col2, login_col3 = st.columns([1, 2, 1])
             with login_col2:
-                login_button = st.form_submit_button("🚀 Login", use_container_width=True)
+                login_button = st.form_submit_button("🚀 Login", use_container_width=True, key="login_button")
             
             if login_button:
                 if username and password:
@@ -761,44 +761,88 @@ def show_quick_actions(role):
     if role == 'facility_user':
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("📝 Create Request", use_container_width=True):
+            if st.button("📝 Create Request", use_container_width=True, key="quick_create_request"):
                 st.session_state.selected_menu = "Create Request"
                 st.rerun()
         with col2:
-            if st.button("📋 My Requests", use_container_width=True):
+            if st.button("📋 My Requests", use_container_width=True, key="quick_my_requests"):
                 st.session_state.selected_menu = "My Requests"
                 st.rerun()
         with col3:
-            if st.button("🏢 Space Management", use_container_width=True):
+            if st.button("🏢 Space Management", use_container_width=True, key="quick_space_management"):
                 st.session_state.selected_menu = "Space Management"
                 st.rerun()
+                
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔧 Preventive Maintenance", use_container_width=True, key="quick_preventive_maintenance"):
+                st.session_state.selected_menu = "Preventive Maintenance"
+                st.rerun()
+        with col2:
+            if st.button("⚡ Generator Records", use_container_width=True, key="quick_generator_records"):
+                st.session_state.selected_menu = "Generator Records"
+                st.rerun()
+        with col3:
+            if st.button("🛡️ HSE Management", use_container_width=True, key="quick_hse_management"):
+                st.session_state.selected_menu = "HSE Management"
+                st.rerun()
+                
     elif role == 'facility_manager':
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🛠️ Manage Requests", use_container_width=True):
+            if st.button("🛠️ Manage Requests", use_container_width=True, key="quick_manage_requests"):
                 st.session_state.selected_menu = "Manage Requests"
                 st.rerun()
         with col2:
-            if st.button("👨‍💼 Management", use_container_width=True):
+            if st.button("👨‍💼 Management", use_container_width=True, key="quick_management"):
                 st.session_state.selected_menu = "Management Requests"
                 st.rerun()
         with col3:
-            if st.button("👥 Vendors", use_container_width=True):
+            if st.button("👥 Vendors", use_container_width=True, key="quick_vendors"):
                 st.session_state.selected_menu = "Vendor Management"
                 st.rerun()
+                
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🏢 Space Management", use_container_width=True, key="quick_space_mgr"):
+                st.session_state.selected_menu = "Space Management"
+                st.rerun()
+        with col2:
+            if st.button("📊 Reports", use_container_width=True, key="quick_reports"):
+                st.session_state.selected_menu = "Reports"
+                st.rerun()
+        with col3:
+            if st.button("🧾 Job & Invoice", use_container_width=True, key="quick_job_invoice"):
+                st.session_state.selected_menu = "Job & Invoice Reports"
+                st.rerun()
+                
     else:  # Vendor
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🔧 Assigned Jobs", use_container_width=True):
+            if st.button("🔧 Assigned Jobs", use_container_width=True, key="quick_assigned_jobs"):
                 st.session_state.selected_menu = "Assigned Jobs"
                 st.rerun()
         with col2:
-            if st.button("✅ Completed Jobs", use_container_width=True):
+            if st.button("✅ Completed Jobs", use_container_width=True, key="quick_completed_jobs"):
                 st.session_state.selected_menu = "Completed Jobs"
                 st.rerun()
         with col3:
-            if st.button("🧾 Create Invoice", use_container_width=True):
+            if st.button("🧾 Create Invoice", use_container_width=True, key="quick_create_invoice"):
                 st.session_state.selected_menu = "Invoice Creation"
+                st.rerun()
+                
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔧 Preventive Maint", use_container_width=True, key="quick_vendor_pm"):
+                st.session_state.selected_menu = "Assigned Preventive Maintenance"
+                st.rerun()
+        with col2:
+            if st.button("🏢 Registration", use_container_width=True, key="quick_registration"):
+                st.session_state.selected_menu = "Vendor Registration"
+                st.rerun()
+        with col3:
+            if st.button("📊 Performance", use_container_width=True, key="quick_performance"):
+                st.session_state.selected_menu = "Reports"
                 st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
@@ -829,16 +873,16 @@ def show_user_dashboard():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Total Requests", len(user_requests))
+        st.metric("Total Requests", len(user_requests), key="metric_total_requests_user")
     with col2:
         pending = len([r for r in user_requests if r['status'] == 'Pending'])
-        st.metric("Pending", pending)
+        st.metric("Pending", pending, key="metric_pending_user")
     with col3:
         completed = len([r for r in user_requests if r['status'] == 'Completed'])
-        st.metric("Completed", completed)
+        st.metric("Completed", completed, key="metric_completed_user")
     with col4:
         assigned = len([r for r in user_requests if r['status'] == 'Assigned'])
-        st.metric("Assigned", assigned)
+        st.metric("Assigned", assigned, key="metric_assigned_user")
     
     show_quick_actions('facility_user')
 
@@ -848,16 +892,16 @@ def show_manager_dashboard():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Total Requests", len(all_requests))
+        st.metric("Total Requests", len(all_requests), key="metric_total_requests_mgr")
     with col2:
         pending = len([r for r in all_requests if r['status'] == 'Pending'])
-        st.metric("Pending", pending)
+        st.metric("Pending", pending, key="metric_pending_mgr")
     with col3:
         assigned = len([r for r in all_requests if r['status'] == 'Assigned'])
-        st.metric("Assigned", assigned)
+        st.metric("Assigned", assigned, key="metric_assigned_mgr")
     with col4:
         completed = len([r for r in all_requests if r['status'] == 'Completed'])
-        st.metric("Completed", completed)
+        st.metric("Completed", completed, key="metric_completed_mgr")
     
     show_quick_actions('facility_manager')
 
@@ -871,13 +915,13 @@ def show_vendor_dashboard():
     
     with col1:
         assigned = len([r for r in vendor_requests if r['status'] == 'Assigned'])
-        st.metric("Assigned Jobs", assigned)
+        st.metric("Assigned Jobs", assigned, key="metric_assigned_vendor")
     with col2:
         completed = len([r for r in vendor_requests if r['status'] == 'Completed'])
-        st.metric("Completed", completed)
+        st.metric("Completed", completed, key="metric_completed_vendor")
     with col3:
         total_invoice = sum([r.get('invoice_amount', 0) or 0 for r in vendor_requests])
-        st.metric("Total Invoice", format_naira(total_invoice))
+        st.metric("Total Invoice", format_naira(total_invoice), key="metric_invoice_vendor")
     
     show_quick_actions('vendor')
 
@@ -892,24 +936,27 @@ def show_create_request():
         col1, col2 = st.columns(2)
         
         with col1:
-            title = st.text_input("📌 Request Title", placeholder="Enter request title")
+            title = st.text_input("📌 Request Title", placeholder="Enter request title", key="create_title")
             location = st.selectbox(
                 "📍 Location",
-                ["Office 301", "Main Hallway", "Generator Room", "Common Area", "Water Treatment Plant", "Admin Building"]
+                ["Office 301", "Main Hallway", "Generator Room", "Common Area", "Water Treatment Plant", "Admin Building"],
+                key="create_location"
             )
             facility_type = st.selectbox(
                 "🏢 Facility Type",
                 ["HVAC (Cooling Systems)", "Generator Maintenance", "ELECTRICAL SYSTEMS INSPECTIONS", 
-                 "FIRE FIGHTING AND ALARM SYSTEMS", "ENVIRONMENTAL / CLEANING CARE", "WATER SYSTEM MAINTENANCE"]
+                 "FIRE FIGHTING AND ALARM SYSTEMS", "ENVIRONMENTAL / CLEANING CARE", "WATER SYSTEM MAINTENANCE"],
+                key="create_facility_type"
             )
         
         with col2:
-            priority = st.selectbox("🚨 Priority", ["Low", "Medium", "High", "Critical"])
+            priority = st.selectbox("🚨 Priority", ["Low", "Medium", "High", "Critical"], key="create_priority")
         
         description = st.text_area("📄 Description", height=100, 
-                                 placeholder="Please provide detailed description of the maintenance request...")
+                                 placeholder="Please provide detailed description of the maintenance request...",
+                                 key="create_description")
         
-        submitted = st.form_submit_button("🚀 Submit Request", use_container_width=True)
+        submitted = st.form_submit_button("🚀 Submit Request", use_container_width=True, key="submit_request_button")
         
         if submitted:
             if not all([title, description, location, facility_type, priority]):
@@ -934,7 +981,7 @@ def show_my_requests():
     )
     
     if user_requests:
-        for request in user_requests:
+        for idx, request in enumerate(user_requests):
             status_color = {
                 'Pending': '#FF9800',
                 'Assigned': '#2196F3',
@@ -980,8 +1027,8 @@ def show_manage_requests():
     all_requests = execute_query('SELECT * FROM maintenance_requests ORDER BY created_date DESC')
     
     if all_requests:
-        for request in all_requests:
-            with st.expander(f"Request #{request['id']}: {request['title']} - {request['status']}"):
+        for idx, request in enumerate(all_requests):
+            with st.expander(f"Request #{request['id']}: {request['title']} - {request['status']}", key=f"expander_{request['id']}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -997,10 +1044,9 @@ def show_manage_requests():
                         vendors = execute_query('SELECT * FROM vendors')
                         if vendors:
                             vendor_options = [f"{v['company_name']} ({v['username']})" for v in vendors]
-                            selected_vendor = st.selectbox(f"Select Vendor for Request #{request['id']}", 
-                                                          vendor_options, key=f"vendor_{request['id']}")
+                            selected_vendor = st.selectbox(f"Select Vendor", vendor_options, key=f"vendor_select_{request['id']}")
                             
-                            if st.button(f"Assign to Vendor", key=f"assign_{request['id']}"):
+                            if st.button(f"Assign to Vendor", key=f"assign_button_{request['id']}"):
                                 vendor_username = selected_vendor.split('(')[-1].rstrip(')')
                                 vendor_name = selected_vendor.split('(')[0].strip()
                                 
@@ -1028,7 +1074,7 @@ def show_space_management():
         bookings = execute_query('SELECT * FROM space_bookings ORDER BY booking_date, start_time')
         
         if bookings:
-            for booking in bookings:
+            for idx, booking in enumerate(bookings):
                 status_class = "booked" if booking['status'] == 'Confirmed' else "available"
                 card_html = f'''
                 <div class="room-card {status_class}">
@@ -1056,15 +1102,15 @@ def show_space_management():
             col1, col2 = st.columns(2)
             
             with col1:
-                room_name = st.selectbox("Room", ["Conference Room A", "Conference Room B", "Board Room"])
-                booking_date = st.date_input("Date", min_value=date.today())
-                start_time = st.time_input("Start Time")
-                attendees = st.number_input("Number of Attendees", min_value=1, max_value=50)
+                room_name = st.selectbox("Room", ["Conference Room A", "Conference Room B", "Board Room"], key="booking_room")
+                booking_date = st.date_input("Date", min_value=date.today(), key="booking_date")
+                start_time = st.time_input("Start Time", key="booking_start_time")
+                attendees = st.number_input("Number of Attendees", min_value=1, max_value=50, key="booking_attendees")
             
             with col2:
-                purpose = st.text_area("Purpose of Meeting")
+                purpose = st.text_area("Purpose of Meeting", key="booking_purpose")
             
-            if st.form_submit_button("Book Room"):
+            if st.form_submit_button("Book Room", key="book_room_button"):
                 # Check availability
                 available = execute_query('''
                     SELECT * FROM space_bookings 
@@ -1090,11 +1136,11 @@ def show_space_management():
         
         with col1:
             total_bookings = len(execute_query("SELECT * FROM space_bookings"))
-            st.metric("Total Bookings", total_bookings)
+            st.metric("Total Bookings", total_bookings, key="metric_total_bookings")
         
         with col2:
             upcoming = len(execute_query("SELECT * FROM space_bookings WHERE booking_date >= date('now')"))
-            st.metric("Upcoming Bookings", upcoming)
+            st.metric("Upcoming Bookings", upcoming, key="metric_upcoming_bookings")
         
         with col3:
             popular_room = execute_query('''
@@ -1104,7 +1150,7 @@ def show_space_management():
                 ORDER BY bookings DESC LIMIT 1
             ''')
             if popular_room:
-                st.metric("Most Popular Room", popular_room[0]['room_name'])
+                st.metric("Most Popular Room", popular_room[0]['room_name'], key="metric_popular_room")
 
 def show_preventive_maintenance():
     st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -1118,7 +1164,7 @@ def show_preventive_maintenance():
         
         schedules = execute_query('SELECT * FROM preventive_maintenance ORDER BY next_due, category')
         
-        for schedule in schedules:
+        for idx, schedule in enumerate(schedules):
             frequency_class = get_frequency_color(schedule['frequency'])
             card_html = f'''
             <div class="schedule-item">
@@ -1153,20 +1199,20 @@ def show_preventive_maintenance():
             col1, col2 = st.columns(2)
             
             with col1:
-                service_code = st.text_input("Service Code*")
-                service_description = st.text_area("Service Description*")
+                service_code = st.text_input("Service Code*", key="pm_service_code")
+                service_description = st.text_area("Service Description*", key="pm_service_description")
                 category = st.selectbox("Category*", [
                     "AIR CONDITIONING SYSTEM", "ELECTRICAL SYSTEMS INSPECTIONS", 
                     "FIRE FIGHTING AND ALARM SYSTEMS", "ENVIRONMENTAL / CLEANING CARE", 
                     "WATER SYSTEM MAINTENANCE", "GENERATOR MAINTENANCE AND REPAIRS"
-                ])
+                ], key="pm_category")
             
             with col2:
-                frequency = st.selectbox("Frequency*", ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "BI-ANNUALLY", "ANNUALLY"])
-                next_due = st.date_input("Next Due Date*")
-                assigned_vendor = st.selectbox("Assign Vendor", ["Select Vendor"] + [v['company_name'] for v in execute_query("SELECT company_name FROM vendors")])
+                frequency = st.selectbox("Frequency*", ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "BI-ANNUALLY", "ANNUALLY"], key="pm_frequency")
+                next_due = st.date_input("Next Due Date*", key="pm_next_due")
+                assigned_vendor = st.selectbox("Assign Vendor", ["Select Vendor"] + [v['company_name'] for v in execute_query("SELECT company_name FROM vendors")], key="pm_assigned_vendor")
             
-            if st.form_submit_button("Add Schedule"):
+            if st.form_submit_button("Add Schedule", key="add_schedule_button"):
                 if all([service_code, service_description, category, frequency, next_due]):
                     execute_update('''
                         INSERT INTO preventive_maintenance 
@@ -1188,14 +1234,14 @@ def show_preventive_maintenance():
         scheduled = len(execute_query("SELECT * FROM preventive_maintenance WHERE status = 'Scheduled'"))
         
         with col1:
-            st.metric("Total Schedules", total_pm)
+            st.metric("Total Schedules", total_pm, key="metric_total_pm")
         with col2:
-            st.metric("Completed", completed)
+            st.metric("Completed", completed, key="metric_completed_pm")
         with col3:
-            st.metric("Scheduled", scheduled)
+            st.metric("Scheduled", scheduled, key="metric_scheduled_pm")
         with col4:
             completion_rate = (completed / total_pm * 100) if total_pm > 0 else 0
-            st.metric("Completion Rate", f"{completion_rate:.1f}%")
+            st.metric("Completion Rate", f"{completion_rate:.1f}%", key="metric_completion_rate_pm")
 
 def show_generator_records():
     st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -1209,7 +1255,7 @@ def show_generator_records():
         
         records = execute_query('SELECT * FROM generator_records ORDER BY record_date DESC LIMIT 10')
         
-        for record in records:
+        for idx, record in enumerate(records):
             card_html = f'''
             <div class="modern-card">
                 <div style="display: flex; justify-content: space-between; align-items: start;">
@@ -1254,20 +1300,20 @@ def show_generator_records():
             col1, col2 = st.columns(2)
             
             with col1:
-                generator_id = st.selectbox("Generator", ["GEN-001", "GEN-002", "GEN-003"])
-                generator_name = st.text_input("Generator Name", value="Main Generator")
-                record_date = st.date_input("Record Date", value=date.today())
-                runtime_hours = st.number_input("Runtime Hours", min_value=0.0, step=0.1, value=8.0)
-                fuel_consumed = st.number_input("Fuel Consumed (Liters)", min_value=0.0, step=0.1, value=80.0)
+                generator_id = st.selectbox("Generator", ["GEN-001", "GEN-002", "GEN-003"], key="gen_generator_id")
+                generator_name = st.text_input("Generator Name", value="Main Generator", key="gen_generator_name")
+                record_date = st.date_input("Record Date", value=date.today(), key="gen_record_date")
+                runtime_hours = st.number_input("Runtime Hours", min_value=0.0, step=0.1, value=8.0, key="gen_runtime_hours")
+                fuel_consumed = st.number_input("Fuel Consumed (Liters)", min_value=0.0, step=0.1, value=80.0, key="gen_fuel_consumed")
             
             with col2:
-                oil_level = st.selectbox("Oil Level", ["Normal", "Low", "High", "Critical"])
-                coolant_level = st.selectbox("Coolant Level", ["Normal", "Low", "High"])
-                battery_status = st.selectbox("Battery Status", ["Good", "Fair", "Poor", "Replace"])
-                load_percentage = st.slider("Load Percentage (%)", 0, 100, 75)
-                issues_noted = st.text_area("Issues Noted")
+                oil_level = st.selectbox("Oil Level", ["Normal", "Low", "High", "Critical"], key="gen_oil_level")
+                coolant_level = st.selectbox("Coolant Level", ["Normal", "Low", "High"], key="gen_coolant_level")
+                battery_status = st.selectbox("Battery Status", ["Good", "Fair", "Poor", "Replace"], key="gen_battery_status")
+                load_percentage = st.slider("Load Percentage (%)", 0, 100, 75, key="gen_load_percentage")
+                issues_noted = st.text_area("Issues Noted", key="gen_issues_noted")
             
-            if st.form_submit_button("Save Record"):
+            if st.form_submit_button("Save Record", key="save_generator_record"):
                 execute_update('''
                     INSERT INTO generator_records 
                     (generator_id, generator_name, record_date, runtime_hours, 
@@ -1288,11 +1334,11 @@ def show_generator_records():
         total_fuel = sum([r.get('fuel_consumed_liters', 0) or 0 for r in execute_query("SELECT fuel_consumed_liters FROM generator_records")])
         
         with col1:
-            st.metric("Total Runtime", f"{total_runtime:.1f} hours")
+            st.metric("Total Runtime", f"{total_runtime:.1f} hours", key="metric_total_runtime")
         with col2:
-            st.metric("Total Fuel Used", f"{total_fuel:.1f} L")
+            st.metric("Total Fuel Used", f"{total_fuel:.1f} L", key="metric_total_fuel")
         with col3:
-            st.metric("Records Count", len(execute_query("SELECT * FROM generator_records")))
+            st.metric("Records Count", len(execute_query("SELECT * FROM generator_records")), key="metric_records_count")
 
 def show_hse_management():
     st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -1307,7 +1353,7 @@ def show_hse_management():
         inspections = execute_query('SELECT * FROM hse_inspections ORDER BY inspection_date DESC')
         
         if inspections:
-            for inspection in inspections:
+            for idx, inspection in enumerate(inspections):
                 card_html = f'''
                 <div class="schedule-item">
                     <div style="display: flex; justify-content: space-between; align-items: start;">
@@ -1331,7 +1377,7 @@ def show_hse_management():
         
         incidents = execute_query('SELECT * FROM hse_records WHERE record_type = "Incident" ORDER BY date_occurred DESC')
         
-        for incident in incidents:
+        for idx, incident in enumerate(incidents):
             severity_color = {
                 'High': '#f44336',
                 'Medium': '#FF9800',
@@ -1369,18 +1415,18 @@ def show_hse_management():
                 inspection_type = st.selectbox("Inspection Type*", [
                     "Fire Safety Inspection", "Electrical Safety Inspection", 
                     "Workplace Safety Audit", "Environmental Compliance Check"
-                ])
-                location = st.text_input("Location*", value="Main Building")
-                inspection_date = st.date_input("Inspection Date*", value=date.today())
+                ], key="hse_inspection_type")
+                location = st.text_input("Location*", value="Main Building", key="hse_location")
+                inspection_date = st.date_input("Inspection Date*", value=date.today(), key="hse_inspection_date")
             
             with col2:
-                inspector = st.text_input("Inspector Name*", value=st.session_state.user['username'])
-                status = st.selectbox("Status", ["Scheduled", "In Progress", "Completed"])
+                inspector = st.text_input("Inspector Name*", value=st.session_state.user['username'], key="hse_inspector")
+                status = st.selectbox("Status", ["Scheduled", "In Progress", "Completed"], key="hse_status")
             
-            findings = st.text_area("Findings")
-            recommendations = st.text_area("Recommendations")
+            findings = st.text_area("Findings", key="hse_findings")
+            recommendations = st.text_area("Recommendations", key="hse_recommendations")
             
-            if st.form_submit_button("Save Inspection"):
+            if st.form_submit_button("Save Inspection", key="save_hse_inspection"):
                 execute_update('''
                     INSERT INTO hse_inspections 
                     (inspection_type, location, inspection_date, inspector, findings, recommendations, status)
@@ -1403,13 +1449,13 @@ def show_compliance_dashboard():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Overall Compliance", f"{compliance_rate}%")
+        st.metric("Overall Compliance", f"{compliance_rate}%", key="metric_overall_compliance")
     with col2:
-        st.metric("Compliant", compliant)
+        st.metric("Compliant", compliant, key="metric_compliant")
     with col3:
-        st.metric("Non-Compliant", non_compliant)
+        st.metric("Non-Compliant", non_compliant, key="metric_non_compliant")
     with col4:
-        st.metric("Pending Review", pending)
+        st.metric("Pending Review", pending, key="metric_pending_review")
     
     st.subheader("Compliance by Category")
     
@@ -1443,8 +1489,8 @@ def show_management_requests():
         
         pending_requests = execute_query('SELECT * FROM maintenance_requests WHERE status = "Pending" ORDER BY priority DESC')
         
-        for request in pending_requests:
-            with st.expander(f"Request #{request['id']}: {request['title']}"):
+        for idx, request in enumerate(pending_requests):
+            with st.expander(f"Request #{request['id']}: {request['title']}", key=f"mgmt_expander_{request['id']}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -1456,9 +1502,9 @@ def show_management_requests():
                     vendors = execute_query('SELECT * FROM vendors')
                     if vendors:
                         vendor_options = [f"{v['company_name']} ({v['username']})" for v in vendors]
-                        selected_vendor = st.selectbox(f"Select Vendor", vendor_options, key=f"vendor_{request['id']}")
+                        selected_vendor = st.selectbox(f"Select Vendor", vendor_options, key=f"mgmt_vendor_{request['id']}")
                         
-                        if st.button(f"Assign to Vendor", key=f"assign_{request['id']}"):
+                        if st.button(f"Assign to Vendor", key=f"mgmt_assign_{request['id']}"):
                             vendor_username = selected_vendor.split('(')[-1].rstrip(')')
                             vendor_name = selected_vendor.split('(')[0].strip()
                             
@@ -1474,7 +1520,7 @@ def show_management_requests():
         
         completed_jobs = execute_query('SELECT * FROM maintenance_requests WHERE status = "Completed"')
         
-        for job in completed_jobs:
+        for idx, job in enumerate(completed_jobs):
             card_html = f'''
             <div class="modern-card">
                 <div style="display: flex; justify-content: space-between; align-items: start;">
@@ -1497,13 +1543,13 @@ def show_management_requests():
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button(f"✅ Approve", key=f"approve_{job['id']}"):
+                if st.button(f"✅ Approve", key=f"approve_mgmt_{job['id']}"):
                     execute_update('UPDATE maintenance_requests SET status = "Approved" WHERE id = ?', (job['id'],))
                     st.success("✅ Job approved!")
                     st.rerun()
             
             with col2:
-                if st.button(f"❌ Reject", key=f"reject_{job['id']}"):
+                if st.button(f"❌ Reject", key=f"reject_mgmt_{job['id']}"):
                     execute_update('UPDATE maintenance_requests SET status = "Revision Required" WHERE id = ?', (job['id'],))
                     st.warning("⚠️ Job rejected, revision requested")
                     st.rerun()
@@ -1522,8 +1568,8 @@ def show_assigned_preventive_maintenance():
     ''', (user['username'],))
     
     if pm_tasks:
-        for task in pm_tasks:
-            with st.expander(f"{task['service_description']} - Due: {task['next_due']}"):
+        for idx, task in enumerate(pm_tasks):
+            with st.expander(f"{task['service_description']} - Due: {task['next_due']}", key=f"pm_expander_{task['id']}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -1537,10 +1583,10 @@ def show_assigned_preventive_maintenance():
                 
                 if task['status'] != 'Completed':
                     with st.form(f"complete_pm_{task['id']}"):
-                        completion_date = st.date_input("Completion Date", value=date.today())
-                        work_performed = st.text_area("Work Performed")
+                        completion_date = st.date_input("Completion Date", value=date.today(), key=f"pm_completion_date_{task['id']}")
+                        work_performed = st.text_area("Work Performed", key=f"pm_work_performed_{task['id']}")
                         
-                        if st.form_submit_button("Mark as Completed"):
+                        if st.form_submit_button("Mark as Completed", key=f"pm_submit_{task['id']}"):
                             execute_update('''
                                 UPDATE preventive_maintenance 
                                 SET status = 'Completed', last_performed = ?, notes = ?
@@ -1572,13 +1618,13 @@ def show_job_invoice_reports():
         approved_jobs = len([j for j in jobs if j['status'] == 'Approved'])
         
         with col1:
-            st.metric("Total Jobs", len(jobs))
+            st.metric("Total Jobs", len(jobs), key="metric_total_jobs_report")
         with col2:
-            st.metric("Total Invoice Value", format_naira(total_invoice))
+            st.metric("Total Invoice Value", format_naira(total_invoice), key="metric_total_invoice_report")
         with col3:
-            st.metric("Completed Jobs", completed_jobs)
+            st.metric("Completed Jobs", completed_jobs, key="metric_completed_jobs_report")
         with col4:
-            st.metric("Approved Jobs", approved_jobs)
+            st.metric("Approved Jobs", approved_jobs, key="metric_approved_jobs_report")
         
         st.subheader("Job Details")
         
@@ -1606,8 +1652,8 @@ def show_vendor_management():
     vendors = execute_query('SELECT * FROM vendors ORDER BY company_name')
     
     if vendors:
-        for vendor in vendors:
-            with st.expander(f"{vendor['company_name']}"):
+        for idx, vendor in enumerate(vendors):
+            with st.expander(f"{vendor['company_name']}", key=f"vendor_expander_{vendor['id']}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -1636,16 +1682,16 @@ def show_reports():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Total Requests", len(all_requests))
+            st.metric("Total Requests", len(all_requests), key="metric_total_requests_report")
         with col2:
             pending = len([r for r in all_requests if r['status'] == 'Pending'])
-            st.metric("Pending", pending)
+            st.metric("Pending", pending, key="metric_pending_report")
         with col3:
             completed = len([r for r in all_requests if r['status'] == 'Completed'])
-            st.metric("Completed", completed)
+            st.metric("Completed", completed, key="metric_completed_report")
         with col4:
             total_invoice = sum([r.get('invoice_amount', 0) or 0 for r in all_requests])
-            st.metric("Total Invoice", format_naira(total_invoice))
+            st.metric("Total Invoice", format_naira(total_invoice), key="metric_total_invoice_general")
         
         # Status distribution chart
         status_counts = {}
@@ -1673,7 +1719,7 @@ def show_assigned_jobs():
     )
     
     if vendor_requests:
-        for job in vendor_requests:
+        for idx, job in enumerate(vendor_requests):
             card_html = f'''
             <div class="modern-card">
                 <div style="display: flex; justify-content: space-between; align-items: start;">
@@ -1694,7 +1740,7 @@ def show_assigned_jobs():
                 completion_notes = st.text_area("Completion Notes", key=f"notes_{job['id']}")
                 invoice_amount = st.number_input("Invoice Amount (₦)", min_value=0.0, key=f"amount_{job['id']}")
                 
-                if st.form_submit_button("Mark as Complete"):
+                if st.form_submit_button("Mark as Complete", key=f"complete_button_{job['id']}"):
                     execute_update('''
                         UPDATE maintenance_requests 
                         SET status = "Completed", completion_notes = ?, invoice_amount = ?, completed_date = ?
@@ -1763,13 +1809,13 @@ def show_vendor_registration():
         # Update form
         st.subheader("Update Vendor Information")
         with st.form("update_vendor_form"):
-            contact_person = st.text_input("Contact Person", value=vendor['contact_person'])
-            email = st.text_input("Email", value=vendor['email'])
-            phone = st.text_input("Phone", value=vendor['phone'])
-            services_offered = st.text_area("Services Offered", value=vendor['services_offered'])
-            address = st.text_area("Address", value=vendor['address'])
+            contact_person = st.text_input("Contact Person", value=vendor['contact_person'], key="update_contact")
+            email = st.text_input("Email", value=vendor['email'], key="update_email")
+            phone = st.text_input("Phone", value=vendor['phone'], key="update_phone")
+            services_offered = st.text_area("Services Offered", value=vendor['services_offered'], key="update_services")
+            address = st.text_area("Address", value=vendor['address'], key="update_address")
             
-            if st.form_submit_button("Update Information"):
+            if st.form_submit_button("Update Information", key="update_vendor_button"):
                 execute_update('''
                     UPDATE vendors SET contact_person = ?, email = ?, phone = ?, services_offered = ?, address = ?
                     WHERE username = ?
@@ -1780,14 +1826,14 @@ def show_vendor_registration():
         st.info("📝 Please complete your vendor registration details below:")
         
         with st.form("vendor_registration"):
-            company_name = st.text_input("🏢 Company Name *")
-            contact_person = st.text_input("👤 Contact Person *")
-            email = st.text_input("📧 Email *")
-            phone = st.text_input("📞 Phone *")
-            services_offered = st.text_area("🔧 Services Offered *", height=100)
-            address = st.text_area("📍 Address *", height=80)
+            company_name = st.text_input("🏢 Company Name *", key="reg_company")
+            contact_person = st.text_input("👤 Contact Person *", key="reg_contact")
+            email = st.text_input("📧 Email *", key="reg_email")
+            phone = st.text_input("📞 Phone *", key="reg_phone")
+            services_offered = st.text_area("🔧 Services Offered *", height=100, key="reg_services")
+            address = st.text_area("📍 Address *", height=80, key="reg_address")
             
-            submitted = st.form_submit_button("🚀 Register Vendor", use_container_width=True)
+            submitted = st.form_submit_button("🚀 Register Vendor", use_container_width=True, key="register_vendor_button")
             
             if submitted:
                 if not all([company_name, contact_person, email, phone, services_offered, address]):
@@ -1819,14 +1865,14 @@ def show_invoice_creation():
     
     with st.form("invoice_creation_form"):
         job_options = [f"{j['id']}: {j['title']}" for j in vendor_jobs]
-        job_id = st.selectbox("Select Job", job_options)
-        invoice_number = st.text_input("🔢 Invoice Number *", value=f"INV-{datetime.now().strftime('%Y%m%d')}-001")
-        invoice_date = st.date_input("📅 Invoice Date *", value=date.today())
-        details_of_work = st.text_area("🔧 Details of Work Done *", height=100)
-        quantity = st.number_input("📦 Quantity *", min_value=1, value=1)
-        unit_cost = st.number_input("💵 Unit Cost (₦) *", min_value=0.0, step=0.01, value=10000.00)
+        job_id = st.selectbox("Select Job", job_options, key="invoice_job_select")
+        invoice_number = st.text_input("🔢 Invoice Number *", value=f"INV-{datetime.now().strftime('%Y%m%d')}-001", key="invoice_number")
+        invoice_date = st.date_input("📅 Invoice Date *", value=date.today(), key="invoice_date")
+        details_of_work = st.text_area("🔧 Details of Work Done *", height=100, key="invoice_details")
+        quantity = st.number_input("📦 Quantity *", min_value=1, value=1, key="invoice_quantity")
+        unit_cost = st.number_input("💵 Unit Cost (₦) *", min_value=0.0, step=0.01, value=10000.00, key="invoice_unit_cost")
         
-        submitted = st.form_submit_button("📄 Create Invoice", use_container_width=True)
+        submitted = st.form_submit_button("📄 Create Invoice", use_container_width=True, key="create_invoice_button")
         
         if submitted:
             if not all([invoice_number, details_of_work]):
@@ -1926,7 +1972,7 @@ def show_main_app():
         
         st.markdown('<div style="height: 20px;"></div>', unsafe_allow_html=True)
         
-        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+        if st.button("🚪 Logout", use_container_width=True, type="secondary", key="logout_button"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
