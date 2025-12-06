@@ -2,26 +2,10 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, date, timedelta
-import calendar
-import base64
-import io
-import tempfile
-import os
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-import random
+from datetime import datetime, date
 import time
 import threading
-import numpy as np
+import os
 
 # Page configuration with enhanced UI
 st.set_page_config(
@@ -98,45 +82,6 @@ st.markdown("""
         box-shadow: 0 7px 20px rgba(76, 175, 80, 0.3);
     }
     
-    /* Quick Action Buttons - Modern Design */
-    .quick-action-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-        margin: 20px 0;
-    }
-    
-    .quick-action-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        min-height: 120px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    }
-    
-    .quick-action-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 15px 30px rgba(0,0,0,0.2);
-    }
-    
-    .quick-action-icon {
-        font-size: 32px;
-        margin-bottom: 10px;
-    }
-    
-    .quick-action-text {
-        font-size: 14px;
-        font-weight: 500;
-    }
-    
     /* Status badges - Modern */
     .status-badge {
         display: inline-block;
@@ -185,28 +130,6 @@ st.markdown("""
         background: transparent !important;
     }
     
-    /* Dashboard Metrics */
-    .metric-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        margin-bottom: 20px;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    }
-    
-    .metric-value {
-        font-size: 32px;
-        font-weight: bold;
-        margin: 10px 0;
-    }
-    
-    .metric-label {
-        font-size: 14px;
-        opacity: 0.9;
-    }
-    
     /* Table styling */
     .dataframe {
         border-radius: 10px;
@@ -228,19 +151,6 @@ st.markdown("""
     .stTextInput > div > div > input:focus {
         border-color: #4CAF50;
         box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
-    }
-    
-    .stSelectbox > div > div > div,
-    .stTextArea > div > div > textarea {
-        background-color: white;
-        border: 2px solid #e0e0e0;
-        border-radius: 10px;
-        transition: border-color 0.3s ease;
-    }
-    
-    .stSelectbox > div > div > div:hover,
-    .stTextArea > div > div > textarea:hover {
-        border-color: #4CAF50;
     }
     
     /* Conference Room Card */
@@ -292,23 +202,6 @@ st.markdown("""
     .frequency-bi-annually { background-color: #F3E5F5; color: #7B1FA2; }
     .frequency-annually { background-color: #E0F2F1; color: #00796B; }
     
-    /* Loading spinner */
-    .loading-spinner {
-        display: inline-block;
-        width: 50px;
-        height: 50px;
-        border: 5px solid #f3f3f3;
-        border-top: 5px solid #4CAF50;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin: 20px auto;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
@@ -324,34 +217,6 @@ st.markdown("""
     .stTabs [aria-selected="true"] {
         background-color: #4CAF50 !important;
         color: white !important;
-    }
-    
-    /* Progress bars */
-    .progress-container {
-        background: #e0e0e0;
-        border-radius: 10px;
-        overflow: hidden;
-        height: 10px;
-        margin: 10px 0;
-    }
-    
-    .progress-bar {
-        height: 100%;
-        background: linear-gradient(45deg, #4CAF50, #2E7D32);
-        border-radius: 10px;
-        transition: width 0.5s ease;
-    }
-    
-    /* Footer */
-    .app-footer {
-        background: linear-gradient(90deg, #1a237e, #283593);
-        color: white;
-        text-align: center;
-        padding: 15px;
-        margin-top: 40px;
-        border-radius: 10px;
-        font-size: 12px;
-        opacity: 0.9;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -556,39 +421,7 @@ def init_database():
             )
         ''')
         
-        # Compliance table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS compliance_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                requirement TEXT NOT NULL,
-                category TEXT NOT NULL,
-                due_date DATE NOT NULL,
-                status TEXT NOT NULL,
-                responsible_party TEXT,
-                notes TEXT,
-                audit_date DATE,
-                compliance_score INTEGER,
-                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Conference Rooms table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS conference_rooms (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                room_name TEXT NOT NULL UNIQUE,
-                room_type TEXT NOT NULL,
-                capacity INTEGER NOT NULL,
-                floor INTEGER,
-                building TEXT,
-                amenities TEXT,
-                hourly_rate REAL DEFAULT 0,
-                status TEXT DEFAULT 'Available',
-                image_url TEXT
-            )
-        ''')
-        
-        # Insert sample users - SIMPLIFIED without department column
+        # Insert sample users
         sample_users = [
             ('facility_user', '0123456', 'facility_user', None),
             ('facility_manager', '0123456', 'facility_manager', None),
@@ -658,9 +491,7 @@ def init_database():
             ('Conference Room B', 'Medium Conference', 15, 3, 'Main Building', 
              'TV Screen, Whiteboard, WiFi', 3000.00, 'Available', None),
             ('Board Room', 'Executive Boardroom', 12, 5, 'Executive Wing', 
-             'Smart TV, Video Conferencing, Coffee Machine, WiFi', 8000.00, 'Available', None),
-            ('Training Room', 'Training Facility', 40, 2, 'Annex Building', 
-             'Projector, Whiteboard, Sound System, WiFi', 4000.00, 'Available', None)
+             'Smart TV, Video Conferencing, Coffee Machine, WiFi', 8000.00, 'Available', None)
         ]
         
         for room_data in conference_rooms:
@@ -676,31 +507,12 @@ def init_database():
         
         # Insert sample preventive maintenance
         pm_schedules = [
-            # AIR CONDITIONING SYSTEM
             ('PPM/AC/001', 'Routine Inspection of all AC units in the main block and common areas.', 
              'AIR CONDITIONING SYSTEM', 'MONTHLY', None, '2024-12-01', 'Provas Limited', 'provas_vendor', 'Scheduled', 4, 'HVAC Certified', 'Safety Gloves, Goggles', 'Check all units'),
             ('PPM/AC/002', 'Routine Servicing of all split units in the common areas', 
              'AIR CONDITIONING SYSTEM', 'QUARTERLY', '2024-09-01', '2024-12-01', 'Provas Limited', 'provas_vendor', 'Scheduled', 8, 'HVAC Technician', 'All safety gear', 'Full service'),
-            ('PPM/AC/003', 'Routine Servicing of all standing AC Units', 
-             'AIR CONDITIONING SYSTEM', 'QUARTERLY', '2024-09-01', '2024-12-01', 'Provas Limited', 'provas_vendor', 'Scheduled', 6, 'HVAC Technician', 'Safety gear', 'Service'),
-            
-            # ELECTRICAL SYSTEMS INSPECTIONS
-            ('PPM/ELECT/001', 'Inspection of bulbs and lighting systems in offices and common areas / Cleaning of extractor fans', 
+            ('PPM/ELECT/001', 'Inspection of bulbs and lighting systems in offices and common areas', 
              'ELECTRICAL SYSTEMS INSPECTIONS', 'DAILY', '2024-11-25', '2024-11-26', 'Power Solutions Ltd', 'power_vendor', 'Completed', 2, 'Electrician', 'Insulated tools', 'Daily check'),
-            ('PPM/ELECT/002', 'Inspection, checks and cleaning of lighting systems in the common area, stairways, service buildings and perimeter fence', 
-             'ELECTRICAL SYSTEMS INSPECTIONS', 'MONTHLY', '2024-11-01', '2024-12-01', 'Power Solutions Ltd', 'power_vendor', 'Scheduled', 4, 'Electrician', 'Safety gear', 'Monthly inspection'),
-            
-            # FIRE FIGHTING AND ALARM SYSTEMS
-            ('PPM/FIRE/001', 'Check performances of the smoke detectors, heat detectors and break glasses', 
-             'FIRE FIGHTING AND ALARM SYSTEMS', 'QUARTERLY', '2024-09-01', '2024-12-01', 'Fire Safety Limited', 'fire_vendor', 'Scheduled', 6, 'Fire Safety Technician', 'Safety gear', 'Quarterly check'),
-            
-            # ENVIRONMENTAL / CLEANING CARE
-            ('PPM/CLEAN/003', 'Daily cleaning of the premises', 
-             'ENVIRONMENTAL / CLEANING CARE', 'DAILY', '2024-11-25', '2024-11-26', 'Environmental Solutions Ltd', 'env_vendor', 'Completed', 8, 'Cleaning staff', 'PPE', 'Daily cleaning'),
-            
-            # WATER SYSTEM MAINTENANCE
-            ('PPM/WSM/001', 'Daily check on water pumps and submersible pumps', 
-             'WATER SYSTEM MAINTENANCE', 'DAILY', '2024-11-25', '2024-11-26', 'Watreatment Lab Solutions', 'water_vendor', 'Completed', 1, 'Plumber', 'Safety gear', 'Daily check'),
         ]
         
         for pm_data in pm_schedules:
@@ -721,8 +533,6 @@ def init_database():
              'John Doe', 'Quarterly Business Review', 15, 'Confirmed', 'facility_manager'),
             ('Board Room', 'Executive Boardroom', '2024-12-28', '14:00', '16:00', 
              'Jane Smith', 'Executive Meeting', 8, 'Confirmed', 'facility_manager'),
-            ('Conference Room B', 'Medium Conference', '2024-12-29', '10:00', '12:00', 
-             'Mike Johnson', 'Team Workshop', 12, 'Confirmed', 'facility_manager'),
         ]
         
         for booking_data in sample_bookings:
@@ -779,23 +589,6 @@ def init_database():
                 print(f"Error inserting HSE record: {e}")
                 continue
         
-        # Insert sample HSE inspections
-        hse_inspections = [
-            ('Fire Safety', 'Main Building', '2024-12-01', 'Safety Officer', 'All fire equipment in good condition', 'Continue quarterly checks', 'Scheduled', '2024-12-31'),
-            ('Electrical Safety', 'Generator Room', '2024-12-05', 'Electrical Engineer', 'Check grounding systems', 'Update electrical panels', 'Scheduled', '2024-12-20'),
-        ]
-        
-        for inspection_data in hse_inspections:
-            try:
-                cursor.execute('''
-                    INSERT OR IGNORE INTO hse_inspections 
-                    (inspection_type, location, inspection_date, inspector, findings, recommendations, status, follow_up_date) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', inspection_data)
-            except Exception as e:
-                print(f"Error inserting HSE inspection: {e}")
-                continue
-        
         # Insert sample maintenance requests
         maintenance_requests = [
             ('AC Not Cooling', 'AC in office 301 not cooling properly', 'Office 301', 'HVAC (Cooling Systems)', 'High', 'Pending', 'facility_user', None, None, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), None, None, None, 0, None, 0, 0, 0),
@@ -819,7 +612,6 @@ def init_database():
         
     except Exception as e:
         print(f"Error initializing database: {e}")
-        st.error(f"Database initialization error: {e}")
     finally:
         if 'conn' in locals():
             conn.close()
@@ -964,45 +756,52 @@ def show_quick_actions(role):
     st.markdown("""
         <div class="modern-card">
             <h3 style="margin: 0 0 20px 0; color: #1a237e;">🚀 Quick Actions</h3>
-            <div class="quick-action-grid">
     """, unsafe_allow_html=True)
     
     if role == 'facility_user':
-        actions = [
-            ("📝", "Create Request"),
-            ("📋", "My Requests"),
-            ("🏢", "Space Management"),
-            ("🔧", "Preventive Maintenance"),
-            ("⚡", "Generator Records"),
-            ("🛡️", "HSE Management")
-        ]
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("📝 Create Request", use_container_width=True):
+                st.session_state.selected_menu = "Create Request"
+                st.rerun()
+        with col2:
+            if st.button("📋 My Requests", use_container_width=True):
+                st.session_state.selected_menu = "My Requests"
+                st.rerun()
+        with col3:
+            if st.button("🏢 Space Management", use_container_width=True):
+                st.session_state.selected_menu = "Space Management"
+                st.rerun()
     elif role == 'facility_manager':
-        actions = [
-            ("🛠️", "Manage Requests"),
-            ("👨‍💼", "Management Requests"),
-            ("👥", "Vendor Management"),
-            ("📊", "Compliance Dashboard"),
-            ("📈", "Reports"),
-            ("🧾", "Job & Invoice Reports")
-        ]
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🛠️ Manage Requests", use_container_width=True):
+                st.session_state.selected_menu = "Manage Requests"
+                st.rerun()
+        with col2:
+            if st.button("👨‍💼 Management", use_container_width=True):
+                st.session_state.selected_menu = "Management Requests"
+                st.rerun()
+        with col3:
+            if st.button("👥 Vendors", use_container_width=True):
+                st.session_state.selected_menu = "Vendor Management"
+                st.rerun()
     else:  # Vendor
-        actions = [
-            ("🔧", "Assigned Jobs"),
-            ("🔧", "Preventive Maintenance"),
-            ("✅", "Completed Jobs"),
-            ("🧾", "Create Invoice"),
-            ("🏢", "Vendor Registration"),
-            ("📊", "Performance")
-        ]
-    
-    for icon, action in actions:
-        col = st.columns(1)[0]
-        with col:
-            if st.button(f"{icon} {action.split()[0]}", use_container_width=True):
-                st.session_state.selected_menu = action
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔧 Assigned Jobs", use_container_width=True):
+                st.session_state.selected_menu = "Assigned Jobs"
+                st.rerun()
+        with col2:
+            if st.button("✅ Completed Jobs", use_container_width=True):
+                st.session_state.selected_menu = "Completed Jobs"
+                st.rerun()
+        with col3:
+            if st.button("🧾 Create Invoice", use_container_width=True):
+                st.session_state.selected_menu = "Invoice Creation"
                 st.rerun()
     
-    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ==================== DASHBOARDS ====================
 
@@ -1143,32 +942,33 @@ def show_my_requests():
                 'Approved': '#00B894'
             }.get(request['status'], '#666')
             
-            st.markdown(f'''
-                <div class="modern-card">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div>
-                            <h4 style="margin: 0 0 5px 0;">{request['title']}</h4>
-                            <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                                📍 {request['location']} | 🏢 {request['facility_type']}
-                            </p>
-                        </div>
-                        <span style="padding: 4px 12px; background: {status_color}; color: white; 
-                                border-radius: 15px; font-size: 12px; font-weight: 600;">
-                            {request['status']}
-                        </span>
+            card_html = f'''
+            <div class="modern-card">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h4 style="margin: 0 0 5px 0;">{request['title']}</h4>
+                        <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                            📍 {request['location']} | 🏢 {request['facility_type']}
+                        </p>
                     </div>
-                    <p style="margin: 10px 0;">{request['description']}</p>
-                    <div style="display: flex; gap: 20px; margin-top: 10px;">
-                        <div>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>🚨 Priority:</strong> {request['priority']}</p>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>📅 Created:</strong> {request['created_date'][:10]}</p>
-                        </div>
-                        <div>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>👥 Vendor:</strong> {request['assigned_vendor'] or 'Not Assigned'}</p>
-                        </div>
+                    <span style="padding: 4px 12px; background: {status_color}; color: white; 
+                            border-radius: 15px; font-size: 12px; font-weight: 600;">
+                        {request['status']}
+                    </span>
+                </div>
+                <p style="margin: 10px 0;">{request['description']}</p>
+                <div style="display: flex; gap: 20px; margin-top: 10px;">
+                    <div>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>🚨 Priority:</strong> {request['priority']}</p>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>📅 Created:</strong> {request['created_date'][:10]}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>👥 Vendor:</strong> {request['assigned_vendor'] or 'Not Assigned'}</p>
                     </div>
                 </div>
-            ''', unsafe_allow_html=True)
+            </div>
+            '''
+            st.markdown(card_html, unsafe_allow_html=True)
     else:
         st.info("📭 No maintenance requests found")
 
@@ -1230,21 +1030,22 @@ def show_space_management():
         if bookings:
             for booking in bookings:
                 status_class = "booked" if booking['status'] == 'Confirmed' else "available"
-                st.markdown(f'''
-                    <div class="room-card {status_class}">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div>
-                                <h4 style="margin: 0 0 10px 0;">{booking['room_name']}</h4>
-                                <p style="margin: 5px 0;"><strong>📅 Date:</strong> {booking['booking_date']}</p>
-                                <p style="margin: 5px 0;"><strong>⏰ Time:</strong> {booking['start_time']} - {booking['end_time']}</p>
-                                <p style="margin: 5px 0;"><strong>👤 Booked By:</strong> {booking['booked_by']}</p>
-                            </div>
-                            <span class="status-badge status-{booking['status'].lower()}">{booking['status']}</span>
+                card_html = f'''
+                <div class="room-card {status_class}">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <h4 style="margin: 0 0 10px 0;">{booking['room_name']}</h4>
+                            <p style="margin: 5px 0;"><strong>📅 Date:</strong> {booking['booking_date']}</p>
+                            <p style="margin: 5px 0;"><strong>⏰ Time:</strong> {booking['start_time']} - {booking['end_time']}</p>
+                            <p style="margin: 5px 0;"><strong>👤 Booked By:</strong> {booking['booked_by']}</p>
                         </div>
-                        <p style="margin: 10px 0;"><strong>🎯 Purpose:</strong> {booking['purpose']}</p>
-                        <p style="margin: 5px 0;"><strong>👥 Attendees:</strong> {booking['attendees_count']} people</p>
+                        <span class="status-badge status-{booking['status'].lower()}">{booking['status']}</span>
                     </div>
-                ''', unsafe_allow_html=True)
+                    <p style="margin: 10px 0;"><strong>🎯 Purpose:</strong> {booking['purpose']}</p>
+                    <p style="margin: 5px 0;"><strong>👥 Attendees:</strong> {booking['attendees_count']} people</p>
+                </div>
+                '''
+                st.markdown(card_html, unsafe_allow_html=True)
         else:
             st.info("No bookings found")
     
@@ -1255,7 +1056,7 @@ def show_space_management():
             col1, col2 = st.columns(2)
             
             with col1:
-                room_name = st.selectbox("Room", ["Conference Room A", "Conference Room B", "Board Room", "Training Room"])
+                room_name = st.selectbox("Room", ["Conference Room A", "Conference Room B", "Board Room"])
                 booking_date = st.date_input("Date", min_value=date.today())
                 start_time = st.time_input("Start Time")
                 attendees = st.number_input("Number of Attendees", min_value=1, max_value=50)
@@ -1319,30 +1120,31 @@ def show_preventive_maintenance():
         
         for schedule in schedules:
             frequency_class = get_frequency_color(schedule['frequency'])
-            st.markdown(f'''
-                <div class="schedule-item">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div>
-                            <h5 style="margin: 0 0 5px 0;">{schedule['service_description']}</h5>
-                            <p style="margin: 5px 0; font-size: 12px; color: #666;">Code: {schedule['service_code']}</p>
-                        </div>
-                        <span class="frequency-badge {frequency_class}">{schedule['frequency']}</span>
+            card_html = f'''
+            <div class="schedule-item">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h5 style="margin: 0 0 5px 0;">{schedule['service_description']}</h5>
+                        <p style="margin: 5px 0; font-size: 12px; color: #666;">Code: {schedule['service_code']}</p>
                     </div>
-                    <div style="display: flex; gap: 20px; margin-top: 10px;">
-                        <div>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>Category:</strong> {schedule['category']}</p>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>Last Performed:</strong> {schedule['last_performed'] or 'Never'}</p>
-                        </div>
-                        <div>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>Next Due:</strong> {schedule['next_due']}</p>
-                            <p style="margin: 3px 0; font-size: 12px;"><strong>Vendor:</strong> {schedule['assigned_vendor'] or 'Not Assigned'}</p>
-                        </div>
+                    <span class="frequency-badge {frequency_class}">{schedule['frequency']}</span>
+                </div>
+                <div style="display: flex; gap: 20px; margin-top: 10px;">
+                    <div>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>Category:</strong> {schedule['category']}</p>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>Last Performed:</strong> {schedule['last_performed'] or 'Never'}</p>
                     </div>
-                    <div style="margin-top: 10px;">
-                        <span class="status-badge status-{schedule['status'].lower().replace(' ', '-')}">{schedule['status']}</span>
+                    <div>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>Next Due:</strong> {schedule['next_due']}</p>
+                        <p style="margin: 3px 0; font-size: 12px;"><strong>Vendor:</strong> {schedule['assigned_vendor'] or 'Not Assigned'}</p>
                     </div>
                 </div>
-            ''', unsafe_allow_html=True)
+                <div style="margin-top: 10px;">
+                    <span class="status-badge status-{schedule['status'].lower().replace(' ', '-')}">{schedule['status']}</span>
+                </div>
+            </div>
+            '''
+            st.markdown(card_html, unsafe_allow_html=True)
     
     with tab2:
         st.subheader("Add New Maintenance Schedule")
@@ -1408,41 +1210,42 @@ def show_generator_records():
         records = execute_query('SELECT * FROM generator_records ORDER BY record_date DESC LIMIT 10')
         
         for record in records:
-            st.markdown(f'''
-                <div class="modern-card">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div>
-                            <h5 style="margin: 0 0 5px 0;">{record['generator_name']} ({record['generator_id']})</h5>
-                            <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                                📅 {record['record_date']} | ⏰ {record['runtime_hours']} hours runtime
-                            </p>
-                        </div>
-                        <div style="text-align: right;">
-                            <p style="margin: 0; font-weight: bold; color: #2196F3;">{record['load_percentage']}%</p>
-                            <p style="margin: 0; font-size: 12px;">Load</p>
-                        </div>
+            card_html = f'''
+            <div class="modern-card">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h5 style="margin: 0 0 5px 0;">{record['generator_name']} ({record['generator_id']})</h5>
+                        <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                            📅 {record['record_date']} | ⏰ {record['runtime_hours']} hours runtime
+                        </p>
                     </div>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px;">
-                        <div>
-                            <p style="margin: 0; font-size: 12px; color: #666;">Fuel Used</p>
-                            <p style="margin: 0; font-weight: bold;">{record['fuel_consumed_liters']}L</p>
-                        </div>
-                        <div>
-                            <p style="margin: 0; font-size: 12px; color: #666;">Voltage</p>
-                            <p style="margin: 0; font-weight: bold;">{record['voltage_output']}V</p>
-                        </div>
-                        <div>
-                            <p style="margin: 0; font-size: 12px; color: #666;">Oil Level</p>
-                            <p style="margin: 0; font-weight: bold;">{record['oil_level']}</p>
-                        </div>
-                        <div>
-                            <p style="margin: 0; font-size: 12px; color: #666;">Battery</p>
-                            <p style="margin: 0; font-weight: bold;">{record['battery_status']}</p>
-                        </div>
+                    <div style="text-align: right;">
+                        <p style="margin: 0; font-weight: bold; color: #2196F3;">{record['load_percentage']}%</p>
+                        <p style="margin: 0; font-size: 12px;">Load</p>
                     </div>
                 </div>
-            ''', unsafe_allow_html=True)
+                
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px;">
+                    <div>
+                        <p style="margin: 0; font-size: 12px; color: #666;">Fuel Used</p>
+                        <p style="margin: 0; font-weight: bold;">{record['fuel_consumed_liters']}L</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0; font-size: 12px; color: #666;">Voltage</p>
+                        <p style="margin: 0; font-weight: bold;">{record['voltage_output']}V</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0; font-size: 12px; color: #666;">Oil Level</p>
+                        <p style="margin: 0; font-weight: bold;">{record['oil_level']}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0; font-size: 12px; color: #666;">Battery</p>
+                        <p style="margin: 0; font-weight: bold;">{record['battery_status']}</p>
+                    </div>
+                </div>
+            </div>
+            '''
+            st.markdown(card_html, unsafe_allow_html=True)
     
     with tab2:
         st.subheader("Add New Generator Record")
@@ -1505,20 +1308,21 @@ def show_hse_management():
         
         if inspections:
             for inspection in inspections:
-                st.markdown(f'''
-                    <div class="schedule-item">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div>
-                                <h5 style="margin: 0 0 5px 0;">{inspection['inspection_type']}</h5>
-                                <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                                    📍 {inspection['location']} | 👤 Inspector: {inspection['inspector']}
-                                </p>
-                            </div>
-                            <span class="status-badge status-{inspection['status'].lower()}">{inspection['status']}</span>
+                card_html = f'''
+                <div class="schedule-item">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <h5 style="margin: 0 0 5px 0;">{inspection['inspection_type']}</h5>
+                            <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                                📍 {inspection['location']} | 👤 Inspector: {inspection['inspector']}
+                            </p>
                         </div>
-                        <p style="margin: 10px 0;"><strong>📅 Date:</strong> {inspection['inspection_date']}</p>
+                        <span class="status-badge status-{inspection['status'].lower()}">{inspection['status']}</span>
                     </div>
-                ''', unsafe_allow_html=True)
+                    <p style="margin: 10px 0;"><strong>📅 Date:</strong> {inspection['inspection_date']}</p>
+                </div>
+                '''
+                st.markdown(card_html, unsafe_allow_html=True)
         else:
             st.info("No HSE inspections scheduled")
     
@@ -1534,25 +1338,26 @@ def show_hse_management():
                 'Low': '#4CAF50'
             }.get(incident['severity'], '#666')
             
-            st.markdown(f'''
-                <div class="modern-card">
-                    <div style="border-left: 4px solid {severity_color}; padding-left: 15px;">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div>
-                                <h5 style="margin: 0 0 5px 0;">{incident['title']}</h5>
-                                <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                                    📅 {incident['date_occurred']} | 📍 {incident['location']}
-                                </p>
-                            </div>
-                            <span style="padding: 4px 12px; background: {severity_color}; color: white; 
-                                    border-radius: 15px; font-size: 12px; font-weight: 600;">
-                                {incident['severity']}
-                            </span>
+            card_html = f'''
+            <div class="modern-card">
+                <div style="border-left: 4px solid {severity_color}; padding-left: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div>
+                            <h5 style="margin: 0 0 5px 0;">{incident['title']}</h5>
+                            <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                                📅 {incident['date_occurred']} | 📍 {incident['location']}
+                            </p>
                         </div>
-                        <p style="margin: 10px 0;">{incident['description']}</p>
+                        <span style="padding: 4px 12px; background: {severity_color}; color: white; 
+                                border-radius: 15px; font-size: 12px; font-weight: 600;">
+                            {incident['severity']}
+                        </span>
                     </div>
+                    <p style="margin: 10px 0;">{incident['description']}</p>
                 </div>
-            ''', unsafe_allow_html=True)
+            </div>
+            '''
+            st.markdown(card_html, unsafe_allow_html=True)
     
     with tab3:
         st.subheader("New HSE Inspection")
@@ -1670,25 +1475,25 @@ def show_management_requests():
         completed_jobs = execute_query('SELECT * FROM maintenance_requests WHERE status = "Completed"')
         
         for job in completed_jobs:
-            st.markdown(f'''
-                <div class="modern-card">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div>
-                            <h5 style="margin: 0 0 5px 0;">{job['title']}</h5>
-                            <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                                Completed: {job['completed_date'] or 'N/A'}
-                            </p>
-                        </div>
-                        <span class="status-badge status-completed">COMPLETED</span>
+            card_html = f'''
+            <div class="modern-card">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h5 style="margin: 0 0 5px 0;">{job['title']}</h5>
+                        <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                            Completed: {job['completed_date'] or 'N/A'}
+                        </p>
                     </div>
-                    
-                    <div style="margin-top: 10px;">
-                        <p><strong>Completion Notes:</strong> {job['completion_notes'] or 'No notes'}</p>
-                        <p><strong>Invoice Amount:</strong> {format_naira(job['invoice_amount'])}</p>
-                    </div>
-                    
-                    <div style="margin-top: 15px;">
-            ''', unsafe_allow_html=True)
+                    <span class="status-badge status-completed">COMPLETED</span>
+                </div>
+                
+                <div style="margin-top: 10px;">
+                    <p><strong>Completion Notes:</strong> {job['completion_notes'] or 'No notes'}</p>
+                    <p><strong>Invoice Amount:</strong> {format_naira(job['invoice_amount'])}</p>
+                </div>
+            </div>
+            '''
+            st.markdown(card_html, unsafe_allow_html=True)
             
             col1, col2 = st.columns(2)
             with col1:
@@ -1702,8 +1507,6 @@ def show_management_requests():
                     execute_update('UPDATE maintenance_requests SET status = "Revision Required" WHERE id = ?', (job['id'],))
                     st.warning("⚠️ Job rejected, revision requested")
                     st.rerun()
-            
-            st.markdown('</div></div>', unsafe_allow_html=True)
 
 def show_assigned_preventive_maintenance():
     st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -1871,36 +1674,34 @@ def show_assigned_jobs():
     
     if vendor_requests:
         for job in vendor_requests:
-            st.markdown(f'''
-                <div class="modern-card">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div>
-                            <h4 style="margin: 0 0 5px 0;">{job['title']}</h4>
-                            <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                                📍 {job['location']} | 🏢 {job['facility_type']}
-                            </p>
-                        </div>
-                        <span class="status-badge status-assigned">ASSIGNED</span>
+            card_html = f'''
+            <div class="modern-card">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h4 style="margin: 0 0 5px 0;">{job['title']}</h4>
+                        <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                            📍 {job['location']} | 🏢 {job['facility_type']}
+                        </p>
                     </div>
-                    <p style="margin: 10px 0;">{job['description']}</p>
-                    
-                    <div style="margin-top: 15px;">
-                        <h5>Complete Job</h5>
-                        with st.form(f"complete_{job['id']}"):
-                            completion_notes = st.text_area("Completion Notes", key=f"notes_{job['id']}")
-                            invoice_amount = st.number_input("Invoice Amount (₦)", min_value=0.0, key=f"amount_{job['id']}")
-                            
-                            if st.form_submit_button("Mark as Complete"):
-                                execute_update('''
-                                    UPDATE maintenance_requests 
-                                    SET status = "Completed", completion_notes = ?, invoice_amount = ?, completed_date = ?
-                                    WHERE id = ?
-                                ''', (completion_notes, invoice_amount, datetime.now().strftime('%Y-%m-%d'), job['id']))
-                                st.success("✅ Job marked as complete!")
-                                st.rerun()
-                    </div>
+                    <span class="status-badge status-assigned">ASSIGNED</span>
                 </div>
-            ''', unsafe_allow_html=True)
+                <p style="margin: 10px 0;">{job['description']}</p>
+            </div>
+            '''
+            st.markdown(card_html, unsafe_allow_html=True)
+            
+            with st.form(f"complete_{job['id']}"):
+                completion_notes = st.text_area("Completion Notes", key=f"notes_{job['id']}")
+                invoice_amount = st.number_input("Invoice Amount (₦)", min_value=0.0, key=f"amount_{job['id']}")
+                
+                if st.form_submit_button("Mark as Complete"):
+                    execute_update('''
+                        UPDATE maintenance_requests 
+                        SET status = "Completed", completion_notes = ?, invoice_amount = ?, completed_date = ?
+                        WHERE id = ?
+                    ''', (completion_notes, invoice_amount, datetime.now().strftime('%Y-%m-%d'), job['id']))
+                    st.success("✅ Job marked as complete!")
+                    st.rerun()
     else:
         st.info("📭 No assigned jobs at the moment")
 
@@ -2017,7 +1818,8 @@ def show_invoice_creation():
         return
     
     with st.form("invoice_creation_form"):
-        job_id = st.selectbox("Select Job", [f"{j['id']}: {j['title']}" for j in vendor_jobs])
+        job_options = [f"{j['id']}: {j['title']}" for j in vendor_jobs]
+        job_id = st.selectbox("Select Job", job_options)
         invoice_number = st.text_input("🔢 Invoice Number *", value=f"INV-{datetime.now().strftime('%Y%m%d')}-001")
         invoice_date = st.date_input("📅 Invoice Date *", value=date.today())
         details_of_work = st.text_area("🔧 Details of Work Done *", height=100)
@@ -2063,31 +1865,33 @@ def show_main_app():
     user = st.session_state.user
     role = user['role']
     
-    st.markdown(f"""
-        <div class="header-container">
-            <h1 style="margin: 0; display: flex; align-items: center; gap: 10px;">
-                🏢 FACILITIES MANAGEMENT SYSTEM™
-                <span style="font-size: 14px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
-                    v4.0
-                </span>
-            </h1>
-            <p style="margin: 5px 0 0 0; opacity: 0.9;">
-                Welcome, <strong>{user['username']}</strong> | Role: {role.replace('_', ' ').title()}
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
+    header_html = f"""
+    <div class="header-container">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+            🏢 FACILITIES MANAGEMENT SYSTEM™
+            <span style="font-size: 14px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                v4.0
+            </span>
+        </h1>
+        <p style="margin: 5px 0 0 0; opacity: 0.9;">
+            Welcome, <strong>{user['username']}</strong> | Role: {role.replace('_', ' ').title()}
+        </p>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
     
     show_quick_actions(role)
     
     with st.sidebar:
-        st.markdown(f"""
-            <div style="text-align: center; padding: 15px; background: linear-gradient(45deg, #4CAF50, #2E7D32); 
-                     border-radius: 10px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
-                <div style="font-size: 32px; margin-bottom: 10px;">👋</div>
-                <h3 style="color: white; margin: 0;">{user['username']}</h3>
-                <p style="color: white; margin: 5px 0; font-size: 12px;">{role.replace('_', ' ').title()}</p>
-            </div>
-        """, unsafe_allow_html=True)
+        sidebar_html = f"""
+        <div style="text-align: center; padding: 15px; background: linear-gradient(45deg, #4CAF50, #2E7D32); 
+                 border-radius: 10px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);">
+            <div style="font-size: 32px; margin-bottom: 10px;">👋</div>
+            <h3 style="color: white; margin: 0;">{user['username']}</h3>
+            <p style="color: white; margin: 5px 0; font-size: 12px;">{role.replace('_', ' ').title()}</p>
+        </div>
+        """
+        st.markdown(sidebar_html, unsafe_allow_html=True)
         
         if 'selected_menu' not in st.session_state:
             st.session_state.selected_menu = "Dashboard"
