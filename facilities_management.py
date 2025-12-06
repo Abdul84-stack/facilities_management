@@ -20,6 +20,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 import random
 import time
+import threading
 
 # Page configuration with enhanced UI
 st.set_page_config(
@@ -417,6 +418,24 @@ st.markdown("""
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
+    
+    /* Job card styling */
+    .job-card {
+        background: white;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 10px 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        border-left: 5px solid #2196F3;
+    }
+    
+    .job-card.assigned {
+        border-left: 5px solid #FF9800;
+    }
+    
+    .job-card.completed {
+        border-left: 5px solid #4CAF50;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -449,6 +468,7 @@ def init_database():
             status TEXT DEFAULT 'Pending',
             created_by TEXT NOT NULL,
             assigned_vendor TEXT,
+            assigned_vendor_username TEXT,
             created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_date TIMESTAMP,
             completion_notes TEXT,
@@ -535,6 +555,7 @@ def init_database():
             last_performed DATE,
             next_due DATE,
             assigned_vendor TEXT,
+            assigned_vendor_username TEXT,
             status TEXT DEFAULT 'Scheduled',
             notes TEXT
         )
@@ -701,6 +722,26 @@ def init_database():
         except sqlite3.IntegrityError:
             pass
     
+    # Insert sample maintenance requests for testing
+    sample_requests = [
+        ('Faulty AC in HR Office', 'AC not cooling properly in HR office', 'HR', 'HVAC (Cooling Systems)', 'High', 'Assigned', 'facility_user', 'Provas Limited', 'provas_vendor'),
+        ('Generator Maintenance Needed', 'Generator making unusual noise', 'Generator Room', 'Generator Maintenance', 'Critical', 'Assigned', 'facility_user', 'Generator Limited', 'generator_vendor'),
+        ('Electrical Fault in Admin', 'Lights flickering in admin building', 'Admin', 'ELECTRICAL SYSTEMS INSPECTIONS', 'Medium', 'Assigned', 'facility_user', 'Power Solutions Ltd', 'power_vendor'),
+        ('Fire Extinguisher Check', 'Monthly fire extinguisher inspection', 'Common Area', 'FIRE FIGHTING AND ALARM SYSTEMS', 'Low', 'Assigned', 'facility_user', 'Fire Safety Limited', 'fire_vendor'),
+        ('Cleaning Services Required', 'Deep cleaning needed in common areas', 'Common Area', 'ENVIRONMENTAL / CLEANING CARE', 'Medium', 'Assigned', 'facility_user', 'Environmental Solutions Ltd', 'env_vendor'),
+        ('Water Pump Issue', 'Water pressure low in main building', 'Water Treatment Plant', 'WATER SYSTEM MAINTENANCE', 'High', 'Assigned', 'facility_user', 'Watreatment Lab Solutions', 'water_vendor'),
+    ]
+    
+    for title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username in sample_requests:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO maintenance_requests 
+                (title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (title, description, location, facility_type, priority, status, created_by, assigned_vendor, assigned_vendor_username))
+        except sqlite3.IntegrityError:
+            pass
+    
     conn.commit()
     conn.close()
 
@@ -762,8 +803,9 @@ def get_cached_all_requests():
 
 @st.cache_data(ttl=60)
 def get_cached_vendor_requests(vendor_username):
+    """Get jobs assigned to vendor by username"""
     return execute_query(
-        'SELECT * FROM maintenance_requests WHERE assigned_vendor = ? ORDER BY created_date DESC',
+        'SELECT * FROM maintenance_requests WHERE assigned_vendor_username = ? ORDER BY created_date DESC',
         (vendor_username,)
     )
 
@@ -774,6 +816,12 @@ def get_cached_vendors():
 @st.cache_data(ttl=300)
 def get_cached_preventive_maintenance():
     return execute_query('SELECT * FROM preventive_maintenance ORDER BY category, service_code')
+
+@st.cache_data(ttl=60)
+def get_vendor_by_username(username):
+    """Get vendor details by username"""
+    result = execute_query('SELECT * FROM vendors WHERE username = ?', (username,))
+    return result[0] if result else None
 
 # Helper functions
 def safe_get(data, key, default=None):
@@ -809,7 +857,7 @@ def format_naira(amount, decimal_places=2):
     except:
         return "₦0.00"
 
-# ==================== ORIGINAL FUNCTIONS THAT WERE MISSING ====================
+# ==================== ORIGINAL FUNCTIONS ====================
 
 def show_dashboard():
     with st.spinner('Loading dashboard...'):
@@ -908,6 +956,26 @@ def show_vendor_dashboard():
         st.markdown('<h4>Total Jobs</h4>', unsafe_allow_html=True)
         st.markdown(f'<h3>{len(vendor_requests)}</h3>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Show assigned jobs
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    st.subheader("🔧 Your Assigned Jobs")
+    
+    assigned_jobs = [r for r in vendor_requests if safe_get(r, 'status') == 'Assigned']
+    
+    if assigned_jobs:
+        for job in assigned_jobs[:5]:  # Show first 5
+            st.markdown(f'''
+                <div class="job-card assigned">
+                    <h4 style="margin: 0 0 10px 0;">{safe_str(safe_get(job, 'title'))}</h4>
+                    <p style="margin: 5px 0;"><strong>📍 Location:</strong> {safe_str(safe_get(job, 'location'))}</p>
+                    <p style="margin: 5px 0;"><strong>🚨 Priority:</strong> {safe_str(safe_get(job, 'priority'))}</p>
+                    <p style="margin: 5px 0;"><strong>📅 Created:</strong> {safe_str(safe_get(job, 'created_date'))[:10]}</p>
+                    <p style="margin: 5px 0;"><strong>📝 Description:</strong> {safe_str(safe_get(job, 'description'))[:100]}...</p>
+                </div>
+            ''', unsafe_allow_html=True)
+    else:
+        st.info("📭 No assigned jobs at the moment")
 
 def show_create_request():
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -979,6 +1047,7 @@ def show_my_requests():
                 'Facility': safe_str(safe_get(req, 'facility_type'), 'N/A'),
                 'Priority': safe_str(safe_get(req, 'priority'), 'N/A'),
                 'Status': safe_str(safe_get(req, 'status'), 'N/A'),
+                'Assigned To': safe_str(safe_get(req, 'assigned_vendor'), 'Not assigned'),
                 'Created': safe_str(safe_get(req, 'created_date'), 'N/A')[:10]
             })
         
@@ -1007,7 +1076,7 @@ def show_manage_requests():
         st.subheader(f"📊 Showing {len(filtered_requests)} request(s)")
         
         for request in filtered_requests[:10]:  # Limit to 10 for performance
-            with st.expander(f"Request #{safe_get(request, 'id')}: {safe_str(safe_get(request, 'title'), 'N/A')}"):
+            with st.expander(f"Request #{safe_get(request, 'id')}: {safe_str(safe_get(request, 'title'), 'N/A')} - Status: {safe_str(safe_get(request, 'status'), 'N/A')}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -1017,6 +1086,7 @@ def show_manage_requests():
                     st.write(f"**Location:** {safe_str(safe_get(request, 'location'), 'Common Area')}")
                     st.write(f"**Priority:** {safe_str(safe_get(request, 'priority'), 'N/A')}")
                     st.write(f"**Status:** {safe_str(safe_get(request, 'status'), 'N/A')}")
+                    st.write(f"**Created By:** {safe_str(safe_get(request, 'created_by'), 'N/A')}")
                 
                 with col2:
                     st.write("**🛠️ Management Actions**")
@@ -1028,17 +1098,32 @@ def show_manage_requests():
                     if st.session_state.get(f"assigning_{safe_get(request, 'id')}"):
                         facility_type = safe_str(safe_get(request, 'facility_type'))
                         vendors = get_cached_vendors()
-                        if vendors:
-                            vendor_options = [f"{vendor['company_name']}" for vendor in vendors]
+                        
+                        # Filter vendors by facility type
+                        filtered_vendors = []
+                        for vendor in vendors:
+                            vendor_type = safe_str(safe_get(vendor, 'vendor_type'))
+                            if facility_type.upper() in vendor_type.upper() or vendor_type.upper() in facility_type.upper():
+                                filtered_vendors.append(vendor)
+                        
+                        if filtered_vendors:
+                            vendor_options = [f"{vendor['company_name']} ({vendor['username']})" for vendor in filtered_vendors]
                             selected_vendor = st.selectbox("Select Vendor", vendor_options, key=f"vendor_select_{safe_get(request, 'id')}")
+                            
                             if st.button("✅ Confirm Assignment", key=f"confirm_{safe_get(request, 'id')}"):
+                                # Extract vendor username from selection
+                                vendor_username = selected_vendor.split('(')[-1].rstrip(')')
+                                vendor_name = selected_vendor.split('(')[0].strip()
+                                
                                 if execute_update(
-                                    'UPDATE maintenance_requests SET status = ?, assigned_vendor = ? WHERE id = ?',
-                                    ('Assigned', selected_vendor, safe_get(request, 'id'))
+                                    'UPDATE maintenance_requests SET status = ?, assigned_vendor = ?, assigned_vendor_username = ? WHERE id = ?',
+                                    ('Assigned', vendor_name, vendor_username, safe_get(request, 'id'))
                                 ):
-                                    st.success(f"✅ Request assigned to {selected_vendor}!")
+                                    st.success(f"✅ Request assigned to {vendor_name}!")
                                     st.cache_data.clear()
                                     st.rerun()
+                        else:
+                            st.warning(f"No vendors found for {facility_type}")
 
 def show_vendor_management():
     with st.spinner('Loading vendor data...'):
@@ -1071,6 +1156,7 @@ def show_vendor_management():
                     st.write(f"**Services Offered:** {safe_str(safe_get(vendor, 'services_offered'), 'N/A')}")
                     st.write(f"**Address:** {safe_str(safe_get(vendor, 'address'), 'N/A')}")
                     st.write(f"**Registration Date:** {safe_str(safe_get(vendor, 'registration_date'), 'N/A')}")
+                    st.write(f"**Username:** {safe_str(safe_get(vendor, 'username'), 'N/A')}")
 
 def show_reports():
     with st.spinner('Generating reports...'):
@@ -1119,32 +1205,67 @@ def show_assigned_jobs():
         assigned_jobs = [r for r in vendor_requests if safe_get(r, 'status') == 'Assigned']
         
         if not assigned_jobs:
-            st.success("🎉 No assigned jobs found - all caught up!")
+            st.info("📭 No assigned jobs at the moment")
             return
         
         st.subheader(f"📊 You have {len(assigned_jobs)} assigned job(s)")
         
-        for job in assigned_jobs[:5]:  # Limit for performance
-            with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')}"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**📍 Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
-                    st.write(f"**🏢 Facility Type:** {safe_str(safe_get(job, 'facility_type'), 'N/A')}")
-                    st.write(f"**📄 Description:** {safe_str(safe_get(job, 'description'), 'N/A')}")
-                
-                with col2:
-                    if st.button("✅ Complete Job", key=f"complete_{safe_get(job, 'id')}"):
-                        st.session_state[f"completing_{safe_get(job, 'id')}"] = True
+        for job in assigned_jobs:
+            st.markdown(f'''
+                <div class="job-card assigned">
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <div style="flex: 1;">
+                            <h4 style="margin: 0 0 10px 0;">{safe_str(safe_get(job, 'title'), 'N/A')}</h4>
+                            <p style="margin: 5px 0;"><strong>📅 Request ID:</strong> #{safe_get(job, 'id')}</p>
+                            <p style="margin: 5px 0;"><strong>📍 Location:</strong> {safe_str(safe_get(job, 'location'), 'Common Area')}</p>
+                            <p style="margin: 5px 0;"><strong>🏢 Facility Type:</strong> {safe_str(safe_get(job, 'facility_type'), 'N/A')}</p>
+                            <p style="margin: 5px 0;"><strong>🚨 Priority:</strong> {safe_str(safe_get(job, 'priority'), 'N/A')}</p>
+                            <p style="margin: 5px 0;"><strong>📅 Created:</strong> {safe_str(safe_get(job, 'created_date'), 'N/A')[:10]}</p>
+                            <p style="margin: 5px 0;"><strong>👤 Created By:</strong> {safe_str(safe_get(job, 'created_by'), 'N/A')}</p>
+                        </div>
+                        <div style="margin-left: 20px;">
+                            <span class="status-badge status-assigned">ASSIGNED</span>
+                        </div>
+                    </div>
                     
-                    if st.session_state.get(f"completing_{safe_get(job, 'id')}"):
-                        completion_notes = st.text_area("Completion Notes", key=f"notes_{safe_get(job, 'id')}")
-                        if st.button("Submit Completion", key=f"submit_{safe_get(job, 'id')}"):
+                    <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                        <p style="margin: 0 0 10px 0; font-weight: bold;">📝 Description:</p>
+                        <p style="margin: 0;">{safe_str(safe_get(job, 'description'), 'No description provided')}</p>
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            # Complete Job Form
+            with st.expander(f"✅ Complete Job #{safe_get(job, 'id')}", expanded=False):
+                with st.form(f"complete_job_{safe_get(job, 'id')}"):
+                    completion_notes = st.text_area("📝 Completion Notes", 
+                                                   placeholder="Describe what work was completed...",
+                                                   height=100)
+                    job_breakdown = st.text_area("🔧 Job Breakdown", 
+                                                placeholder="Detailed breakdown of work done...",
+                                                height=100)
+                    completion_date = st.date_input("📅 Completion Date", value=date.today())
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        invoice_amount = st.number_input("💰 Invoice Amount (₦)", min_value=0.0, step=0.01, format="%.2f")
+                    with col2:
+                        invoice_number = st.text_input("🔢 Invoice Number", placeholder="e.g., INV-001")
+                    
+                    submitted = st.form_submit_button("✅ Mark as Complete", use_container_width=True)
+                    
+                    if submitted:
+                        if not completion_notes:
+                            st.error("Please provide completion notes")
+                        else:
                             if execute_update(
-                                'UPDATE maintenance_requests SET status = ?, completion_notes = ?, completed_date = ? WHERE id = ?',
-                                ('Completed', completion_notes, datetime.now().strftime('%Y-%m-%d'), safe_get(job, 'id'))
+                                '''UPDATE maintenance_requests SET status = ?, completion_notes = ?, job_breakdown = ?, 
+                                completed_date = ?, invoice_amount = ?, invoice_number = ? WHERE id = ?''',
+                                ('Completed', completion_notes, job_breakdown, 
+                                 completion_date.strftime('%Y-%m-%d'), invoice_amount, 
+                                 invoice_number, safe_get(job, 'id'))
                             ):
-                                st.success("✅ Job completed successfully!")
+                                st.success("✅ Job marked as complete! Waiting for approval.")
                                 st.cache_data.clear()
                                 st.rerun()
 
@@ -1168,7 +1289,8 @@ def show_completed_jobs():
                 'Title': safe_str(safe_get(job, 'title'), 'N/A'),
                 'Location': safe_str(safe_get(job, 'location'), 'Common Area'),
                 'Invoice Amount': format_naira(safe_get(job, 'invoice_amount')),
-                'Status': safe_str(safe_get(job, 'status'), 'N/A')
+                'Status': safe_str(safe_get(job, 'status'), 'N/A'),
+                'Completed Date': safe_str(safe_get(job, 'completed_date'), 'N/A')[:10]
             })
         
         df = pd.DataFrame(display_data)
@@ -1242,7 +1364,7 @@ def show_invoice_creation():
         SELECT mr.* 
         FROM maintenance_requests mr
         LEFT JOIN invoices i ON mr.id = i.request_id
-        WHERE mr.assigned_vendor = ? AND mr.status = 'Completed' AND i.id IS NULL
+        WHERE mr.assigned_vendor_username = ? AND mr.status = 'Completed' AND i.id IS NULL
         ORDER BY mr.completed_date DESC
     ''', (st.session_state.user['username'],))
     
@@ -1268,11 +1390,13 @@ def show_invoice_creation():
                 if existing_invoice:
                     st.error("❌ Invoice number already exists.")
                 else:
+                    # Get the first job that needs an invoice
+                    job = vendor_jobs[0]
                     success = execute_update(
-                        '''INSERT INTO invoices (invoice_number, vendor_username, invoice_date, 
+                        '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
                         details_of_work, quantity, unit_cost, amount, total_amount, currency) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (invoice_number, st.session_state.user['username'], 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (invoice_number, job['id'], st.session_state.user['username'], 
                          invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
                          amount, amount, '₦')
                     )
@@ -1316,51 +1440,6 @@ def show_job_invoice_reports():
         
         df = pd.DataFrame(display_data)
         st.dataframe(df, use_container_width=True, hide_index=True)
-
-# PDF Generation Functions (simplified for performance)
-def generate_job_completion_invoice_report(job_data, invoice_data=None):
-    try:
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-        
-        # Add content
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(100, 750, "Job Completion & Invoice Report")
-        
-        c.setFont("Helvetica", 12)
-        c.drawString(100, 730, f"Job ID: {safe_get(job_data, 'id', 'N/A')}")
-        c.drawString(100, 710, f"Title: {safe_str(safe_get(job_data, 'title', 'N/A'))}")
-        
-        if invoice_data:
-            c.drawString(100, 690, f"Invoice Amount: {format_naira(safe_get(invoice_data, 'total_amount', 0))}")
-        
-        c.showPage()
-        c.save()
-        
-        buffer.seek(0)
-        return buffer.getvalue()
-    except:
-        return None
-
-def generate_invoice_report_pdf(invoice_data, job_data=None):
-    try:
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-        
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(100, 750, "Invoice Report")
-        
-        c.setFont("Helvetica", 12)
-        c.drawString(100, 730, f"Invoice Number: {safe_str(safe_get(invoice_data, 'invoice_number', 'N/A'))}")
-        c.drawString(100, 710, f"Amount: {format_naira(safe_get(invoice_data, 'total_amount', 0))}")
-        
-        c.showPage()
-        c.save()
-        
-        buffer.seek(0)
-        return buffer.getvalue()
-    except:
-        return None
 
 # ==================== NEW FEATURES IMPLEMENTATION ====================
 
@@ -1428,436 +1507,7 @@ def show_quick_actions(role):
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-# 2. Space Management Section
-def show_space_management():
-    with st.spinner('Loading space management...'):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.title("🏢 Space Management")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        tab1, tab2, tab3 = st.tabs(["📅 View Bookings", "➕ New Booking", "📊 Analytics"])
-        
-        with tab1:
-            show_space_bookings()
-        
-        with tab2:
-            show_new_booking()
-        
-        with tab3:
-            show_space_analytics()
-
-def show_space_bookings():
-    st.subheader("📅 Conference Room Bookings")
-    
-    # Mock data for three conference rooms
-    rooms = [
-        {
-            'name': 'Conference Room A - Executive Suite',
-            'capacity': 20,
-            'location': 'Main Building, 3rd Floor',
-            'amenities': 'Projector, Whiteboard, Video Conferencing'
-        },
-        {
-            'name': 'Conference Room B - Innovation Hub',
-            'capacity': 15,
-            'location': 'Annex Building, 2nd Floor',
-            'amenities': 'Smart TV, Sound System, Coffee Station'
-        },
-        {
-            'name': 'Conference Room C - Boardroom',
-            'capacity': 12,
-            'location': 'Main Building, 1st Floor',
-            'amenities': 'Executive Chairs, Video Wall, Conference Phone'
-        }
-    ]
-    
-    for room in rooms:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.write(f"**{room['name']}**")
-            st.write(f"📍 {room['location']}")
-            st.write(f"👥 Capacity: {room['capacity']} people")
-            st.write(f"🎯 Amenities: {room['amenities']}")
-        with col2:
-            if st.button("Book Now", key=f"book_{room['name']}"):
-                st.info(f"Booking {room['name']}...")
-
-def show_new_booking():
-    st.subheader("➕ New Space Booking")
-    
-    with st.form("new_booking_form"):
-        room_name = st.selectbox(
-            "🏢 Select Room",
-            ["Conference Room A - Executive Suite", 
-             "Conference Room B - Innovation Hub", 
-             "Conference Room C - Boardroom"]
-        )
-        booking_date = st.date_input("📅 Booking Date", min_value=date.today())
-        start_time = st.time_input("⏰ Start Time")
-        end_time = st.time_input("⏰ End Time")
-        purpose = st.text_input("🎯 Purpose of Booking")
-        
-        if st.form_submit_button("📅 Book Now", use_container_width=True):
-            st.success("✅ Room booking request submitted successfully!")
-
-def show_space_analytics():
-    st.subheader("📊 Space Utilization Analytics")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("📅 Total Bookings This Month", "42")
-        st.metric("🏢 Most Used Room", "Conference Room A")
-    with col2:
-        st.metric("⏰ Average Booking Duration", "2.5 hours")
-        st.metric("📈 Utilization Rate", "68%")
-
-# 3. Preventive Maintenance Section
-def show_preventive_maintenance():
-    with st.spinner('Loading preventive maintenance...'):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.title("🔧 Preventive Maintenance")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        tab1, tab2, tab3 = st.tabs(["📅 Schedule Overview", "➕ Add New Schedule", "📊 Analytics"])
-        
-        with tab1:
-            show_pm_schedule_overview()
-        
-        with tab2:
-            show_add_pm_schedule()
-        
-        with tab3:
-            show_pm_analytics()
-
-def show_pm_schedule_overview():
-    st.subheader("📅 Preventive Maintenance Schedule")
-    
-    pm_schedules = get_cached_preventive_maintenance()
-    
-    if pm_schedules:
-        categories = list(set([safe_get(sched, 'category') for sched in pm_schedules]))
-        
-        for category in categories[:3]:  # Limit for performance
-            category_schedules = [s for s in pm_schedules if safe_get(s, 'category') == category]
-            
-            st.markdown(f'**{category}**')
-            for schedule in category_schedules[:5]:  # Limit per category
-                st.write(f"• {safe_get(schedule, 'service_code')}: {safe_get(schedule, 'service_description')}")
-                st.write(f"  Frequency: {safe_get(schedule, 'frequency')} | Status: {safe_get(schedule, 'status')}")
-                st.markdown('---')
-    else:
-        st.info("No preventive maintenance schedules found")
-
-def show_add_pm_schedule():
-    st.subheader("➕ Add New Preventive Maintenance Schedule")
-    
-    with st.form("add_pm_schedule_form"):
-        service_code = st.text_input("🔢 Service Code (e.g., PPM/AC/005)")
-        service_description = st.text_area("📝 Service Description", height=100)
-        category = st.selectbox("🏢 Category", [
-            "AIR CONDITIONING SYSTEM",
-            "ELECTRICAL SYSTEMS INSPECTIONS",
-            "FIRE FIGHTING AND ALARM SYSTEMS",
-            "ENVIRONMENTAL / CLEANING CARE",
-            "WATER SYSTEM MAINTENANCE",
-            "GENERATOR MAINTENANCE AND REPAIRS"
-        ])
-        frequency = st.selectbox("📅 Frequency", ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "BI-ANNUALLY", "ANNUALLY"])
-        
-        if st.form_submit_button("➕ Add Schedule", use_container_width=True):
-            st.success("✅ Preventive maintenance schedule added successfully!")
-
-def show_pm_analytics():
-    st.subheader("📊 Preventive Maintenance Analytics")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("📋 Total Schedules", "28")
-        st.metric("✅ Completed This Month", "15")
-    with col2:
-        st.metric("📅 Due This Week", "8")
-        st.metric("📈 Compliance Rate", "92%")
-
-# 4. Generator Records
-def show_generator_records():
-    with st.spinner('Loading generator records...'):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.title("⚡ Generator Records")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        tab1, tab2, tab3 = st.tabs(["📅 Daily Records", "➕ New Record", "📊 Analytics"])
-        
-        with tab1:
-            show_generator_daily_records()
-        
-        with tab2:
-            show_new_generator_record()
-        
-        with tab3:
-            show_generator_analytics()
-
-def show_generator_daily_records():
-    st.subheader("📅 Daily Generator Records")
-    
-    # Mock data
-    records = [
-        {
-            'generator_id': 'GEN-001',
-            'date': date.today(),
-            'runtime_hours': 10,
-            'fuel_consumed': 250,
-            'oil_level': 'Normal',
-            'load_percentage': 75
-        },
-        {
-            'generator_id': 'GEN-002',
-            'date': date.today() - timedelta(days=1),
-            'runtime_hours': 8,
-            'fuel_consumed': 200,
-            'oil_level': 'Low',
-            'load_percentage': 60
-        }
-    ]
-    
-    for record in records:
-        st.write(f"**{record['generator_id']}** - {record['date']}")
-        st.write(f"Runtime: {record['runtime_hours']} hours | Fuel: {record['fuel_consumed']}L")
-        st.write(f"Oil: {record['oil_level']} | Load: {record['load_percentage']}%")
-        st.markdown('---')
-
-def show_new_generator_record():
-    st.subheader("➕ New Generator Record")
-    
-    with st.form("new_generator_record_form"):
-        generator_id = st.selectbox("🔧 Generator ID", ["GEN-001", "GEN-002", "GEN-003"])
-        record_date = st.date_input("📅 Record Date", value=date.today())
-        runtime_hours = st.number_input("⏰ Runtime Hours", min_value=0.0, step=0.1)
-        fuel_consumed = st.number_input("⛽ Fuel Consumed (liters)", min_value=0.0, step=0.1)
-        
-        if st.form_submit_button("💾 Save Record", use_container_width=True):
-            st.success("✅ Generator record saved successfully!")
-
-def show_generator_analytics():
-    st.subheader("📊 Generator Analytics")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("⚡ Total Runtime", "1,250 hours")
-        st.metric("⛽ Fuel Consumed", "31,250 liters")
-    with col2:
-        st.metric("💰 Fuel Cost", "₦18,750,000")
-        st.metric("📈 Efficiency", "85%")
-
-# 5. HSE Management
-def show_hse_management():
-    with st.spinner('Loading HSE management...'):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.title("🛡️ HSE Management")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        tab1, tab2, tab3 = st.tabs(["📅 HSE Schedule", "⚠️ Incident Reports", "➕ New Inspection"])
-        
-        with tab1:
-            show_hse_schedule()
-        
-        with tab2:
-            show_incident_reports()
-        
-        with tab3:
-            show_new_inspection()
-
-def show_hse_schedule():
-    st.subheader("📅 HSE Inspection Schedule")
-    
-    # Mock HSE schedule data
-    hse_schedule = [
-        {
-            'activity': 'Fire Drill & Evacuation Exercise',
-            'frequency': 'Quarterly',
-            'next_due': date.today() + timedelta(days=45),
-            'responsible': 'Fire Safety Limited'
-        },
-        {
-            'activity': 'First Aid Kit Inspection',
-            'frequency': 'Monthly',
-            'next_due': date.today() + timedelta(days=15),
-            'responsible': 'HSE Department'
-        }
-    ]
-    
-    for schedule in hse_schedule:
-        st.write(f"**{schedule['activity']}**")
-        st.write(f"Frequency: {schedule['frequency']} | Next Due: {schedule['next_due']}")
-        st.write(f"Responsible: {schedule['responsible']}")
-        st.markdown('---')
-
-def show_incident_reports():
-    st.subheader("⚠️ HSE Incident Reports")
-    
-    # Mock incident data
-    incidents = [
-        {
-            'id': 'INC-2024-001',
-            'title': 'Minor Slip in Kitchen Area',
-            'date': date.today() - timedelta(days=5),
-            'location': 'Main Building Kitchen',
-            'severity': 'Low',
-            'status': 'Resolved'
-        },
-        {
-            'id': 'INC-2024-002',
-            'title': 'Electrical Panel Overheating',
-            'date': date.today() - timedelta(days=15),
-            'location': 'Electrical Room',
-            'severity': 'Medium',
-            'status': 'Under Investigation'
-        }
-    ]
-    
-    for incident in incidents:
-        st.write(f"**{incident['title']}** ({incident['id']})")
-        st.write(f"Date: {incident['date']} | Location: {incident['location']}")
-        st.write(f"Severity: {incident['severity']} | Status: {incident['status']}")
-        st.markdown('---')
-
-def show_new_inspection():
-    st.subheader("➕ New HSE Inspection")
-    
-    with st.form("new_hse_inspection_form"):
-        inspection_type = st.selectbox("📋 Inspection Type", [
-            "Fire Safety", "First Aid", "Electrical Safety", 
-            "Chemical Safety", "Workplace Ergonomics", "General Safety"
-        ])
-        location = st.selectbox("📍 Location", [
-            "Main Building", "Annex Building", "Production Area", 
-            "Warehouse", "Car Park", "Common Areas"
-        ])
-        inspection_date = st.date_input("📅 Inspection Date", value=date.today())
-        findings = st.text_area("🔍 Findings/Observations", height=100)
-        
-        if st.form_submit_button("📋 Submit Inspection Report", use_container_width=True):
-            st.success("✅ HSE inspection report submitted successfully!")
-
-# 6. Compliance Dashboard
-def show_compliance_dashboard():
-    with st.spinner('Loading compliance dashboard...'):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.title("📊 Compliance Dashboard")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("📈 Overall Compliance", "92%")
-        with col2:
-            st.metric("✅ Compliant Items", "46")
-        with col3:
-            st.metric("⚠️ Non-Compliant", "4")
-        with col4:
-            st.metric("📅 Due This Month", "8")
-
-# 7. Management Requests
-def show_management_requests():
-    with st.spinner('Loading management requests...'):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.title("👨‍💼 Management Requests")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        tab1, tab2 = st.tabs(["📋 Assign Jobs to Vendors", "✅ Approve Completed Jobs"])
-        
-        with tab1:
-            show_assign_jobs()
-        
-        with tab2:
-            show_approve_jobs()
-
-def show_assign_jobs():
-    st.subheader("📋 Assign Maintenance Jobs to Vendors")
-    
-    pending_requests = execute_query(
-        'SELECT * FROM maintenance_requests WHERE status = "Pending" ORDER BY created_date DESC LIMIT 10'
-    )
-    
-    if pending_requests:
-        for request in pending_requests:
-            with st.expander(f"Request #{safe_get(request, 'id')}: {safe_str(safe_get(request, 'title'))}"):
-                st.write(f"**Description:** {safe_str(safe_get(request, 'description'))}")
-                st.write(f"**Location:** {safe_str(safe_get(request, 'location'))}")
-                
-                if st.button("👥 Assign to Vendor", key=f"assign_{safe_get(request, 'id')}"):
-                    st.info("Assignment feature would open vendor selection here")
-    else:
-        st.info("No pending requests to assign")
-
-def show_approve_jobs():
-    st.subheader("✅ Approve Completed Jobs")
-    
-    completed_jobs = execute_query('''
-        SELECT * FROM maintenance_requests 
-        WHERE status = 'Completed' 
-        AND requesting_dept_approval = 1 
-        AND facilities_manager_approval = 0
-        ORDER BY completed_date DESC
-        LIMIT 10
-    ''')
-    
-    if completed_jobs:
-        for job in completed_jobs:
-            with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))}"):
-                st.write(f"**Job Breakdown:** {safe_str(safe_get(job, 'job_breakdown'))}")
-                if st.button("✅ Approve Job Completion", key=f"approve_{safe_get(job, 'id')}"):
-                    st.success("Job approved successfully!")
-    else:
-        st.info("No jobs waiting for manager approval")
-
-# 8. Vendor Login Information
-def show_vendor_login_info():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("🔐 Vendor Login Information")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    vendor_credentials = [
-        {"SERVICE": "AIR CONDITIONING SYSTEM", "VENDOR": "Provas Limited", "USERNAME": "provas_vendor", "PASSWORD": "123456"},
-        {"SERVICE": "ELECTRICAL SYSTEMS INSPECTIONS", "VENDOR": "Power Solutions Ltd", "USERNAME": "power_vendor", "PASSWORD": "123456"},
-        {"SERVICE": "FIRE FIGHTING AND ALARM SYSTEMS", "VENDOR": "Fire Safety Limited", "USERNAME": "fire_vendor", "PASSWORD": "123456"},
-        {"SERVICE": "ENVIRONMENTAL / CLEANING CARE", "VENDOR": "Environmental Solutions Ltd", "USERNAME": "env_vendor", "PASSWORD": "123456"},
-        {"SERVICE": "WATER SYSTEM MAINTENANCE", "VENDOR": "Watreatment Lab Solutions", "USERNAME": "water_vendor", "PASSWORD": "123456"},
-        {"SERVICE": "GENERATOR MAINTENANCE AND REPAIRS", "VENDOR": "Generator Limited", "USERNAME": "generator_vendor", "PASSWORD": "123456"}
-    ]
-    
-    df = pd.DataFrame(vendor_credentials)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-# 9. Vendor Assigned Preventive Maintenance
-def show_assigned_preventive_maintenance():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("🔧 Assigned Preventive Maintenance")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    user = st.session_state.user
-    vendor_type = user.get('vendor_type')
-    
-    if vendor_type:
-        pm_assignments = execute_query(
-            'SELECT * FROM preventive_maintenance WHERE category LIKE ? LIMIT 10',
-            (f'%{vendor_type}%',)
-        )
-        
-        if pm_assignments:
-            for pm in pm_assignments:
-                st.write(f"**{safe_get(pm, 'service_code')}**: {safe_str(safe_get(pm, 'service_description'), 'N/A')}")
-                st.write(f"Category: {safe_str(safe_get(pm, 'category'))} | Status: {safe_str(safe_get(pm, 'status'))}")
-                if st.button("✅ Mark as Complete", key=f"complete_pm_{safe_get(pm, 'id')}"):
-                    st.success("Maintenance marked as complete!")
-                st.markdown('---')
-        else:
-            st.info("No preventive maintenance assigned to you")
-    else:
-        st.warning("Vendor type not specified")
-
 # ==================== MAIN APP FUNCTION ====================
-
-import threading
 
 def show_main_app():
     user = st.session_state.user
@@ -1898,7 +1548,7 @@ def show_main_app():
         if role == 'facility_user':
             menu_options = [
                 "Dashboard", "Create Request", "My Requests", 
-                "Space Management", "Requests", "Manage Request",
+                "Space Management", "Manage Request",
                 "Preventive Maintenance", "Generator Records", "HSE Management",
                 "Compliance Dashboard", "Reports"
             ]
@@ -1939,8 +1589,6 @@ def show_main_app():
         show_my_requests()
     elif selected_menu == "Space Management":
         show_space_management()
-    elif selected_menu == "Requests":
-        show_my_requests()  # Reuse existing function
     elif selected_menu == "Manage Request":
         show_manage_requests()
     elif selected_menu == "Preventive Maintenance":
@@ -2059,14 +1707,6 @@ def main():
         st.session_state.user = None
     if 'selected_menu' not in st.session_state:
         st.session_state.selected_menu = "Dashboard"
-    
-    # Initialize all dynamic state variables
-    all_requests = get_cached_all_requests()
-    for req in all_requests[:20]:  # Initialize for first 20 requests
-        if f"assigning_{req['id']}" not in st.session_state:
-            st.session_state[f"assigning_{req['id']}"] = False
-        if f"completing_{req['id']}" not in st.session_state:
-            st.session_state[f"completing_{req['id']}"] = False
     
     if st.session_state.user is None:
         show_login()
