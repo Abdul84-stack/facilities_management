@@ -1,1696 +1,3794 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import sqlite3
-import hashlib
-import io
+from datetime import datetime, timedelta, date
 import base64
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+import io
+import tempfile
+import os
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 from reportlab.lib import colors
-import numpy as np
+from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import HexColor
+from io import BytesIO
 
-# ============================================================================
-# CONFIGURATION & SETUP
-# ============================================================================
-
+# Page configuration with enhanced UI
 st.set_page_config(
-    page_title="A-B Facilities Management Pro™",
+    page_title="Facilities Management System",
     page_icon="🏢",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': "### Facilities Management System v3.0\nDeveloped by Abdulahi Ibrahim\n© 2024 All Rights Reserved"
+    }
 )
 
-# Custom CSS
+# Custom CSS for enhanced UI
 st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1E3A8A;
-        font-weight: 700;
-        margin-bottom: 1.5rem;
+    <style>
+    /* Main styling */
+    .main {
+        background-color: #f8f9fa;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
+    
+    /* Login page styling */
+    .login-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 40px;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        color: white;
+        max-width: 600px;
+        margin: 0 auto;
     }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        border-radius: 8px 8px 0 0;
+    
+    .login-title {
+        text-align: center;
+        font-size: 2.5em;
+        margin-bottom: 30px;
+        color: white;
+        font-weight: bold;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
     }
-    .priority-critical { background: #DC2626; color: white; padding: 4px 12px; border-radius: 12px; }
-    .priority-high { background: #EA580C; color: white; padding: 4px 12px; border-radius: 12px; }
-    .priority-medium { background: #F59E0B; color: white; padding: 4px 12px; border-radius: 12px; }
-    .priority-low { background: #10B981; color: white; padding: 4px 12px; border-radius: 12px; }
-</style>
+    
+    /* Button styling */
+    .stButton > button {
+        background: linear-gradient(45deg, #4CAF50, #2E7D32);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 16px;
+        transition: all 0.3s ease;
+        width: 100%;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    
+    /* Logout button specific styling */
+    div[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+        background: linear-gradient(45deg, #f44336, #d32f2f) !important;
+        color: white !important;
+    }
+    
+    div[data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+        background: linear-gradient(45deg, #d32f2f, #b71c1c) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(211, 47, 47, 0.4) !important;
+    }
+    
+    /* Form styling */
+    .stTextInput > div > div > input,
+    .stTextInput > div > div > input:focus {
+        background-color: rgba(255,255,255,0.9);
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        padding: 12px;
+        font-size: 16px;
+    }
+    
+    .stSelectbox > div > div > div,
+    .stTextArea > div > div > textarea {
+        background-color: rgba(255,255,255,0.9);
+        border: 2px solid #ddd;
+        border-radius: 8px;
+    }
+    
+    /* Header styling */
+    .header-container {
+        background: linear-gradient(90deg, #1a237e, #283593);
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* Card styling */
+    .card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    
+    /* Currency styling */
+    .currency-naira {
+        color: #4CAF50;
+        font-weight: bold;
+        font-size: 1.1em;
+    }
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #2c3e50, #34495e) !important;
+    }
+    
+    [data-testid="stSidebar"] > div:first-child {
+        background: transparent !important;
+    }
+    
+    /* METRIC CARD STYLING */
+    [data-testid="metric-container"] {
+        background-color: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    /* Custom separator */
+    .separator {
+        height: 4px;
+        background: linear-gradient(90deg, #4CAF50, #2196F3);
+        border-radius: 2px;
+        margin: 20px 0;
+    }
+    
+    /* FIX FOR SIDEBAR RADIO BUTTONS TEXT COLOR */
+    [data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stRadio span {
+        color: white !important;
+        font-weight: 500 !important;
+        font-size: 16px !important;
+    }
+    
+    /* Make radio button circles visible */
+    [data-testid="stSidebar"] .stRadio > div > label > div:first-child {
+        background-color: white !important;
+    }
+    
+    /* Style for selected radio button */
+    [data-testid="stSidebar"] .stRadio > div > label > div:first-child > div {
+        background-color: #4CAF50 !important;
+    }
+    
+    /* Fix for all text in sidebar */
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+    
+    /* Specific fix for radio labels */
+    [data-testid="stSidebar"] label {
+        color: white !important;
+    }
+    
+    /* Fix for sidebar headings */
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] h5,
+    [data-testid="stSidebar"] h6,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] div,
+    [data-testid="stSidebar"] span {
+        color: white !important;
+    }
+    
+    /* Fix sidebar radio button container */
+    [data-testid="stSidebar"] .stRadio > div {
+        background-color: rgba(255,255,255,0.1);
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    
+    /* Hover effect for radio buttons */
+    [data-testid="stSidebar"] .stRadio > div:hover {
+        background-color: rgba(255,255,255,0.15);
+    }
+    
+    /* Footer styling */
+    .app-footer {
+        background: linear-gradient(90deg, #1a237e, #283593);
+        color: white;
+        text-align: center;
+        padding: 10px;
+        margin-top: 40px;
+        border-radius: 5px;
+        font-size: 12px;
+    }
+    
+    /* Logout container styling */
+    .logout-container {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 20px;
+        background: transparent;
+    }
+    
+    /* Metric card styling - separate class */
+    .metric-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+    
+    .metric-card h4 {
+        color: #666;
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        text-transform: uppercase;
+    }
+    
+    .metric-card h3 {
+        color: #1a237e;
+        margin: 0;
+        font-size: 24px;
+        font-weight: bold;
+    }
+    
+    /* Make sure all streamlit metric text is visible */
+    [data-testid="stMetricValue"], 
+    [data-testid="stMetricLabel"] {
+        color: #333 !important;
+    }
+    
+    /* PDF Download button styling */
+    .pdf-download-btn {
+        background: linear-gradient(45deg, #2196F3, #1976D2) !important;
+        margin-top: 10px;
+    }
+    
+    /* Format for K notation */
+    .k-notation {
+        font-family: monospace;
+        color: #1a237e;
+        font-weight: bold;
+    }
+    
+    /* Status indicators */
+    .status-upcoming {
+        color: #FF9800;
+        font-weight: bold;
+    }
+    
+    .status-due {
+        color: #F44336;
+        font-weight: bold;
+    }
+    
+    .status-completed {
+        color: #4CAF50;
+        font-weight: bold;
+    }
+    
+    /* Booking status */
+    .booking-confirmed {
+        background-color: #E8F5E9;
+        padding: 5px 10px;
+        border-radius: 5px;
+        color: #2E7D32;
+        font-weight: bold;
+    }
+    
+    .booking-pending {
+        background-color: #FFF3E0;
+        padding: 5px 10px;
+        border-radius: 5px;
+        color: #EF6C00;
+        font-weight: bold;
+    }
+    
+    .booking-cancelled {
+        background-color: #FFEBEE;
+        padding: 5px 10px;
+        border-radius: 5px;
+        color: #C62828;
+        font-weight: bold;
+    }
+    
+    /* HSE status */
+    .hse-compliant {
+        background-color: #E8F5E9;
+        color: #2E7D32;
+        font-weight: bold;
+        padding: 5px 10px;
+        border-radius: 5px;
+    }
+    
+    .hse-non-compliant {
+        background-color: #FFEBEE;
+        color: #C62828;
+        font-weight: bold;
+        padding: 5px 10px;
+        border-radius: 5px;
+    }
+    
+    /* Alert styling */
+    .alert-warning {
+        background-color: #FFF3CD;
+        border-left: 4px solid #FFC107;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 4px;
+    }
+    
+    .alert-danger {
+        background-color: #F8D7DA;
+        border-left: 4px solid #DC3545;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 4px;
+    }
+    
+    .alert-success {
+        background-color: #D4EDDA;
+        border-left: 4px solid #28A745;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 4px;
+    }
+    </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# DATABASE FUNCTIONS - FIXED
-# ============================================================================
-
-def init_db():
-    """Initialize SQLite database with all necessary tables"""
-    conn = sqlite3.connect('ab_fms_pro.db')
-    c = conn.cursor()
+# Database setup with enhanced schema
+def init_database():
+    conn = sqlite3.connect('facilities_management.db')
+    cursor = conn.cursor()
     
     # Users table
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    email TEXT,
-                    role TEXT DEFAULT 'End User',
-                    organization TEXT DEFAULT 'Demo Corp',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            vendor_type TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
-    # Work Requests
-    c.execute('''CREATE TABLE IF NOT EXISTS work_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    request_id TEXT UNIQUE,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    requested_by TEXT,
-                    organization TEXT,
-                    location TEXT,
-                    priority TEXT DEFAULT 'Medium',
-                    status TEXT DEFAULT 'Submitted',
-                    category TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # Create maintenance_requests table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS maintenance_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            location TEXT NOT NULL DEFAULT "Common Area",
+            facility_type TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            status TEXT DEFAULT 'Pending',
+            created_by TEXT NOT NULL,
+            assigned_vendor TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_date TIMESTAMP,
+            completion_notes TEXT,
+            job_breakdown TEXT,
+            invoice_amount REAL,
+            invoice_number TEXT,
+            requesting_dept_approval BOOLEAN DEFAULT 0,
+            facilities_manager_approval BOOLEAN DEFAULT 0
+        )
+    ''')
     
-    # Work Orders - FIXED: Added all necessary columns
-    c.execute('''CREATE TABLE IF NOT EXISTS work_orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    work_order_id TEXT UNIQUE,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    work_request_id INTEGER,
-                    organization TEXT,
-                    assigned_to TEXT,
-                    assigned_vendor_id INTEGER,
-                    priority TEXT DEFAULT 'Medium',
-                    status TEXT DEFAULT 'Draft',
-                    scheduled_start TIMESTAMP,
-                    scheduled_end TIMESTAMP,
-                    actual_start TIMESTAMP,
-                    actual_end TIMESTAMP,
-                    estimated_cost REAL DEFAULT 0,
-                    actual_cost REAL DEFAULT 0,
-                    completion_notes TEXT,
-                    user_approval BOOLEAN DEFAULT 0,
-                    user_approval_date TIMESTAMP,
-                    manager_approval BOOLEAN DEFAULT 0,
-                    manager_approval_date TIMESTAMP,
-                    invoice_approved BOOLEAN DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # Create vendors table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vendors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT NOT NULL,
+            contact_person TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            vendor_type TEXT NOT NULL,
+            services_offered TEXT NOT NULL,
+            annual_turnover REAL,
+            tax_identification_number TEXT,
+            rc_number TEXT,
+            key_management_staff TEXT,
+            account_details TEXT,
+            certification TEXT,
+            address TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            certificate_incorporation BLOB,
+            tax_clearance_certificate BLOB,
+            audited_financial_statement BLOB
+        )
+    ''')
     
-    # Vendors - FIXED: Added missing columns
-    c.execute('''CREATE TABLE IF NOT EXISTS vendors (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    vendor_id TEXT UNIQUE,
-                    name TEXT NOT NULL,
-                    organization TEXT,
-                    contact_person TEXT,
-                    email TEXT,
-                    phone TEXT,
-                    address TEXT,
-                    vendor_type TEXT,
-                    specialties TEXT,
-                    is_approved BOOLEAN DEFAULT 0,
-                    approval_date DATE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # Create invoices table with Naira currency
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_number TEXT UNIQUE NOT NULL,
+            request_id INTEGER,
+            vendor_username TEXT NOT NULL,
+            invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            details_of_work TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_cost REAL NOT NULL,
+            amount REAL NOT NULL,
+            labour_charge REAL DEFAULT 0,
+            vat_applicable BOOLEAN DEFAULT 0,
+            vat_amount REAL DEFAULT 0,
+            total_amount REAL NOT NULL,
+            currency TEXT DEFAULT '₦',
+            status TEXT DEFAULT 'Pending',
+            FOREIGN KEY (request_id) REFERENCES maintenance_requests (id)
+        )
+    ''')
     
-    # Preventive Maintenance
-    c.execute('''CREATE TABLE IF NOT EXISTS preventive_maintenance (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    pm_id TEXT UNIQUE,
-                    asset_id INTEGER,
-                    organization TEXT,
-                    frequency TEXT,
-                    checklist TEXT,
-                    assigned_to TEXT,
-                    estimated_duration_hours REAL,
-                    is_active BOOLEAN DEFAULT 1,
-                    last_performed TIMESTAMP,
-                    next_due_date TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # ========== NEW TABLES FOR REQUESTED FEATURES ==========
     
-    # Diesel & Generator Tracking - FIXED: Added all necessary columns
-    c.execute('''CREATE TABLE IF NOT EXISTS diesel_tracking (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tracking_id TEXT UNIQUE,
-                    organization TEXT,
-                    date DATE,
-                    generator_id TEXT,
-                    opening_hours_reading REAL DEFAULT 0,
-                    closing_hours_reading REAL DEFAULT 0,
-                    total_hours_run REAL DEFAULT 0,
-                    opening_diesel_liters REAL DEFAULT 0,
-                    diesel_purchased_liters REAL DEFAULT 0,
-                    diesel_consumed_liters REAL DEFAULT 0,
-                    closing_diesel_liters REAL DEFAULT 0,
-                    purchase_amount REAL DEFAULT 0,
-                    recorded_by TEXT,
-                    notes TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # Planned Preventive Maintenance Schedule
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS preventive_maintenance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            equipment_name TEXT NOT NULL,
+            equipment_type TEXT NOT NULL,
+            location TEXT NOT NULL,
+            maintenance_type TEXT NOT NULL,
+            frequency TEXT NOT NULL,
+            last_maintenance_date DATE,
+            next_maintenance_date DATE NOT NULL,
+            status TEXT DEFAULT 'Upcoming',
+            assigned_to TEXT,
+            notes TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_date DATE,
+            completion_notes TEXT
+        )
+    ''')
     
-    # Generators - FIXED: Added all columns
-    c.execute('''CREATE TABLE IF NOT EXISTS generators (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    generator_id TEXT UNIQUE,
-                    name TEXT NOT NULL,
-                    organization TEXT,
-                    location TEXT,
-                    capacity_kva REAL,
-                    manufacturer TEXT,
-                    model TEXT,
-                    serial_number TEXT,
-                    installation_date DATE,
-                    last_service_date DATE,
-                    next_service_date DATE,
-                    total_hours_run REAL DEFAULT 0,
-                    status TEXT DEFAULT 'Operational',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # Generator Diesel Daily Record
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS generator_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_date DATE NOT NULL,
+            generator_name TEXT NOT NULL,
+            opening_hours REAL NOT NULL,
+            closing_hours REAL NOT NULL,
+            opening_diesel_level REAL NOT NULL,
+            closing_diesel_level REAL NOT NULL,
+            recorded_by TEXT NOT NULL,
+            notes TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
-    # Vendor Invoices
-    c.execute('''CREATE TABLE IF NOT EXISTS vendor_invoices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    invoice_id TEXT UNIQUE,
-                    vendor_id INTEGER,
-                    work_order_id INTEGER,
-                    amount REAL,
-                    invoice_date DATE,
-                    due_date DATE,
-                    status TEXT DEFAULT 'Pending',
-                    payment_date DATE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # Space Management (Room Bookings)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS space_bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_name TEXT NOT NULL,
+            room_type TEXT NOT NULL,
+            booking_date DATE NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            booked_by TEXT NOT NULL,
+            department TEXT NOT NULL,
+            attendees_count INTEGER,
+            status TEXT DEFAULT 'Confirmed',
+            catering_required BOOLEAN DEFAULT 0,
+            special_requirements TEXT,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
-    # Assets
-    c.execute('''CREATE TABLE IF NOT EXISTS assets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    asset_id TEXT UNIQUE,
-                    name TEXT NOT NULL,
-                    category TEXT,
-                    organization TEXT,
-                    location TEXT,
-                    building TEXT,
-                    floor TEXT,
-                    room TEXT,
-                    status TEXT DEFAULT 'Operational',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
+    # HSE Schedule and Inspections
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hse_schedule (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_type TEXT NOT NULL,
+            area TEXT NOT NULL,
+            frequency TEXT NOT NULL,
+            last_inspection_date DATE,
+            next_inspection_date DATE NOT NULL,
+            assigned_to TEXT NOT NULL,
+            status TEXT DEFAULT 'Upcoming',
+            compliance_level TEXT DEFAULT 'Compliant',
+            findings TEXT,
+            corrective_actions TEXT,
+            follow_up_date DATE,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
-    # Insert demo data if empty
-    c.execute("SELECT COUNT(*) FROM users")
-    if c.fetchone()[0] == 0:
-        # Insert users
-        demo_users = [
-            ('admin', hashlib.sha256('admin123'.encode()).hexdigest(), 'admin@fms.com', 'Admin', 'Demo Corp'),
-            ('manager', hashlib.sha256('manager123'.encode()).hexdigest(), 'manager@demo.com', 'Facility Manager', 'Demo Corp'),
-            ('user', hashlib.sha256('user123'.encode()).hexdigest(), 'user@demo.com', 'End User', 'Demo Corp'),
-            ('vendor', hashlib.sha256('vendor123'.encode()).hexdigest(), 'vendor@demo.com', 'Vendor', 'Demo Corp')
-        ]
-        
-        for user in demo_users:
-            c.execute("INSERT INTO users (username, password, email, role, organization) VALUES (?, ?, ?, ?, ?)", user)
-        
-        # Insert vendors
-        demo_vendors = [
-            ('VEND-001', 'QuickFix Electrical', 'Demo Corp', 'John Electric', 'vendor@demo.com', '555-0101', '123 Main St', 'Electrical', 'HVAC, Wiring, Lighting', 1, '2024-01-01'),
-            ('VEND-002', 'Pro Plumbing Co', 'Demo Corp', 'Mike Plumber', 'mike@proplumbing.com', '555-0102', '456 Oak Ave', 'Plumbing', 'Pipes, Drains, Water Heaters', 1, '2024-01-01'),
-        ]
-        
-        for vendor in demo_vendors:
-            c.execute("INSERT INTO vendors (vendor_id, name, organization, contact_person, email, phone, address, vendor_type, specialties, is_approved, approval_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", vendor)
-        
-        # Insert generators
-        demo_generators = [
-            ('GEN-001', 'Main Backup Generator', 'Demo Corp', 'Basement', 500, 'Cummins', 'C500D5', 'SN12345', '2023-01-15', '2024-01-10', '2024-04-10', 1250.5),
-            ('GEN-002', 'Emergency Generator', 'Demo Corp', 'Building B', 200, 'CAT', 'C200', 'SN67890', '2023-03-20', '2024-02-15', '2024-05-15', 850.2),
-        ]
-        
-        for gen in demo_generators:
-            c.execute("INSERT INTO generators (generator_id, name, organization, location, capacity_kva, manufacturer, model, serial_number, installation_date, last_service_date, next_service_date, total_hours_run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", gen)
-        
-        # Insert assets
-        demo_assets = [
-            ('ASSET-001', 'HVAC System - Main', 'HVAC', 'Demo Corp', 'Building A', '3', '301'),
-            ('ASSET-002', 'Water Heater - Kitchen', 'Plumbing', 'Demo Corp', 'Building A', '2', 'Kitchen'),
-            ('ASSET-003', 'Generator - Backup', 'Electrical', 'Demo Corp', 'Basement', 'B1', 'Generator Room'),
-        ]
-        
-        for asset in demo_assets:
-            c.execute("INSERT INTO assets (asset_id, name, category, organization, building, floor, room) VALUES (?, ?, ?, ?, ?, ?, ?)", asset)
-        
-        # Insert preventive maintenance
-        demo_pm = [
-            ('PM-001', 3, 'Demo Corp', 'Monthly', 'Check oil level|Check fuel level|Test startup', 'VEND-001', 2, '2024-04-10'),
-            ('PM-002', 1, 'Demo Corp', 'Quarterly', 'Clean filters|Check coolant|Inspect belts', 'VEND-001', 4, '2024-06-01'),
-        ]
-        
-        for pm in demo_pm:
-            c.execute("INSERT INTO preventive_maintenance (pm_id, asset_id, organization, frequency, checklist, assigned_to, estimated_duration_hours, next_due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", pm)
-        
-        # Insert diesel tracking records
-        for i in range(1, 8):
-            date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-            c.execute("""
-                INSERT INTO diesel_tracking 
-                (tracking_id, organization, date, generator_id, opening_hours_reading, 
-                 closing_hours_reading, total_hours_run, opening_diesel_liters, 
-                 diesel_purchased_liters, diesel_consumed_liters, closing_diesel_liters,
-                 purchase_amount, recorded_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                f"DTR-{i:03d}", 'Demo Corp', date, 'GEN-001',
-                1200 + (i * 8), 1208 + (i * 8), 8,
-                500 - (i * 50), 200 if i % 3 == 0 else 0, 100 + (i * 5),
-                500 - (i * 50) + (200 if i % 3 == 0 else 0) - (100 + (i * 5)),
-                (200 if i % 3 == 0 else 0) * 850, 'manager'
-            ))
+    # HSE Incidents
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hse_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_date DATE NOT NULL,
+            incident_time TEXT NOT NULL,
+            location TEXT NOT NULL,
+            incident_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            description TEXT NOT NULL,
+            reported_by TEXT NOT NULL,
+            affected_persons TEXT,
+            immediate_actions TEXT,
+            investigation_status TEXT DEFAULT 'Open',
+            corrective_measures TEXT,
+            status TEXT DEFAULT 'Open',
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Insert sample users
+    sample_users = [
+        ('facility_user', '0123456', 'facility_user', None),
+        ('facility_manager', '0123456', 'facility_manager', None),
+        ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
+        ('generator_vendor', '0123456', 'vendor', 'Generator'),
+        ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
+        ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
+        ('hse_vendor', '0123456', 'vendor', 'HSE'),
+        ('space_vendor', '0123456', 'vendor', 'Space Management'),
+        ('hse_officer', '0123456', 'hse_officer', None),
+        ('space_manager', '0123456', 'space_manager', None)
+    ]
+    
+    for username, password, role, vendor_type in sample_users:
+        try:
+            cursor.execute(
+                'INSERT OR IGNORE INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
+                (username, password, role, vendor_type)
+            )
+        except sqlite3.IntegrityError:
+            pass
+    
+    # Insert sample vendors
+    sample_vendors = [
+        ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
+         'HVAC installation, maintenance and repair services', 50000000.00, 'TIN123456', 'RC789012',
+         'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: Zenith Bank, Acc: 1234567890', 
+         'HVAC Certified', '123 HVAC Street, Lagos'),
+        ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
+         'Generator installation and maintenance', 30000000.00, 'TIN123457', 'RC789013',
+         'Mike Johnson (Director)', 'Bank: First Bank, Acc: 9876543210', 
+         'Generator Specialist', '456 Power Ave, Abuja'),
+        ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
+         'Fixture installation and repairs', 25000000.00, 'TIN123458', 'RC789014',
+         'Sarah Wilson (Owner)', 'Bank: GTBank, Acc: 4561237890', 
+         'Fixture Expert', '789 Fixture Road, Port Harcourt'),
+        ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
+         'General building maintenance and repairs', 40000000.00, 'TIN123459', 'RC789015',
+         'David Brown (Manager)', 'Bank: Access Bank, Acc: 7894561230', 
+         'Building Maintenance Certified', '321 Builders Lane, Kano')
+    ]
+    
+    for username, company_name, contact_person, email, phone, vendor_type, services_offered, annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address in sample_vendors:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO vendors 
+                (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                 annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                 account_details, certification, address) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (username, company_name, contact_person, email, phone, vendor_type, services_offered,
+                  annual_turnover, tax_id, rc_number, key_staff, account_details, certification, address))
+        except sqlite3.IntegrityError:
+            pass
+    
+    # Insert sample preventive maintenance data
+    today = datetime.now().date()
+    sample_maintenance = [
+        ('Main HVAC System', 'HVAC', 'Main Building', 'Routine Check', 'Monthly', 
+         (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(), None, None),
+        ('Fire Extinguishers', 'Fire Safety', 'All Floors', 'Inspection', 'Biannual',
+         (today - timedelta(days=60)).isoformat(), (today + timedelta(days=120)).isoformat(), None, None),
+        ('Smoke Detectors', 'Fire Safety', 'All Floors', 'Testing', 'Quarterly',
+         (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), None, None),
+        ('Generator Set #1', 'Generator', 'Generator Room', 'Service', '200 hours',
+         (today - timedelta(days=10)).isoformat(), (today + timedelta(days=10)).isoformat(), None, None),
+        ('Pest Control', 'General', 'Entire Facility', 'Fumigation', 'Quarterly',
+         (today - timedelta(days=30)).isoformat(), (today + timedelta(days=60)).isoformat(), None, None)
+    ]
+    
+    for equipment_name, equipment_type, location, maintenance_type, frequency, last_date, next_date, assigned_to, notes in sample_maintenance:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO preventive_maintenance 
+                (equipment_name, equipment_type, location, maintenance_type, frequency, 
+                 last_maintenance_date, next_maintenance_date, assigned_to, notes) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (equipment_name, equipment_type, location, maintenance_type, frequency, last_date, next_date, assigned_to, notes))
+        except sqlite3.IntegrityError:
+            pass
+    
+    # Insert sample generator records
+    for i in range(7):
+        record_date = today - timedelta(days=i)
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO generator_records 
+                (record_date, generator_name, opening_hours, closing_hours, 
+                 opening_diesel_level, closing_diesel_level, recorded_by, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (record_date.isoformat(), 'Generator #1', 
+                  1000 + i*8, 1008 + i*8,
+                  500 - i*50, 450 - i*50, 
+                  'facility_user', f'Daily operation - Day {i+1}'))
+        except sqlite3.IntegrityError:
+            pass
+    
+    # Insert sample space bookings
+    sample_bookings = [
+        ('Conference Room A', 'Conference', today.isoformat(), '09:00', '12:00', 
+         'Management Meeting', 'facility_manager', 'Management', 10, 'Confirmed', 0, None),
+        ('Meeting Room B', 'Meeting', today.isoformat(), '14:00', '16:00', 
+         'Team Brainstorming', 'facility_user', 'Operations', 6, 'Confirmed', 0, None),
+        ('Cafeteria', 'Cafeteria', (today + timedelta(days=1)).isoformat(), '12:00', '15:00', 
+         'Company Town Hall', 'hse_officer', 'All', 100, 'Confirmed', 1, 'Need audio system and projector')
+    ]
+    
+    for booking in sample_bookings:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO space_bookings 
+                (room_name, room_type, booking_date, start_time, end_time, purpose, 
+                 booked_by, department, attendees_count, status, catering_required, special_requirements)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', booking)
+        except sqlite3.IntegrityError:
+            pass
+    
+    # Insert sample HSE schedule
+    sample_hse_schedule = [
+        ('Fire Safety Inspection', 'All Buildings', 'Quarterly', 
+         (today - timedelta(days=45)).isoformat(), (today + timedelta(days=45)).isoformat(), 
+         'hse_officer', 'Compliant', None, None, None),
+        ('First Aid Kit Check', 'All Floors', 'Monthly',
+         (today - timedelta(days=20)).isoformat(), (today + timedelta(days=10)).isoformat(),
+         'hse_officer', 'Non-Compliant', 'Some kits missing bandages', 'Restock bandages', (today + timedelta(days=7)).isoformat()),
+        ('Emergency Exit Inspection', 'Main Building', 'Monthly',
+         (today - timedelta(days=15)).isoformat(), (today + timedelta(days=15)).isoformat(),
+         'hse_officer', 'Compliant', None, None, None),
+        ('Electrical Safety Check', 'Generator Room', 'Monthly',
+         (today - timedelta(days=10)).isoformat(), (today + timedelta(days=20)).isoformat(),
+         'hse_officer', 'Compliant', None, None, None)
+    ]
+    
+    for inspection in sample_hse_schedule:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO hse_schedule 
+                (inspection_type, area, frequency, last_inspection_date, next_inspection_date,
+                 assigned_to, compliance_level, findings, corrective_actions, follow_up_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', inspection)
+        except sqlite3.IntegrityError:
+            pass
     
     conn.commit()
     conn.close()
 
-def get_db_connection():
-    """Get database connection"""
-    return sqlite3.connect('ab_fms_pro.db', check_same_thread=False)
+# Initialize database
+init_database()
 
-def query_to_dataframe(query, params=()):
-    """Execute SQL query and return DataFrame"""
-    conn = get_db_connection()
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    return df
+# Database functions
+def get_connection():
+    return sqlite3.connect('facilities_management.db')
 
 def execute_query(query, params=()):
-    """Execute SQL query"""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute(query, params)
-    conn.commit()
-    conn.close()
-
-def hash_password(password):
-    """Hash password"""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# ============================================================================
-# AUTHENTICATION FUNCTIONS - FIXED
-# ============================================================================
-
-def init_session_state():
-    """Initialize session state"""
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = False
-    if 'username' not in st.session_state:
-        st.session_state.username = None
-    if 'role' not in st.session_state:
-        st.session_state.role = None
-    if 'organization' not in st.session_state:
-        st.session_state.organization = None
-    if 'vendor_id' not in st.session_state:
-        st.session_state.vendor_id = None
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = 'Dashboard'
-
-def authenticate_user(username, password):
-    """Authenticate user"""
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    hashed_password = hash_password(password)
-    c.execute("SELECT id, username, role, organization FROM users WHERE username = ? AND password = ?", 
-              (username, hashed_password))
-    
-    user = c.fetchone()
-    
-    if user:
-        st.session_state.user_id = user[0]
-        st.session_state.username = user[1]
-        st.session_state.role = user[2]
-        st.session_state.organization = user[3]
-        st.session_state.authenticated = True
-        
-        # Get vendor ID if user is a vendor
-        if user[2] == 'Vendor':
-            c.execute("SELECT id FROM vendors WHERE email = ?", (username,))
-            vendor = c.fetchone()
-            if vendor:
-                st.session_state.vendor_id = vendor[0]
-        
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    try:
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        st.error(f"Query error: {e}")
+        results = []
+    finally:
         conn.close()
+    return results
+
+def execute_update(query, params=()):
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        conn.commit()
         return True
-    
-    conn.close()
-    return False
+    except Exception as e:
+        st.error(f"Database update error: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
 
-def check_permission(required_roles):
-    """Check if user has required role"""
-    if isinstance(required_roles, str):
-        required_roles = [required_roles]
-    return st.session_state.role in required_roles
+# Safe data access functions
+def safe_get(data, key, default=None):
+    if not data or not isinstance(data, dict):
+        return default
+    return data.get(key, default)
 
-# ============================================================================
-# VENDOR REGISTRATION - FIXED
-# ============================================================================
+def safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
 
-def show_vendor_registration():
-    """Display vendor registration form"""
-    st.markdown('<h1 class="main-header">👷 Vendor Registration</h1>', unsafe_allow_html=True)
-    
-    with st.form("vendor_registration_form"):
-        st.subheader("Complete Your Vendor Profile")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            company_name = st.text_input("Company Name*", key="reg_company")
-            contact_person = st.text_input("Contact Person*", value=st.session_state.username)
-            email = st.text_input("Email*", value=st.session_state.username, key="reg_email")
-            phone = st.text_input("Phone*", key="reg_phone")
-        
-        with col2:
-            address = st.text_area("Address*", height=100, key="reg_address")
-            vendor_type = st.selectbox("Service Type*", 
-                ["Electrical", "Plumbing", "HVAC", "Cleaning", "General Maintenance", "Other"],
-                key="reg_type")
-            specialties = st.text_input("Specialties", placeholder="e.g., HVAC, Wiring, Plumbing", key="reg_specialties")
-        
-        st.markdown("**Required fields (*)**")
-        
-        submitted = st.form_submit_button("Submit Registration", type="primary")
-        
-        if submitted:
-            if company_name and contact_person and email and phone and address:
-                # Generate vendor ID
-                org_code = st.session_state.organization[:3].upper()
-                count = query_to_dataframe(
-                    "SELECT COUNT(*) as count FROM vendors WHERE organization = ?",
-                    (st.session_state.organization,)
-                ).iloc[0]['count']
-                
-                vendor_id = f"VEND-{org_code}-{count+1:03d}"
-                
-                # Insert vendor
-                conn = get_db_connection()
-                c = conn.cursor()
-                c.execute("""
-                    INSERT INTO vendors 
-                    (vendor_id, name, organization, contact_person, email, phone, address, vendor_type, specialties)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    vendor_id, company_name, st.session_state.organization,
-                    contact_person, email, phone, address, vendor_type, specialties
-                ))
-                
-                # Get the new vendor ID
-                c.execute("SELECT id FROM vendors WHERE vendor_id = ?", (vendor_id,))
-                new_vendor_id = c.fetchone()[0]
-                
-                # Update user role if needed
-                c.execute("UPDATE users SET role = 'Vendor' WHERE username = ?", (st.session_state.username,))
-                
-                conn.commit()
-                conn.close()
-                
-                # Update session state
-                st.session_state.vendor_id = new_vendor_id
-                st.session_state.role = 'Vendor'
-                
-                st.success(f"✅ Vendor registration submitted! Vendor ID: **{vendor_id}**")
-                st.info("Your registration is pending approval. You can now access vendor features.")
-                st.balloons()
-                
-                # Redirect to vendor portal
-                st.session_state.current_page = 'Vendor Portal'
-                st.rerun()
-            else:
-                st.error("Please fill in all required fields (*)")
+def safe_str(value, default="N/A"):
+    if value is None:
+        return default
+    return str(value)
 
-# ============================================================================
-# DIESEL & GENERATOR TRACKING - FIXED
-# ============================================================================
+def safe_int(value, default=0):
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (ValueError, TypeError):
+        return default
 
-def show_diesel_tracking():
-    """Display diesel and generator tracking module"""
-    st.markdown('<h1 class="main-header">⛽ Diesel & Generator Tracking</h1>', unsafe_allow_html=True)
+def safe_date(value, default=None):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        return value
+    except:
+        return default
+
+# Currency formatting function
+def format_naira(amount, decimal_places=2):
+    try:
+        amount = safe_float(amount, 0)
+        return f"₦{amount:,.{decimal_places}f}"
+    except:
+        return "₦0.00"
+
+def get_user_requests(username):
+    return execute_query(
+        'SELECT * FROM maintenance_requests WHERE created_by = ? ORDER BY created_date DESC',
+        (username,)
+    )
+
+def get_all_requests():
+    return execute_query('SELECT * FROM maintenance_requests ORDER BY created_date DESC')
+
+def get_vendor_requests(vendor_username):
+    return execute_query(
+        'SELECT * FROM maintenance_requests WHERE assigned_vendor = ? ORDER BY created_date DESC',
+        (vendor_username,)
+    )
+
+# ========== PDF REPORT GENERATION FUNCTIONS ==========
+
+def generate_job_completion_pdf(job_data, invoice_data=None):
+    """Generate a PDF report for a completed job"""
+    buffer = BytesIO()
     
-    organization = st.session_state.organization
-    role = st.session_state.role
+    # Create PDF
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
     
-    tabs = st.tabs(["Daily Recording", "View Records", "Generator Management", "PM Alerts"])
+    # Add company header
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(50, height - 50, "FACILITIES MANAGEMENT SYSTEM")
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(50, height - 70, "Job Completion Report")
     
-    with tabs[0]:  # Daily Recording
-        st.subheader("📝 Daily Diesel & Generator Recording")
+    # Draw a line
+    pdf.line(50, height - 80, width - 50, height - 80)
+    
+    # Report details
+    y_position = height - 100
+    
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(50, y_position, "JOB DETAILS")
+    y_position -= 20
+    
+    pdf.setFont("Helvetica", 10)
+    details = [
+        f"Job ID: #{job_data.get('id', 'N/A')}",
+        f"Title: {job_data.get('title', 'N/A')}",
+        f"Location: {job_data.get('location', 'Common Area')}",
+        f"Facility Type: {job_data.get('facility_type', 'N/A')}",
+        f"Priority: {job_data.get('priority', 'N/A')}",
+        f"Status: {job_data.get('status', 'N/A')}",
+        f"Created By: {job_data.get('created_by', 'N/A')}",
+        f"Assigned Vendor: {job_data.get('assigned_vendor', 'Not assigned')}",
+        f"Created Date: {job_data.get('created_date', 'N/A')}",
+        f"Completed Date: {job_data.get('completed_date', 'N/A')}"
+    ]
+    
+    for detail in details:
+        pdf.drawString(50, y_position, detail)
+        y_position -= 15
+    
+    # Job description
+    y_position -= 10
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(50, y_position, "JOB DESCRIPTION")
+    y_position -= 20
+    
+    pdf.setFont("Helvetica", 10)
+    description = job_data.get('description', 'No description provided')
+    # Wrap text for description
+    text_object = pdf.beginText(50, y_position)
+    text_object.setFont("Helvetica", 10)
+    text_object.setTextOrigin(50, y_position)
+    text_object.setLeading(14)
+    
+    # Split description into lines
+    words = description.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        current_line.append(word)
+        if len(' '.join(current_line)) > 80:
+            lines.append(' '.join(current_line[:-1]))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    for line in lines[:15]:  # Limit to 15 lines
+        text_object.textLine(line)
+    
+    pdf.drawText(text_object)
+    y_position -= (len(lines) * 14) + 20
+    
+    # Job breakdown if exists
+    if job_data.get('job_breakdown'):
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "WORK PERFORMED")
+        y_position -= 20
         
-        with st.form("diesel_tracking_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                date = st.date_input("Date*", value=datetime.now(), key="diesel_date")
-                
-                # Get available generators
-                generators = query_to_dataframe(
-                    "SELECT generator_id, name FROM generators WHERE organization = ?",
-                    (organization,)
-                )
-                
-                if not generators.empty:
-                    generator_id = st.selectbox("Generator*", 
-                        generators['generator_id'].tolist(),
-                        format_func=lambda x: f"{x} - {generators[generators['generator_id'] == x]['name'].iloc[0]}",
-                        key="diesel_generator")
-                    
-                    # Get last reading for this generator
-                    last_reading = query_to_dataframe("""
-                        SELECT closing_hours_reading, closing_diesel_liters 
-                        FROM diesel_tracking 
-                        WHERE generator_id = ? 
-                        ORDER BY date DESC LIMIT 1
-                    """, (generator_id,))
-                    
-                    opening_hours = st.number_input("Opening Hours Reading*", 
-                        min_value=0.0, step=0.1, 
-                        value=float(last_reading['closing_hours_reading'].iloc[0]) if not last_reading.empty else 0.0,
-                        key="opening_hours")
-                    
-                    closing_hours = st.number_input("Closing Hours Reading*",
-                        min_value=opening_hours, step=0.1, value=opening_hours + 8.0,
-                        key="closing_hours")
-                
-                else:
-                    st.warning("No generators found. Please add generators first.")
-                    generator_id = None
-            
-            with col2:
-                opening_diesel = st.number_input("Opening Diesel (liters)*",
-                    min_value=0.0, step=0.1,
-                    value=float(last_reading['closing_diesel_liters'].iloc[0]) if not last_reading.empty else 500.0,
-                    key="opening_diesel")
-                
-                diesel_purchased = st.number_input("Diesel Purchased (liters)",
-                    min_value=0.0, step=0.1, value=0.0, key="diesel_purchased")
-                
-                diesel_consumed = st.number_input("Diesel Consumed (liters)*",
-                    min_value=0.0, step=0.1, value=100.0, key="diesel_consumed")
-                
-                purchase_amount = st.number_input("Purchase Amount (₦)",
-                    min_value=0.0, step=100.0, value=0.0, key="purchase_amount")
-            
-            # Calculate values
-            if generator_id:
-                total_hours_run = closing_hours - opening_hours
-                closing_diesel = opening_diesel + diesel_purchased - diesel_consumed
-                
-                st.info(f"**Calculated Values:**")
-                st.info(f"Total Hours Run: **{total_hours_run:.1f} hours**")
-                st.info(f"Closing Diesel: **{closing_diesel:.1f} liters**")
-            
-            notes = st.text_area("Notes (Optional)", height=100, key="diesel_notes")
-            
-            submitted = st.form_submit_button("Save Daily Record", type="primary")
-            
-            if submitted and generator_id:
-                # Generate tracking ID
-                count = query_to_dataframe(
-                    "SELECT COUNT(*) as count FROM diesel_tracking WHERE organization = ?",
-                    (organization,)
-                ).iloc[0]['count']
-                tracking_id = f"DTR-{organization[:3]}-{count+1:03d}"
-                
-                # Insert record
-                conn = get_db_connection()
-                c = conn.cursor()
-                
-                c.execute("""
-                    INSERT INTO diesel_tracking 
-                    (tracking_id, organization, date, generator_id, opening_hours_reading,
-                     closing_hours_reading, total_hours_run, opening_diesel_liters,
-                     diesel_purchased_liters, diesel_consumed_liters, closing_diesel_liters,
-                     purchase_amount, recorded_by, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    tracking_id, organization, date.strftime('%Y-%m-%d'), generator_id,
-                    opening_hours, closing_hours, total_hours_run, opening_diesel,
-                    diesel_purchased, diesel_consumed, closing_diesel,
-                    purchase_amount, st.session_state.username, notes
-                ))
-                
-                # Update generator total hours
-                c.execute("""
-                    UPDATE generators 
-                    SET total_hours_run = total_hours_run + ?
-                    WHERE generator_id = ?
-                """, (total_hours_run, generator_id))
-                
-                conn.commit()
-                conn.close()
-                
-                st.success(f"✅ Daily record saved! Tracking ID: **{tracking_id}**")
-                st.balloons()
+        pdf.setFont("Helvetica", 10)
+        breakdown = job_data.get('job_breakdown')
+        text_object = pdf.beginText(50, y_position)
+        text_object.setFont("Helvetica", 10)
+        text_object.setTextOrigin(50, y_position)
+        text_object.setLeading(14)
+        
+        words = breakdown.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            if len(' '.join(current_line)) > 80:
+                lines.append(' '.join(current_line[:-1]))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        for line in lines[:10]:  # Limit to 10 lines
+            text_object.textLine(line)
+        
+        pdf.drawText(text_object)
+        y_position -= (len(lines) * 14) + 20
     
-    with tabs[1]:  # View Records
-        st.subheader("📋 Diesel Tracking Records")
+    # Completion notes if exists
+    if job_data.get('completion_notes'):
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "COMPLETION NOTES")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        notes = job_data.get('completion_notes')
+        text_object = pdf.beginText(50, y_position)
+        text_object.setFont("Helvetica", 10)
+        text_object.setTextOrigin(50, y_position)
+        text_object.setLeading(14)
+        
+        words = notes.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            if len(' '.join(current_line)) > 80:
+                lines.append(' '.join(current_line[:-1]))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        for line in lines[:8]:  # Limit to 8 lines
+            text_object.textLine(line)
+        
+        pdf.drawText(text_object)
+        y_position -= (len(lines) * 14) + 20
+    
+    # Approval status
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(50, y_position, "APPROVAL STATUS")
+    y_position -= 20
+    
+    pdf.setFont("Helvetica", 10)
+    dept_approval = "✅ APPROVED" if job_data.get('requesting_dept_approval') else "⏳ PENDING"
+    manager_approval = "✅ APPROVED" if job_data.get('facilities_manager_approval') else "⏳ PENDING"
+    
+    pdf.drawString(50, y_position, f"Department Approval: {dept_approval}")
+    y_position -= 15
+    pdf.drawString(50, y_position, f"Facility Manager Approval: {manager_approval}")
+    y_position -= 30
+    
+    # If we have invoice data, add it
+    if invoice_data:
+        pdf.showPage()  # New page for invoice
+        
+        # Invoice header
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawString(50, height - 50, "INVOICE")
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(50, height - 70, f"Invoice Number: {invoice_data.get('invoice_number', 'N/A')}")
+        
+        pdf.line(50, height - 80, width - 50, height - 80)
+        
+        y_position = height - 100
+        
+        # Invoice details
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "INVOICE DETAILS")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        invoice_details = [
+            f"Invoice Date: {invoice_data.get('invoice_date', 'N/A')}",
+            f"Vendor: {invoice_data.get('vendor_username', 'N/A')}",
+            f"Status: {invoice_data.get('status', 'N/A')}",
+            f"Currency: {invoice_data.get('currency', '₦')}"
+        ]
+        
+        for detail in invoice_details:
+            pdf.drawString(50, y_position, detail)
+            y_position -= 15
+        
+        y_position -= 10
+        
+        # Work details
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "WORK DETAILS")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        work_details = invoice_data.get('details_of_work', 'No details provided')
+        text_object = pdf.beginText(50, y_position)
+        text_object.setFont("Helvetica", 10)
+        text_object.setTextOrigin(50, y_position)
+        text_object.setLeading(14)
+        
+        words = work_details.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            if len(' '.join(current_line)) > 80:
+                lines.append(' '.join(current_line[:-1]))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        for line in lines[:10]:
+            text_object.textLine(line)
+        
+        pdf.drawText(text_object)
+        y_position -= (len(lines) * 14) + 30
+        
+        # Cost breakdown
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(50, y_position, "COST BREAKDOWN")
+        y_position -= 20
+        
+        pdf.setFont("Helvetica", 10)
+        
+        # Create a table-like structure
+        col1_x = 50
+        col2_x = width - 150
+        
+        # Quantity and Unit Cost
+        pdf.drawString(col1_x, y_position, f"Quantity: {invoice_data.get('quantity', 1)}")
+        pdf.drawString(col2_x, y_position, f"Unit Cost: {format_naira(invoice_data.get('unit_cost', 0))}")
+        y_position -= 15
+        
+        # Amount
+        amount = invoice_data.get('amount', 0)
+        pdf.drawString(col1_x, y_position, "Amount:")
+        pdf.drawString(col2_x, y_position, format_naira(amount))
+        y_position -= 15
+        
+        # Labour Charge
+        labour = invoice_data.get('labour_charge', 0)
+        if labour > 0:
+            pdf.drawString(col1_x, y_position, "Labour/Service Charge:")
+            pdf.drawString(col2_x, y_position, format_naira(labour))
+            y_position -= 15
+        
+        # Subtotal
+        subtotal = amount + labour
+        pdf.drawString(col1_x, y_position, "Subtotal:")
+        pdf.drawString(col2_x, y_position, format_naira(subtotal))
+        y_position -= 15
+        
+        # VAT if applicable
+        if invoice_data.get('vat_applicable'):
+            vat_amount = invoice_data.get('vat_amount', 0)
+            pdf.drawString(col1_x, y_position, "VAT (7.5%):")
+            pdf.drawString(col2_x, y_position, format_naira(vat_amount))
+            y_position -= 15
+        
+        # Total Amount
+        total = invoice_data.get('total_amount', 0)
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(col1_x, y_position - 10, "TOTAL AMOUNT:")
+        pdf.drawString(col2_x, y_position - 10, format_naira(total))
+        
+        y_position -= 40
+        
+        # Payment details
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(50, y_position, "Payment Terms: Net 30 days")
+        y_position -= 15
+        pdf.drawString(50, y_position, "Please make payment to the account details provided by vendor.")
+    
+    # Footer
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(50, 50, f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    pdf.drawString(50, 40, "Facilities Management System v3.0")
+    
+    pdf.save()
+    buffer.seek(0)
+    return buffer
+
+def get_completed_job_with_invoice(job_id):
+    """Get completed job with invoice data"""
+    query = '''
+        SELECT mr.*, i.* 
+        FROM maintenance_requests mr
+        LEFT JOIN invoices i ON mr.id = i.request_id
+        WHERE mr.id = ? AND mr.status IN ('Completed', 'Approved')
+    '''
+    result = execute_query(query, (job_id,))
+    return result[0] if result else None
+
+# ========== NEW FUNCTIONS FOR REQUESTED FEATURES ==========
+
+# Preventive Maintenance Functions
+def get_preventive_maintenance(filters=None):
+    base_query = 'SELECT * FROM preventive_maintenance WHERE 1=1'
+    params = []
+    
+    if filters:
+        if filters.get('status'):
+            base_query += ' AND status = ?'
+            params.append(filters['status'])
+        if filters.get('equipment_type'):
+            base_query += ' AND equipment_type = ?'
+            params.append(filters['equipment_type'])
+        if filters.get('location'):
+            base_query += ' AND location = ?'
+            params.append(filters['location'])
+    
+    base_query += ' ORDER BY next_maintenance_date ASC'
+    return execute_query(base_query, params)
+
+def add_preventive_maintenance(equipment_name, equipment_type, location, maintenance_type, 
+                              frequency, last_maintenance_date, next_maintenance_date, assigned_to, notes):
+    return execute_update('''
+        INSERT INTO preventive_maintenance 
+        (equipment_name, equipment_type, location, maintenance_type, frequency, 
+         last_maintenance_date, next_maintenance_date, assigned_to, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (equipment_name, equipment_type, location, maintenance_type, frequency,
+          last_maintenance_date, next_maintenance_date, assigned_to, notes))
+
+def update_preventive_maintenance(maintenance_id, status, completion_notes=None):
+    today = datetime.now().date()
+    if status == 'Completed':
+        return execute_update('''
+            UPDATE preventive_maintenance 
+            SET status = ?, completed_date = ?, completion_notes = ?
+            WHERE id = ?
+        ''', (status, today.isoformat(), completion_notes, maintenance_id))
+    else:
+        return execute_update('''
+            UPDATE preventive_maintenance 
+            SET status = ?
+            WHERE id = ?
+        ''', (status, maintenance_id))
+
+# Generator Records Functions
+def get_generator_records(start_date=None, end_date=None):
+    query = '''
+        SELECT 
+            id, record_date, generator_name, opening_hours, closing_hours,
+            opening_diesel_level, closing_diesel_level, recorded_by, notes, created_date,
+            (closing_hours - opening_hours) as net_hours_used,
+            (opening_diesel_level - closing_diesel_level) as diesel_consumed
+        FROM generator_records 
+        WHERE 1=1
+    '''
+    params = []
+    
+    if start_date:
+        query += ' AND record_date >= ?'
+        params.append(start_date.isoformat())
+    if end_date:
+        query += ' AND record_date <= ?'
+        params.append(end_date.isoformat())
+    
+    query += ' ORDER BY record_date DESC'
+    return execute_query(query, params)
+
+def add_generator_record(record_date, generator_name, opening_hours, closing_hours, 
+                        opening_diesel_level, closing_diesel_level, recorded_by, notes):
+    # Fixed validation - only check for negative values
+    if closing_hours < opening_hours:
+        return False, "Closing hours cannot be less than opening hours"
+    
+    if opening_diesel_level < 0 or closing_diesel_level < 0:
+        return False, "Diesel levels cannot be negative"
+    
+    success = execute_update('''
+        INSERT INTO generator_records 
+        (record_date, generator_name, opening_hours, closing_hours, 
+         opening_diesel_level, closing_diesel_level, recorded_by, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (record_date.isoformat(), generator_name, opening_hours, closing_hours,
+          opening_diesel_level, closing_diesel_level, recorded_by, notes))
+    
+    return success, "Record saved successfully" if success else "Failed to save record"
+
+def get_generator_summary():
+    records = execute_query('''
+        SELECT 
+            generator_name,
+            COUNT(*) as total_days,
+            SUM(closing_hours - opening_hours) as total_hours,
+            SUM(opening_diesel_level - closing_diesel_level) as total_diesel,
+            AVG(closing_hours - opening_hours) as avg_hours_per_day,
+            AVG(opening_diesel_level - closing_diesel_level) as avg_diesel_per_day
+        FROM generator_records 
+        WHERE record_date >= date('now', '-30 days')
+        GROUP BY generator_name
+    ''')
+    return records
+
+# Space Management Functions
+def get_space_bookings(filters=None):
+    base_query = '''
+        SELECT * FROM space_bookings 
+        WHERE 1=1
+    '''
+    params = []
+    
+    if filters:
+        if filters.get('room_type'):
+            base_query += ' AND room_type = ?'
+            params.append(filters['room_type'])
+        if filters.get('status'):
+            base_query += ' AND status = ?'
+            params.append(filters['status'])
+        if filters.get('booking_date'):
+            base_query += ' AND booking_date = ?'
+            params.append(filters['booking_date'].isoformat())
+        if filters.get('booked_by'):
+            base_query += ' AND booked_by = ?'
+            params.append(filters['booked_by'])
+    
+    base_query += ' ORDER BY booking_date DESC, start_time ASC'
+    return execute_query(base_query, params)
+
+def add_space_booking(room_name, room_type, booking_date, start_time, end_time, purpose,
+                     booked_by, department, attendees_count, catering_required, special_requirements):
+    return execute_update('''
+        INSERT INTO space_bookings 
+        (room_name, room_type, booking_date, start_time, end_time, purpose, 
+         booked_by, department, attendees_count, catering_required, special_requirements)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (room_name, room_type, booking_date.isoformat(), start_time, end_time, purpose,
+          booked_by, department, attendees_count, catering_required, special_requirements))
+
+def update_booking_status(booking_id, status):
+    return execute_update('''
+        UPDATE space_bookings 
+        SET status = ?, last_modified = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (status, booking_id))
+
+def check_room_availability(room_name, booking_date, start_time, end_time, exclude_booking_id=None):
+    query = '''
+        SELECT * FROM space_bookings 
+        WHERE room_name = ? 
+        AND booking_date = ?
+        AND status = 'Confirmed'
+        AND ((? < end_time AND ? > start_time) OR (? <= start_time AND ? >= end_time))
+    '''
+    params = [room_name, booking_date.isoformat(), start_time, end_time, start_time, end_time]
+    
+    if exclude_booking_id:
+        query += ' AND id != ?'
+        params.append(exclude_booking_id)
+    
+    conflicting_bookings = execute_query(query, params)
+    return len(conflicting_bookings) == 0
+
+# HSE Schedule Functions
+def get_hse_schedule(filters=None):
+    base_query = 'SELECT * FROM hse_schedule WHERE 1=1'
+    params = []
+    
+    if filters:
+        if filters.get('status'):
+            base_query += ' AND status = ?'
+            params.append(filters['status'])
+        if filters.get('compliance_level'):
+            base_query += ' AND compliance_level = ?'
+            params.append(filters['compliance_level'])
+        if filters.get('inspection_type'):
+            base_query += ' AND inspection_type = ?'
+            params.append(filters['inspection_type'])
+    
+    base_query += ' ORDER BY next_inspection_date ASC'
+    return execute_query(base_query, params)
+
+def add_hse_schedule(inspection_type, area, frequency, next_inspection_date, assigned_to):
+    return execute_update('''
+        INSERT INTO hse_schedule 
+        (inspection_type, area, frequency, next_inspection_date, assigned_to)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (inspection_type, area, frequency, next_inspection_date.isoformat(), assigned_to))
+
+def update_hse_inspection(inspection_id, compliance_level, findings, corrective_actions, follow_up_date):
+    today = datetime.now().date()
+    return execute_update('''
+        UPDATE hse_schedule 
+        SET status = 'Completed',
+            last_inspection_date = ?,
+            compliance_level = ?,
+            findings = ?,
+            corrective_actions = ?,
+            follow_up_date = ?
+        WHERE id = ?
+    ''', (today.isoformat(), compliance_level, findings, corrective_actions, 
+          follow_up_date.isoformat() if follow_up_date else None, inspection_id))
+
+def get_hse_incidents(filters=None):
+    base_query = 'SELECT * FROM hse_incidents WHERE 1=1'
+    params = []
+    
+    if filters:
+        if filters.get('severity'):
+            base_query += ' AND severity = ?'
+            params.append(filters['severity'])
+        if filters.get('status'):
+            base_query += ' AND status = ?'
+            params.append(filters['status'])
+        if filters.get('start_date'):
+            base_query += ' AND incident_date >= ?'
+            params.append(filters['start_date'].isoformat())
+        if filters.get('end_date'):
+            base_query += ' AND incident_date <= ?'
+            params.append(filters['end_date'].isoformat())
+    
+    base_query += ' ORDER BY incident_date DESC'
+    return execute_query(base_query, params)
+
+def add_hse_incident(incident_date, incident_time, location, incident_type, severity, 
+                    description, reported_by, affected_persons, immediate_actions):
+    return execute_update('''
+        INSERT INTO hse_incidents 
+        (incident_date, incident_time, location, incident_type, severity, 
+         description, reported_by, affected_persons, immediate_actions)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (incident_date.isoformat(), incident_time, location, incident_type, severity,
+          description, reported_by, affected_persons, immediate_actions))
+
+def update_incident_status(incident_id, investigation_status, corrective_measures, status):
+    return execute_update('''
+        UPDATE hse_incidents 
+        SET investigation_status = ?,
+            corrective_measures = ?,
+            status = ?
+        WHERE id = ?
+    ''', (investigation_status, corrective_measures, status, incident_id))
+
+# Authentication
+def authenticate_user(username, password):
+    users = execute_query('SELECT * FROM users WHERE username = ? AND password_hash = ?', (username, password))
+    return users[0] if users else None
+
+# ========== NEW PAGES FOR REQUESTED FEATURES ==========
+
+def show_preventive_maintenance():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📅 Planned Preventive Maintenance Schedule")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Schedule Overview", "➕ Add New Schedule", "📊 Reports & Analytics"])
+    
+    with tab1:
+        st.subheader("🔧 Maintenance Schedule")
         
         # Filters
         col1, col2, col3 = st.columns(3)
         with col1:
-            start_date = st.date_input("Start Date", 
-                value=datetime.now() - timedelta(days=30),
-                key="diesel_start")
+            status_filter = st.selectbox("Filter by Status", ["All", "Upcoming", "Due", "Completed"], key="pm_status")
         with col2:
-            end_date = st.date_input("End Date", 
-                value=datetime.now(),
-                key="diesel_end")
+            equipment_filter = st.selectbox("Filter by Equipment Type", ["All", "HVAC", "Generator", "Fire Safety", "General"], key="pm_equipment")
         with col3:
-            generators = query_to_dataframe(
-                "SELECT generator_id, name FROM generators WHERE organization = ?",
-                (organization,)
-            )
-            generator_filter = st.selectbox("Generator",
-                ["All"] + generators['generator_id'].tolist(),
-                key="diesel_filter")
+            location_filter = st.selectbox("Filter by Location", ["All", "Main Building", "Generator Room", "All Floors", "Entire Facility"], key="pm_location")
         
-        # Query records
-        query = """
-            SELECT dt.*, g.name as generator_name
-            FROM diesel_tracking dt
-            JOIN generators g ON dt.generator_id = g.generator_id
-            WHERE dt.organization = ? 
-            AND dt.date BETWEEN ? AND ?
-        """
-        params = [organization, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
+        filters = {}
+        if status_filter != "All":
+            filters['status'] = status_filter
+        if equipment_filter != "All":
+            filters['equipment_type'] = equipment_filter
+        if location_filter != "All":
+            filters['location'] = location_filter
         
-        if generator_filter != "All":
-            query += " AND dt.generator_id = ?"
-            params.append(generator_filter)
+        maintenance_schedule = get_preventive_maintenance(filters)
         
-        query += " ORDER BY dt.date DESC"
-        
-        records = query_to_dataframe(query, tuple(params))
-        
-        if not records.empty:
-            # Summary metrics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                total_hours = records['total_hours_run'].sum()
-                st.metric("Total Hours", f"{total_hours:.1f}")
-            with col2:
-                total_consumed = records['diesel_consumed_liters'].sum()
-                st.metric("Diesel Consumed", f"{total_consumed:.1f} L")
-            with col3:
-                total_purchased = records['diesel_purchased_liters'].sum()
-                st.metric("Diesel Purchased", f"{total_purchased:.1f} L")
-            with col4:
-                total_amount = records['purchase_amount'].sum()
-                st.metric("Total Amount", f"₦{total_amount:,.0f}")
+        if not maintenance_schedule:
+            st.info("📭 No maintenance schedules found")
+        else:
+            # Display maintenance schedule
+            display_data = []
+            for item in maintenance_schedule:
+                next_date = safe_date(item.get('next_maintenance_date'))
+                status = item.get('status', 'Upcoming')
+                
+                # Determine if overdue
+                if status != 'Completed' and next_date and next_date < datetime.now().date():
+                    status = "Due"
+                
+                display_data.append({
+                    'ID': item.get('id'),
+                    'Equipment': item.get('equipment_name'),
+                    'Type': item.get('equipment_type'),
+                    'Location': item.get('location'),
+                    'Maintenance Type': item.get('maintenance_type'),
+                    'Frequency': item.get('frequency'),
+                    'Last Done': item.get('last_maintenance_date', 'Never'),
+                    'Next Due': next_date.strftime('%Y-%m-%d') if next_date else 'N/A',
+                    'Status': status,
+                    'Assigned To': item.get('assigned_to', 'Not assigned')
+                })
             
-            # Display records
-            st.subheader("Detailed Records")
-            for _, record in records.iterrows():
-                with st.expander(f"{record['date']} - {record['generator_name']} ({record['tracking_id']})"):
-                    col_a, col_b = st.columns(2)
+            df = pd.DataFrame(display_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Action buttons for each item
+            st.subheader("🛠️ Maintenance Actions")
+            selected_id = st.selectbox("Select maintenance item to update", [""] + [str(item.get('id')) for item in maintenance_schedule])
+            
+            if selected_id:
+                item = next((i for i in maintenance_schedule if str(i.get('id')) == selected_id), None)
+                if item:
+                    col1, col2 = st.columns(2)
                     
-                    with col_a:
-                        st.write("**Hours Tracking:**")
-                        st.write(f"Opening: {record['opening_hours_reading']:.1f} hours")
-                        st.write(f"Closing: {record['closing_hours_reading']:.1f} hours")
-                        st.write(f"Total Run: {record['total_hours_run']:.1f} hours")
+                    with col1:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write(f"**Equipment:** {item.get('equipment_name')}")
+                        st.write(f"**Type:** {item.get('equipment_type')}")
+                        st.write(f"**Location:** {item.get('location')}")
+                        st.write(f"**Maintenance Type:** {item.get('maintenance_type')}")
+                        st.write(f"**Frequency:** {item.get('frequency')}")
+                        st.write(f"**Next Due Date:** {item.get('next_maintenance_date')}")
+                        st.markdown('</div>', unsafe_allow_html=True)
                     
-                    with col_b:
-                        st.write("**Diesel Tracking:**")
-                        st.write(f"Opening: {record['opening_diesel_liters']:.1f} liters")
-                        st.write(f"Purchased: {record['diesel_purchased_liters']:.1f} liters")
-                        st.write(f"Consumed: {record['diesel_consumed_liters']:.1f} liters")
-                        st.write(f"Closing: {record['closing_diesel_liters']:.1f} liters")
-                    
-                    if record['purchase_amount'] > 0:
-                        st.write(f"**Purchase Amount:** ₦{record['purchase_amount']:,.0f}")
-                    
-                    if record['notes']:
-                        st.write(f"**Notes:** {record['notes']}")
-                    
-                    st.write(f"**Recorded by:** {record['recorded_by']}")
-        else:
-            st.info("No records found for the selected period")
-    
-    with tabs[2]:  # Generator Management
-        st.subheader("🔧 Generator Management")
-        
-        # List generators
-        generators = query_to_dataframe(
-            "SELECT * FROM generators WHERE organization = ?",
-            (organization,)
-        )
-        
-        if not generators.empty:
-            for _, gen in generators.iterrows():
-                with st.expander(f"{gen['generator_id']} - {gen['name']}"):
-                    col_a, col_b = st.columns(2)
-                    
-                    with col_a:
-                        st.write(f"**Location:** {gen['location']}")
-                        st.write(f"**Capacity:** {gen['capacity_kva']} kVA")
-                        st.write(f"**Manufacturer:** {gen['manufacturer']} {gen['model']}")
-                        st.write(f"**Serial:** {gen['serial_number']}")
-                        st.write(f"**Total Hours:** {gen['total_hours_run']:.1f} hours")
-                    
-                    with col_b:
-                        st.write(f"**Installation:** {gen['installation_date']}")
-                        if gen['last_service_date']:
-                            st.write(f"**Last Service:** {gen['last_service_date']}")
-                        if gen['next_service_date']:
-                            days_left = (datetime.strptime(gen['next_service_date'], '%Y-%m-%d').date() - datetime.now().date()).days
-                            st.write(f"**Next Service:** {gen['next_service_date']} ({days_left} days)")
+                    with col2:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write("**✅ Mark as Completed**")
                         
-                        if gen['status'] == 'Operational':
-                            st.success("✅ Operational")
-                        else:
-                            st.warning(f"⚠️ {gen['status']}")
-        
-        # Add/Edit Generator
-        with st.expander("➕ Add New Generator"):
-            with st.form("add_generator_form"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    gen_name = st.text_input("Generator Name*", key="new_gen_name")
-                    gen_id = st.text_input("Generator ID*", key="new_gen_id")
-                    location = st.text_input("Location*", key="new_gen_location")
-                    capacity = st.number_input("Capacity (kVA)*", 
-                        min_value=1.0, value=100.0, key="new_gen_capacity")
-                
-                with col2:
-                    manufacturer = st.text_input("Manufacturer", key="new_gen_manufacturer")
-                    model = st.text_input("Model", key="new_gen_model")
-                    serial_number = st.text_input("Serial Number", key="new_gen_serial")
-                    installation_date = st.date_input("Installation Date", 
-                        value=datetime.now(), key="new_gen_install")
-                
-                submitted = st.form_submit_button("Add Generator", type="primary")
-                
-                if submitted:
-                    if gen_name and gen_id and location and capacity:
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute("""
-                            INSERT INTO generators 
-                            (generator_id, name, organization, location, capacity_kva,
-                             manufacturer, model, serial_number, installation_date)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            gen_id, gen_name, organization, location, capacity,
-                            manufacturer, model, serial_number, installation_date.strftime('%Y-%m-%d')
-                        ))
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success(f"Generator {gen_id} added successfully!")
-                        st.rerun()
-    
-    with tabs[3]:  # PM Alerts
-        st.subheader("🚨 Preventive Maintenance Alerts")
-        
-        # Check for PM due based on hours
-        generators = query_to_dataframe(
-            "SELECT generator_id, name, total_hours_run FROM generators WHERE organization = ?",
-            (organization,)
-        )
-        
-        if not generators.empty:
-            for _, gen in generators.iterrows():
-                # Get last PM hours reading
-                last_pm_hours = query_to_dataframe("""
-                    SELECT closing_hours_reading 
-                    FROM diesel_tracking 
-                    WHERE generator_id = ? 
-                    ORDER BY date DESC LIMIT 1
-                """, (gen['generator_id'],))
-                
-                if not last_pm_hours.empty:
-                    hours_since_pm = gen['total_hours_run'] - last_pm_hours.iloc[0]['closing_hours_reading']
-                    
-                    if hours_since_pm >= 200:
-                        with st.container():
-                            st.error(f"**{gen['generator_id']} - {gen['name']}**")
-                            st.error(f"⚠️ **CRITICAL:** {hours_since_pm:.1f} hours since last PM (Threshold: 200 hours)")
+                        with st.form(f"complete_maintenance_{selected_id}"):
+                            completion_notes = st.text_area("Completion Notes", 
+                                                           placeholder="Describe what maintenance was performed...")
                             
-                            col_a, col_b = st.columns([3, 1])
-                            with col_a:
-                                if st.button(f"Schedule PM for {gen['generator_id']}", key=f"schedule_{gen['generator_id']}"):
-                                    # Create PM work request
-                                    conn = get_db_connection()
-                                    c = conn.cursor()
-                                    
-                                    # Get next request ID
-                                    count = query_to_dataframe(
-                                        "SELECT COUNT(*) as count FROM work_requests WHERE organization = ?",
-                                        (organization,)
-                                    ).iloc[0]['count']
-                                    request_id = f"WR-{organization[:3]}-{count+1:04d}"
-                                    
-                                    c.execute("""
-                                        INSERT INTO work_requests 
-                                        (request_id, title, description, requested_by, organization,
-                                         location, priority, status, category)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (
-                                        request_id,
-                                        f"Preventive Maintenance - {gen['name']}",
-                                        f"Generator has run {hours_since_pm:.1f} hours since last PM. Scheduled maintenance required.",
-                                        st.session_state.username,
-                                        organization,
-                                        "Generator Room",
-                                        "High",
-                                        "Submitted",
-                                        "Electrical"
-                                    ))
-                                    conn.commit()
-                                    conn.close()
-                                    
-                                    st.success(f"PM work request created: {request_id}")
+                            # Calculate next maintenance date based on frequency
+                            frequency = item.get('frequency', 'Monthly')
+                            next_date = datetime.now().date()
+                            
+                            if frequency == 'Monthly':
+                                next_date = next_date + timedelta(days=30)
+                            elif frequency == 'Quarterly':
+                                next_date = next_date + timedelta(days=90)
+                            elif frequency == 'Biannual':
+                                next_date = next_date + timedelta(days=180)
+                            elif frequency == '200 hours':
+                                next_date = next_date + timedelta(days=30)  # Approximate
+                            
+                            new_next_date = st.date_input("Next Maintenance Date", value=next_date)
+                            
+                            if st.form_submit_button("✅ Mark as Completed"):
+                                if update_preventive_maintenance(int(selected_id), 'Completed', completion_notes):
+                                    st.success("✅ Maintenance marked as completed!")
                                     st.rerun()
-                            
-                            st.markdown("---")
-                    elif hours_since_pm >= 160:
-                        st.warning(f"**{gen['generator_id']} - {gen['name']}**: {hours_since_pm:.1f} hours since last PM (80% of threshold)")
-                    else:
-                        st.success(f"**{gen['generator_id']} - {gen['name']}**: {hours_since_pm:.1f} hours since last PM")
-                else:
-                    st.info(f"**{gen['generator_id']} - {gen['name']}**: No PM records found")
-        else:
-            st.info("No generators found")
-
-# ============================================================================
-# PREVENTIVE MAINTENANCE - FIXED
-# ============================================================================
-
-def show_preventive_maintenance():
-    """Display preventive maintenance module"""
-    st.markdown('<h1 class="main-header">🔧 Preventive Maintenance</h1>', unsafe_allow_html=True)
-    
-    organization = st.session_state.organization
-    
-    tabs = st.tabs(["PM Schedule", "Create PM", "Maintenance History", "Due Soon"])
-    
-    with tabs[0]:  # PM Schedule
-        st.subheader("📅 Preventive Maintenance Schedule")
+                        st.markdown('</div>', unsafe_allow_html=True)
         
-        # Get PM schedule with asset names
-        pm_schedule = query_to_dataframe("""
-            SELECT pm.pm_id, a.name as asset_name, pm.frequency, pm.next_due_date,
-                   pm.assigned_to, pm.is_active, pm.estimated_duration_hours
-            FROM preventive_maintenance pm
-            LEFT JOIN assets a ON pm.asset_id = a.id
-            WHERE pm.organization = ?
-            ORDER BY pm.next_due_date
-        """, (organization,))
+        # Alerts for overdue items
+        overdue_items = [i for i in maintenance_schedule if i.get('status') != 'Completed' 
+                        and safe_date(i.get('next_maintenance_date')) 
+                        and safe_date(i.get('next_maintenance_date')) < datetime.now().date()]
         
-        if not pm_schedule.empty:
-            for _, pm in pm_schedule.iterrows():
-                with st.container():
-                    col_a, col_b, col_c = st.columns([3, 2, 1])
-                    
-                    with col_a:
-                        st.write(f"**{pm['pm_id']}**")
-                        st.write(f"**Asset:** {pm['asset_name']}")
-                        st.caption(f"Frequency: {pm['frequency']}")
-                    
-                    with col_b:
-                        if pm['next_due_date']:
-                            due_date = datetime.strptime(pm['next_due_date'], '%Y-%m-%d').date()
-                            days_diff = (due_date - datetime.now().date()).days
-                            
-                            st.write(f"**Due Date:** {pm['next_due_date']}")
-                            st.write(f"**Days Until Due:** {days_diff}")
-                    
-                    with col_c:
-                        if pm['is_active']:
-                            if days_diff < 0:
-                                st.error("⚠️ Overdue")
-                            elif days_diff <= 7:
-                                st.warning("🔔 Due Soon")
-                            else:
-                                st.success("✅ Scheduled")
-                        else:
-                            st.info("⏸️ Inactive")
-                    
-                    st.markdown("---")
-        else:
-            st.info("No preventive maintenance scheduled")
+        if overdue_items:
+            st.markdown('<div class="alert-danger">', unsafe_allow_html=True)
+            st.warning(f"⚠️ **Alert:** {len(overdue_items)} maintenance item(s) are overdue!")
+            for item in overdue_items:
+                st.write(f"• {item.get('equipment_name')} at {item.get('location')} (Due: {item.get('next_maintenance_date')})")
+            st.markdown('</div>', unsafe_allow_html=True)
     
-    with tabs[1]:  # Create PM
-        st.subheader("➕ Create Preventive Maintenance Schedule")
+    with tab2:
+        st.subheader("➕ Add New Preventive Maintenance Schedule")
         
-        with st.form("create_pm_form"):
+        with st.form("add_maintenance_schedule"):
             col1, col2 = st.columns(2)
             
             with col1:
-                # Get assets
-                assets = query_to_dataframe(
-                    "SELECT id, asset_id, name FROM assets WHERE organization = ?",
-                    (organization,)
-                )
-                
-                if not assets.empty:
-                    asset_options = {f"{row['asset_id']} - {row['name']}": row['id'] for _, row in assets.iterrows()}
-                    asset_display = list(asset_options.keys())
-                    
-                    selected_asset = st.selectbox("Select Asset*", asset_display, key="pm_asset")
-                    asset_id = asset_options[selected_asset]
-                else:
-                    st.warning("No assets found. Please add assets first.")
-                    asset_id = None
-                
-                frequency = st.selectbox("Frequency*",
-                    ["Daily", "Weekly", "Monthly", "Quarterly", "Semi-Annual", "Annual"],
-                    key="pm_frequency")
+                equipment_name = st.text_input("Equipment Name *")
+                equipment_type = st.selectbox("Equipment Type *", 
+                                            ["HVAC", "Generator", "Fire Extinguisher", 
+                                             "Smoke Detector", "Fire Alarm", "Pest Control", "Other"])
+                location = st.text_input("Location *", value="Common Area")
+                maintenance_type = st.selectbox("Maintenance Type *", 
+                                              ["Routine Check", "Inspection", "Testing", 
+                                               "Service", "Calibration", "Fumigation"])
             
             with col2:
-                # Get vendors
-                vendors = query_to_dataframe(
-                    "SELECT vendor_id, name FROM vendors WHERE organization = ? AND is_approved = 1",
-                    (organization,)
-                )
-                
-                if not vendors.empty:
-                    vendor_options = {f"{row['vendor_id']} - {row['name']}": row['vendor_id'] for _, row in vendors.iterrows()}
-                    vendor_display = ["Select Vendor"] + list(vendor_options.keys())
-                    
-                    selected_vendor = st.selectbox("Assign to Vendor", vendor_display, key="pm_vendor")
-                    assigned_to = vendor_options[selected_vendor] if selected_vendor != "Select Vendor" else None
+                frequency = st.selectbox("Frequency *", 
+                                       ["Daily", "Weekly", "Monthly", "Quarterly", 
+                                        "Biannual", "Annual", "200 hours"])
+                last_maintenance_date = st.date_input("Last Maintenance Date", value=datetime.now().date())
+                next_maintenance_date = st.date_input("Next Maintenance Date *", 
+                                                     value=datetime.now().date() + timedelta(days=30))
+                assigned_to = st.text_input("Assigned To", placeholder="Name or department")
+                notes = st.text_area("Notes")
+            
+            submitted = st.form_submit_button("✅ Add to Schedule", use_container_width=True)
+            
+            if submitted:
+                if not all([equipment_name, equipment_type, location, maintenance_type, frequency]):
+                    st.error("⚠️ Please fill in all required fields (*)")
                 else:
-                    st.info("No approved vendors available")
-                    assigned_to = None
-                
-                next_due = st.date_input("Next Due Date*", 
-                    value=datetime.now() + timedelta(days=30),
-                    key="pm_next_due")
-                
-                estimated_hours = st.number_input("Estimated Hours",
-                    min_value=0.5, step=0.5, value=2.0, key="pm_hours")
-            
-            checklist = st.text_area("Checklist Items*",
-                value="Inspect condition|Clean components|Test operation|Record readings",
-                height=100, key="pm_checklist")
-            
-            submitted = st.form_submit_button("Create PM Schedule", type="primary")
-            
-            if submitted and asset_id:
-                # Generate PM ID
-                count = query_to_dataframe(
-                    "SELECT COUNT(*) as count FROM preventive_maintenance WHERE organization = ?",
-                    (organization,)
-                ).iloc[0]['count']
-                pm_id = f"PM-{organization[:3]}-{count+1:03d}"
-                
-                # Insert PM
-                conn = get_db_connection()
-                c = conn.cursor()
-                c.execute("""
-                    INSERT INTO preventive_maintenance 
-                    (pm_id, asset_id, organization, frequency, checklist, 
-                     assigned_to, estimated_duration_hours, next_due_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    pm_id, asset_id, organization, frequency, checklist,
-                    assigned_to, estimated_hours, next_due.strftime('%Y-%m-%d')
-                ))
-                conn.commit()
-                conn.close()
-                
-                st.success(f"Preventive Maintenance {pm_id} scheduled!")
-                st.rerun()
-    
-    with tabs[2]:  # Maintenance History
-        st.subheader("📋 Maintenance History")
-        
-        # Get maintenance work orders
-        history = query_to_dataframe("""
-            SELECT wo.work_order_id, wo.title, wo.status, wo.actual_end,
-                   wo.assigned_to, wo.actual_cost, wo.completion_notes
-            FROM work_orders wo
-            WHERE wo.organization = ?
-            AND wo.title LIKE '%PM%'
-            ORDER BY wo.actual_end DESC
-            LIMIT 20
-        """, (organization,))
-        
-        if not history.empty:
-            for _, record in history.iterrows():
-                with st.container():
-                    col_a, col_b, col_c = st.columns([3, 2, 1])
-                    
-                    with col_a:
-                        st.write(f"**{record['work_order_id']}**")
-                        st.write(f"**{record['title']}**")
-                        if record['completion_notes']:
-                            st.caption(f"{record['completion_notes'][:100]}...")
-                    
-                    with col_b:
-                        if record['actual_end']:
-                            st.write(f"**Completed:** {record['actual_end'][:10]}")
-                        if record['actual_cost'] > 0:
-                            st.write(f"**Cost:** ₦{record['actual_cost']:,.0f}")
-                    
-                    with col_c:
-                        if record['status'] == 'Completed':
-                            st.success("✅ Completed")
-                        else:
-                            st.info(f"📊 {record['status']}")
-                    
-                    st.markdown("---")
-        else:
-            st.info("No maintenance history found")
-    
-    with tabs[3]:  # Due Soon
-        st.subheader("⚠️ Maintenance Due Soon")
-        
-        # Get PM due in next 30 days
-        due_soon = query_to_dataframe("""
-            SELECT pm.pm_id, a.name as asset_name, pm.frequency, pm.next_due_date,
-                   pm.assigned_to
-            FROM preventive_maintenance pm
-            LEFT JOIN assets a ON pm.asset_id = a.id
-            WHERE pm.organization = ?
-            AND pm.is_active = 1
-            AND pm.next_due_date BETWEEN DATE('now') AND DATE('now', '+30 days')
-            ORDER BY pm.next_due_date
-        """, (organization,))
-        
-        if not due_soon.empty:
-            for _, pm in due_soon.iterrows():
-                with st.container():
-                    col_a, col_b, col_c = st.columns([3, 2, 1])
-                    
-                    with col_a:
-                        st.write(f"**{pm['pm_id']}**")
-                        st.write(f"**Asset:** {pm['asset_name']}")
-                        st.caption(f"Frequency: {pm['frequency']}")
-                    
-                    with col_b:
-                        due_date = datetime.strptime(pm['next_due_date'], '%Y-%m-%d').date()
-                        days_diff = (due_date - datetime.now().date()).days
-                        st.write(f"**Due Date:** {pm['next_due_date']}")
-                        st.write(f"**Due In:** {days_diff} days")
-                    
-                    with col_c:
-                        if days_diff <= 7:
-                            st.error("🔴 Urgent")
-                        else:
-                            st.warning("🟡 Due Soon")
-                    
-                    st.markdown("---")
-        else:
-            st.success("✅ No maintenance due in the next 30 days")
-
-# ============================================================================
-# VENDOR PORTAL - FIXED
-# ============================================================================
-
-def show_vendor_portal():
-    """Display vendor portal"""
-    st.markdown('<h1 class="main-header">👷 Vendor Portal</h1>', unsafe_allow_html=True)
-    
-    # Check if vendor is registered
-    vendor_info = query_to_dataframe(
-        "SELECT * FROM vendors WHERE email = ? AND organization = ?",
-        (st.session_state.username, st.session_state.organization)
-    )
-    
-    if vendor_info.empty:
-        st.warning("Vendor profile not found. Please complete your vendor registration.")
-        show_vendor_registration()
-        return
-    
-    vendor = vendor_info.iloc[0]
-    vendor_id = vendor['id']
-    
-    # Vendor dashboard
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        active_jobs = query_to_dataframe(
-            "SELECT COUNT(*) as count FROM work_orders WHERE assigned_vendor_id = ? AND status IN ('Assigned', 'In Progress')",
-            (vendor_id,)
-        ).iloc[0]['count']
-        st.metric("Active Jobs", active_jobs)
-    
-    with col2:
-        completed_jobs = query_to_dataframe(
-            "SELECT COUNT(*) as count FROM work_orders WHERE assigned_vendor_id = ? AND status = 'Completed'",
-            (vendor_id,)
-        ).iloc[0]['count']
-        st.metric("Completed", completed_jobs)
-    
-    with col3:
-        pending_invoices = query_to_dataframe(
-            "SELECT COUNT(*) as count FROM vendor_invoices WHERE vendor_id = ? AND status = 'Pending'",
-            (vendor_id,)
-        ).iloc[0]['count']
-        st.metric("Pending Invoices", pending_invoices)
-    
-    with col4:
-        if vendor['is_approved']:
-            st.success("✅ Approved")
-        else:
-            st.warning("⏳ Pending")
-    
-    tabs = st.tabs(["My Jobs", "Submit Invoice", "My Profile"])
-    
-    with tabs[0]:  # My Jobs
-        st.subheader("📋 My Assigned Jobs")
-        
-        assigned_jobs = query_to_dataframe("""
-            SELECT wo.work_order_id, wo.title, wo.status, wo.priority,
-                   wo.scheduled_start, wo.scheduled_end, wo.estimated_cost,
-                   wr.requested_by, wr.location
-            FROM work_orders wo
-            LEFT JOIN work_requests wr ON wo.work_request_id = wr.id
-            WHERE wo.assigned_vendor_id = ?
-            ORDER BY 
-                CASE wo.status
-                    WHEN 'In Progress' THEN 1
-                    WHEN 'Assigned' THEN 2
-                    WHEN 'Completed' THEN 3
-                    ELSE 4
-                END,
-                wo.created_at DESC
-        """, (vendor_id,))
-        
-        if not assigned_jobs.empty:
-            for _, job in assigned_jobs.iterrows():
-                with st.container():
-                    col_a, col_b, col_c = st.columns([3, 2, 1])
-                    
-                    with col_a:
-                        st.write(f"**{job['work_order_id']}**")
-                        st.write(f"**{job['title']}**")
-                        st.caption(f"📍 {job['location']}")
-                        if job['scheduled_start']:
-                            st.caption(f"📅 {job['scheduled_start'][:10]} to {job['scheduled_end'][:10]}")
-                    
-                    with col_b:
-                        # Priority badge
-                        priority_class = f"priority-{job['priority'].lower()}"
-                        st.markdown(f'<span class="{priority_class}">{job["priority"]}</span>', unsafe_allow_html=True)
-                        
-                        if job['estimated_cost'] > 0:
-                            st.caption(f"💰 ₦{job['estimated_cost']:,.0f}")
-                    
-                    with col_c:
-                        if job['status'] == 'Assigned':
-                            st.warning("🟡 Assigned")
-                            if st.button("Start", key=f"start_{job['work_order_id']}"):
-                                conn = get_db_connection()
-                                c = conn.cursor()
-                                c.execute("""
-                                    UPDATE work_orders 
-                                    SET status = 'In Progress', actual_start = ?
-                                    WHERE work_order_id = ?
-                                """, (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), job['work_order_id']))
-                                conn.commit()
-                                conn.close()
-                                st.success("Job started!")
-                                st.rerun()
-                        
-                        elif job['status'] == 'In Progress':
-                            st.info("🔵 In Progress")
-                            if st.button("Complete", key=f"complete_{job['work_order_id']}"):
-                                st.session_state.completing_job = job['work_order_id']
-                        
-                        elif job['status'] == 'Completed':
-                            st.success("✅ Completed")
-                    
-                    st.markdown("---")
-            
-            # Job completion form
-            if st.session_state.get('completing_job'):
-                wo_id = st.session_state.completing_job
-                
-                with st.form("job_completion_form"):
-                    st.subheader(f"Complete Job: {wo_id}")
-                    
-                    completion_notes = st.text_area("Completion Notes*", height=150)
-                    actual_cost = st.number_input("Actual Cost (₦)", min_value=0.0, value=0.0)
-                    
-                    submitted = st.form_submit_button("Submit Completion", type="primary")
-                    
-                    if submitted and completion_notes:
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute("""
-                            UPDATE work_orders 
-                            SET status = 'Completed', 
-                                actual_end = ?,
-                                completion_notes = ?,
-                                actual_cost = ?
-                            WHERE work_order_id = ?
-                        """, (
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            completion_notes,
-                            actual_cost,
-                            wo_id
-                        ))
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success("Job completion submitted!")
-                        st.session_state.pop('completing_job', None)
+                    if add_preventive_maintenance(equipment_name, equipment_type, location, 
+                                                 maintenance_type, frequency, 
+                                                 last_maintenance_date.isoformat(), 
+                                                 next_maintenance_date.isoformat(), 
+                                                 assigned_to, notes):
+                        st.success("✅ Preventive maintenance schedule added successfully!")
                         st.rerun()
-        else:
-            st.info("No jobs assigned to you yet")
     
-    with tabs[1]:  # Submit Invoice
-        st.subheader("💰 Submit Invoice")
+    with tab3:
+        st.subheader("📊 Maintenance Analytics")
         
-        # Get completed jobs without invoices
-        completed_jobs = query_to_dataframe("""
-            SELECT wo.work_order_id, wo.title, wo.actual_cost
-            FROM work_orders wo
-            WHERE wo.assigned_vendor_id = ?
-            AND wo.status = 'Completed'
-            AND wo.work_order_id NOT IN (SELECT work_order_id FROM vendor_invoices)
-        """, (vendor_id,))
+        # Summary statistics
+        all_maintenance = get_preventive_maintenance()
         
-        if not completed_jobs.empty:
-            with st.form("invoice_form"):
-                selected_job = st.selectbox("Select Job", 
-                    completed_jobs['work_order_id'].tolist(),
-                    format_func=lambda x: f"{x} - {completed_jobs[completed_jobs['work_order_id'] == x]['title'].iloc[0]}",
-                    key="invoice_job")
-                
-                job_info = completed_jobs[completed_jobs['work_order_id'] == selected_job].iloc[0]
-                
-                invoice_amount = st.number_input("Invoice Amount (₦)*",
-                    min_value=0.0, value=float(job_info['actual_cost'] or 0),
-                    key="invoice_amount")
-                
-                invoice_date = st.date_input("Invoice Date", value=datetime.now())
-                due_date = st.date_input("Due Date", value=datetime.now() + timedelta(days=30))
-                
-                submitted = st.form_submit_button("Submit Invoice", type="primary")
-                
-                if submitted and invoice_amount > 0:
-                    # Generate invoice ID
-                    count = query_to_dataframe(
-                        "SELECT COUNT(*) as count FROM vendor_invoices WHERE vendor_id = ?",
-                        (vendor_id,)
-                    ).iloc[0]['count']
-                    invoice_id = f"INV-{vendor['vendor_id']}-{count+1:03d}"
-                    
-                    conn = get_db_connection()
-                    c = conn.cursor()
-                    c.execute("""
-                        INSERT INTO vendor_invoices 
-                        (invoice_id, vendor_id, work_order_id, amount, invoice_date, due_date)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (
-                        invoice_id, vendor_id, selected_job, invoice_amount,
-                        invoice_date.strftime('%Y-%m-%d'), due_date.strftime('%Y-%m-%d')
-                    ))
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success(f"Invoice {invoice_id} submitted successfully!")
-                    st.rerun()
-        else:
-            st.info("No completed jobs available for invoicing")
-        
-        # Show existing invoices
-        st.subheader("📄 My Invoices")
-        invoices = query_to_dataframe("""
-            SELECT vi.invoice_id, vi.amount, vi.invoice_date, vi.due_date, 
-                   vi.status, vi.payment_date, wo.title as job_title
-            FROM vendor_invoices vi
-            LEFT JOIN work_orders wo ON vi.work_order_id = wo.work_order_id
-            WHERE vi.vendor_id = ?
-            ORDER BY vi.invoice_date DESC
-        """, (vendor_id,))
-        
-        if not invoices.empty:
-            st.dataframe(invoices, use_container_width=True)
-        else:
-            st.info("No invoices found")
-    
-    with tabs[2]:  # My Profile
-        st.subheader("👤 My Profile")
-        
-        col_a, col_b = st.columns([2, 1])
-        
-        with col_a:
-            st.write(f"**Vendor ID:** {vendor['vendor_id']}")
-            st.write(f"**Company:** {vendor['name']}")
-            st.write(f"**Contact:** {vendor['contact_person']}")
-            st.write(f"**Email:** {vendor['email']}")
-            st.write(f"**Phone:** {vendor['phone']}")
-            st.write(f"**Address:** {vendor['address']}")
-            st.write(f"**Service Type:** {vendor['vendor_type']}")
-            st.write(f"**Specialties:** {vendor['specialties']}")
-        
-        with col_b:
-            if vendor['is_approved']:
-                st.success("✅ Approved Vendor")
-                if vendor['approval_date']:
-                    st.caption(f"Approved: {vendor['approval_date']}")
-            else:
-                st.warning("⏳ Pending Approval")
-                st.caption("Your registration is under review")
-
-# ============================================================================
-# DASHBOARD
-# ============================================================================
-
-def show_dashboard():
-    """Display main dashboard"""
-    st.markdown('<h1 class="main-header">📊 Facilities Management Dashboard</h1>', unsafe_allow_html=True)
-    
-    organization = st.session_state.organization
-    role = st.session_state.role
-    
-    # Welcome message
-    role_icon = {
-        "Admin": "👑",
-        "Facility Manager": "👨‍💼",
-        "Vendor": "👷",
-        "End User": "👤"
-    }.get(role, "👤")
-    
-    st.markdown(f"### {role_icon} Welcome back, {st.session_state.username}!")
-    st.caption(f"Role: {role} | Organization: {organization}")
-    
-    # Quick Stats
-    st.markdown("### 📈 Quick Stats")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_requests = query_to_dataframe(
-            "SELECT COUNT(*) as count FROM work_requests WHERE organization = ?",
-            (organization,)
-        ).iloc[0]['count']
-        st.metric("Work Requests", total_requests)
-    
-    with col2:
-        active_orders = query_to_dataframe(
-            "SELECT COUNT(*) as count FROM work_orders WHERE organization = ? AND status IN ('In Progress', 'Assigned')",
-            (organization,)
-        ).iloc[0]['count']
-        st.metric("Active Orders", active_orders)
-    
-    with col3:
-        due_pm = query_to_dataframe("""
-            SELECT COUNT(*) as count FROM preventive_maintenance 
-            WHERE organization = ? AND next_due_date <= date('now', '+7 days')
-        """, (organization,)).iloc[0]['count']
-        st.metric("Due PM", due_pm)
-    
-    with col4:
-        pm_alerts = query_to_dataframe("""
-            SELECT COUNT(DISTINCT g.generator_id) as count
-            FROM generators g
-            LEFT JOIN (
-                SELECT generator_id, MAX(closing_hours_reading) as last_hours
-                FROM diesel_tracking 
-                GROUP BY generator_id
-            ) dt ON g.generator_id = dt.generator_id
-            WHERE g.organization = ?
-            AND (g.total_hours_run - COALESCE(dt.last_hours, 0)) >= 200
-        """, (organization,)).iloc[0]['count']
-        st.metric("Gen PM Alerts", pm_alerts)
-    
-    # Recent Activities
-    st.markdown("### 📋 Recent Activities")
-    
-    if role == 'Vendor':
-        vendor_info = query_to_dataframe(
-            "SELECT id FROM vendors WHERE email = ? AND organization = ?",
-            (st.session_state.username, organization)
-        )
-        
-        if not vendor_info.empty:
-            vendor_id = vendor_info.iloc[0]['id']
-            activities = query_to_dataframe("""
-                SELECT wo.work_order_id, wo.title, wo.status, wo.created_at
-                FROM work_orders wo
-                WHERE wo.assigned_vendor_id = ?
-                ORDER BY wo.created_at DESC
-                LIMIT 5
-            """, (vendor_id,))
-    else:
-        activities = query_to_dataframe("""
-            SELECT request_id, title, status, created_at
-            FROM work_requests 
-            WHERE organization = ?
-            ORDER BY created_at DESC
-            LIMIT 5
-        """, (organization,))
-    
-    if not activities.empty:
-        for _, activity in activities.iterrows():
-            with st.container():
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.write(f"**{activity['title']}**")
-                    if 'request_id' in activity:
-                        st.caption(f"ID: {activity['request_id']}")
-                    elif 'work_order_id' in activity:
-                        st.caption(f"WO: {activity['work_order_id']}")
-                with col_b:
-                    if activity['status'] == 'Completed':
-                        st.success("✅ Completed")
-                    elif activity['status'] == 'In Progress':
-                        st.info("🔵 In Progress")
-                    else:
-                        st.warning("🟡 {activity['status']}")
-                st.markdown("---")
-    else:
-        st.info("No recent activities")
-    
-    # Quick Actions
-    st.markdown("### ⚡ Quick Actions")
-    
-    if role == 'End User':
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📝 Create Request", use_container_width=True):
-                st.session_state.current_page = "Work Management"
-                st.rerun()
-        with col2:
-            if st.button("⚕️ Report Incident", use_container_width=True):
-                st.session_state.current_page = "HSE Management"
-                st.rerun()
-    
-    elif role == 'Facility Manager':
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("👨‍💼 Manage Vendors", use_container_width=True):
-                st.session_state.current_page = "Vendor Management"
-                st.rerun()
-        with col2:
-            if st.button("⛽ Diesel Tracking", use_container_width=True):
-                st.session_state.current_page = "Diesel Tracking"
-                st.rerun()
-    
-    elif role == 'Vendor':
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📋 My Jobs", use_container_width=True):
-                st.session_state.current_page = "Vendor Portal"
-                st.rerun()
-        with col2:
-            if st.button("💰 Submit Invoice", use_container_width=True):
-                st.session_state.current_page = "Vendor Portal"
-                st.rerun()
-    
-    # Alerts
-    st.markdown("### 🚨 Alerts")
-    
-    # Overdue PM
-    overdue_pm = query_to_dataframe("""
-        SELECT pm_id, next_due_date 
-        FROM preventive_maintenance 
-        WHERE organization = ? 
-        AND next_due_date < date('now')
-        AND is_active = 1
-        LIMIT 3
-    """, (organization,))
-    
-    if not overdue_pm.empty:
-        for _, pm in overdue_pm.iterrows():
-            st.error(f"**PM {pm['pm_id']}** - Overdue since {pm['next_due_date']}")
-    
-    # Generator PM alerts
-    pm_alerts_list = query_to_dataframe("""
-        SELECT g.generator_id, g.name, 
-               (g.total_hours_run - COALESCE(dt.last_hours, 0)) as hours_since_pm
-        FROM generators g
-        LEFT JOIN (
-            SELECT generator_id, MAX(closing_hours_reading) as last_hours
-            FROM diesel_tracking 
-            GROUP BY generator_id
-        ) dt ON g.generator_id = dt.generator_id
-        WHERE g.organization = ?
-        AND (g.total_hours_run - COALESCE(dt.last_hours, 0)) >= 200
-        LIMIT 3
-    """, (organization,))
-    
-    if not pm_alerts_list.empty:
-        for _, alert in pm_alerts_list.iterrows():
-            st.error(f"**{alert['generator_id']}** - {alert['hours_since_pm']:.1f} hours since last PM")
-
-# ============================================================================
-# WORK MANAGEMENT
-# ============================================================================
-
-def show_work_management():
-    """Display work management"""
-    st.markdown('<h1 class="main-header">📋 Work Management</h1>', unsafe_allow_html=True)
-    
-    role = st.session_state.role
-    
-    if role == 'End User':
-        tabs = ["Create Request", "My Requests"]
-    elif role == 'Vendor':
-        st.info("Vendor work management is available in the Vendor Portal")
-        st.session_state.current_page = "Vendor Portal"
-        st.rerun()
-    else:
-        tabs = ["All Requests", "Assign Work", "Approve Jobs"]
-    
-    tab_objects = st.tabs(tabs)
-    
-    if role == 'End User':
-        with tab_objects[0]:  # Create Request
-            st.subheader("📝 Create Work Request")
+        if all_maintenance:
+            total_items = len(all_maintenance)
+            completed_items = len([i for i in all_maintenance if i.get('status') == 'Completed'])
+            upcoming_items = len([i for i in all_maintenance if i.get('status') == 'Upcoming'])
+            due_items = len([i for i in all_maintenance if i.get('status') != 'Completed' 
+                           and safe_date(i.get('next_maintenance_date')) 
+                           and safe_date(i.get('next_maintenance_date')) < datetime.now().date()])
             
-            with st.form("create_request_form"):
-                title = st.text_input("Title*", key="request_title")
-                description = st.text_area("Description*", height=150, key="request_desc")
-                location = st.text_input("Location*", key="request_location")
-                category = st.selectbox("Category*",
-                    ["Electrical", "Plumbing", "HVAC", "General", "Cleaning", "Other"],
-                    key="request_category")
-                priority = st.selectbox("Priority",
-                    ["Low", "Medium", "High", "Critical"],
-                    key="request_priority")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Items", total_items)
+            with col2:
+                st.metric("Completed", completed_items)
+            with col3:
+                st.metric("Upcoming", upcoming_items)
+            with col4:
+                st.metric("Overdue", due_items, delta=f"-{due_items}", delta_color="inverse")
+            
+            # Equipment type distribution
+            equipment_counts = {}
+            for item in all_maintenance:
+                eq_type = item.get('equipment_type', 'Other')
+                equipment_counts[eq_type] = equipment_counts.get(eq_type, 0) + 1
+            
+            if equipment_counts:
+                fig = px.pie(values=list(equipment_counts.values()), 
+                            names=list(equipment_counts.keys()),
+                            title="Equipment Type Distribution")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Export options
+            st.subheader("📤 Export Data")
+            if st.button("📥 Export to CSV", use_container_width=True):
+                df = pd.DataFrame(all_maintenance)
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Download CSV",
+                    data=csv,
+                    file_name=f"preventive_maintenance_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+
+def show_generator_diesel_records():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("⛽ Generator & Diesel Daily Records")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📝 Daily Records", "➕ New Record", "📈 Reports & Analysis"])
+    
+    with tab1:
+        st.subheader("📅 Daily Generator Records")
+        
+        # Date range filter
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Start Date", value=datetime.now().date() - timedelta(days=7))
+        with col2:
+            end_date = st.date_input("End Date", value=datetime.now().date())
+        
+        records = get_generator_records(start_date, end_date)
+        
+        if not records:
+            st.info("📭 No records found for the selected date range")
+        else:
+            # Display records
+            display_data = []
+            total_hours = 0
+            total_diesel = 0
+            
+            for record in records:
+                net_hours = safe_float(record.get('net_hours_used', 0))
+                diesel_consumed = safe_float(record.get('diesel_consumed', 0))
                 
-                submitted = st.form_submit_button("Submit Request", type="primary")
+                display_data.append({
+                    'Date': record.get('record_date'),
+                    'Generator': record.get('generator_name'),
+                    'Opening Hours': f"{safe_float(record.get('opening_hours', 0)):.1f}",
+                    'Closing Hours': f"{safe_float(record.get('closing_hours', 0)):.1f}",
+                    'Net Hours': f"{net_hours:.1f}",
+                    'Opening Diesel': f"{safe_float(record.get('opening_diesel_level', 0)):.1f} L",
+                    'Closing Diesel': f"{safe_float(record.get('closing_diesel_level', 0)):.1f} L",
+                    'Diesel Consumed': f"{diesel_consumed:.1f} L",
+                    'Recorded By': record.get('recorded_by'),
+                    'Notes': record.get('notes', '')
+                })
+                
+                total_hours += net_hours
+                total_diesel += diesel_consumed
+            
+            df = pd.DataFrame(display_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Summary statistics
+            st.subheader("📊 Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Records", len(records))
+            with col2:
+                st.metric("Total Hours", f"{total_hours:.1f}")
+            with col3:
+                st.metric("Total Diesel Used", f"{total_diesel:.1f} L")
+    
+    with tab2:
+        st.subheader("➕ Add New Daily Record")
+        
+        with st.form("add_generator_record"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                record_date = st.date_input("Record Date *", value=datetime.now().date())
+                generator_name = st.selectbox("Generator Name *", ["Generator #1", "Generator #2", "Generator #3"])
+                opening_hours = st.number_input("Opening Hours *", min_value=0.0, step=0.1, format="%.1f")
+                closing_hours = st.number_input("Closing Hours *", min_value=opening_hours, step=0.1, format="%.1f")
+            
+            with col2:
+                opening_diesel_level = st.number_input("Opening Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f")
+                closing_diesel_level = st.number_input("Closing Diesel Level (L) *", min_value=0.0, step=0.1, format="%.1f")
+                recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'])
+                notes = st.text_area("Notes")
+            
+            # Calculate preview
+            net_hours = closing_hours - opening_hours if closing_hours > opening_hours else 0
+            diesel_consumed = opening_diesel_level - closing_diesel_level if opening_diesel_level > closing_diesel_level else 0
+            
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.write("**📊 Preview**")
+            col_preview1, col_preview2 = st.columns(2)
+            with col_preview1:
+                st.write(f"**Net Hours Used:** {net_hours:.1f}")
+            with col_preview2:
+                st.write(f"**Diesel Consumed:** {diesel_consumed:.1f} L")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+            
+            if submitted:
+                if not all([record_date, generator_name, opening_hours, closing_hours, 
+                          opening_diesel_level, closing_diesel_level, recorded_by]):
+                    st.error("⚠️ Please fill in all required fields (*)")
+                elif closing_hours < opening_hours:
+                    st.error("❌ Closing hours cannot be less than opening hours")
+                elif opening_diesel_level < 0 or closing_diesel_level < 0:
+                    st.error("❌ Diesel levels cannot be negative")
+                else:
+                    success, message = add_generator_record(record_date, generator_name, opening_hours, closing_hours,
+                                          opening_diesel_level, closing_diesel_level, recorded_by, notes)
+                    if success:
+                        st.success("✅ " + message)
+                        st.rerun()
+                    else:
+                        st.error("❌ " + message)
+    
+    with tab3:
+        st.subheader("📈 Analysis & Reports")
+        
+        # Get summary data
+        summary = get_generator_summary()
+        
+        if summary:
+            for gen in summary:
+                st.markdown(f'<div class="card">', unsafe_allow_html=True)
+                st.write(f"**{gen['generator_name']}**")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Days Operated", int(gen['total_days']))
+                with col2:
+                    st.metric("Total Hours", f"{safe_float(gen['total_hours']):.1f}")
+                with col3:
+                    st.metric("Total Diesel", f"{safe_float(gen['total_diesel']):.1f} L")
+                with col4:
+                    st.metric("Avg Daily Hours", f"{safe_float(gen['avg_hours_per_day']):.1f}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Diesel consumption chart
+            st.subheader("⛽ Diesel Consumption Trend")
+            records_30d = get_generator_records(datetime.now().date() - timedelta(days=30), datetime.now().date())
+            
+            if records_30d:
+                chart_data = []
+                for record in records_30d:
+                    chart_data.append({
+                        'Date': record['record_date'],
+                        'Diesel Consumed': safe_float(record['diesel_consumed']),
+                        'Net Hours': safe_float(record['net_hours_used'])
+                    })
+                
+                chart_df = pd.DataFrame(chart_data)
+                if not chart_df.empty:
+                    fig = px.line(chart_df, x='Date', y='Diesel Consumed', 
+                                 title="Daily Diesel Consumption (Last 30 Days)",
+                                 markers=True)
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        # Inventory alert
+        st.subheader("⚠️ Inventory Alerts")
+        recent_records = get_generator_records(datetime.now().date() - timedelta(days=3), datetime.now().date())
+        
+        if recent_records:
+            avg_daily_consumption = sum(safe_float(r['diesel_consumed']) for r in recent_records) / len(recent_records)
+            current_level = safe_float(recent_records[0]['closing_diesel_level']) if recent_records else 0
+            
+            days_remaining = current_level / avg_daily_consumption if avg_daily_consumption > 0 else 0
+            
+            if days_remaining < 2:
+                st.markdown('<div class="alert-danger">', unsafe_allow_html=True)
+                st.error(f"🚨 CRITICAL: Diesel inventory very low! Only {days_remaining:.1f} days remaining.")
+                st.markdown('</div>', unsafe_allow_html=True)
+            elif days_remaining < 5:
+                st.markdown('<div class="alert-warning">', unsafe_allow_html=True)
+                st.warning(f"⚠️ WARNING: Diesel inventory low. {days_remaining:.1f} days remaining.")
+                st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="alert-success">', unsafe_allow_html=True)
+                st.success(f"✅ Diesel inventory sufficient. {days_remaining:.1f} days remaining.")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+def show_space_management():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🏢 Space Management & Room Booking")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📅 View Bookings", "➕ New Booking", "🏢 Room Management"])
+    
+    with tab1:
+        st.subheader("📅 Current Bookings")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            room_filter = st.selectbox("Filter by Room Type", ["All", "Conference", "Meeting", "Cafeteria", "Other"], key="space_type")
+        with col2:
+            status_filter = st.selectbox("Filter by Status", ["All", "Confirmed", "Pending", "Cancelled"], key="space_status")
+        with col3:
+            date_filter = st.date_input("Filter by Date", value=datetime.now().date(), key="space_date")
+        
+        filters = {}
+        if room_filter != "All":
+            filters['room_type'] = room_filter
+        if status_filter != "All":
+            filters['status'] = status_filter
+        if date_filter:
+            filters['booking_date'] = date_filter
+        
+        # For regular users, show only their bookings
+        if st.session_state.user['role'] in ['facility_user', 'hse_officer']:
+            filters['booked_by'] = st.session_state.user['username']
+        
+        bookings = get_space_bookings(filters)
+        
+        if not bookings:
+            st.info("📭 No bookings found")
+        else:
+            # Display bookings
+            for booking in bookings:
+                status = booking.get('status', 'Pending')
+                status_class = {
+                    'Confirmed': 'booking-confirmed',
+                    'Pending': 'booking-pending',
+                    'Cancelled': 'booking-cancelled'
+                }.get(status, 'booking-pending')
+                
+                with st.expander(f"{booking['room_name']} - {booking['booking_date']} {booking['start_time']} to {booking['end_time']} ({status})"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"""
+                            <div class="card">
+                                <p><strong>Purpose:</strong> {booking['purpose']}</p>
+                                <p><strong>Department:</strong> {booking['department']}</p>
+                                <p><strong>Attendees:</strong> {booking['attendees_count']}</p>
+                                <p><strong>Catering Required:</strong> {'✅ Yes' if booking.get('catering_required') else '❌ No'}</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        st.markdown(f"""
+                            <div class="card">
+                                <p><strong>Status:</strong> <span class="{status_class}">{status}</span></p>
+                                <p><strong>Booked By:</strong> {booking['booked_by']}</p>
+                                <p><strong>Room Type:</strong> {booking['room_type']}</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    if booking.get('special_requirements'):
+                        st.markdown(f"""
+                            <div class="card">
+                                <p><strong>Special Requirements:</strong> {booking['special_requirements']}</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Action buttons for user's own bookings
+                    if booking['booked_by'] == st.session_state.user['username'] and booking['status'] != 'Cancelled':
+                        if st.button("❌ Cancel Booking", key=f"cancel_{booking['id']}"):
+                            if update_booking_status(booking['id'], 'Cancelled'):
+                                st.success("✅ Booking cancelled!")
+                                st.rerun()
+    
+    with tab2:
+        st.subheader("➕ Book a Room")
+        
+        with st.form("new_booking_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                room_type = st.selectbox("Room Type *", ["Conference", "Meeting", "Cafeteria"])
+                room_name = st.selectbox("Room Name *", 
+                                       ["Conference Room A", "Conference Room B", 
+                                        "Meeting Room 1", "Meeting Room 2", 
+                                        "Cafeteria"] if room_type != "Cafeteria" else ["Cafeteria"])
+                booking_date = st.date_input("Booking Date *", value=datetime.now().date())
+                start_time = st.time_input("Start Time *", value=datetime.strptime("09:00", "%H:%M").time())
+                end_time = st.time_input("End Time *", value=datetime.strptime("12:00", "%H:%M").time())
+            
+            with col2:
+                purpose = st.text_input("Purpose *", placeholder="e.g., Team meeting, Training session...")
+                department = st.selectbox("Department *", 
+                                        ["Management", "Operations", "Finance", "HR", 
+                                         "IT", "Facilities", "HSE", "All"])
+                attendees_count = st.number_input("Number of Attendees *", min_value=1, max_value=500, value=10)
+                catering_required = st.checkbox("Catering Required")
+                special_requirements = st.text_area("Special Requirements", 
+                                                  placeholder="Audio/visual equipment, specific setup, etc.")
+            
+            # Check availability
+            if room_name and booking_date and start_time and end_time:
+                is_available = check_room_availability(room_name, booking_date, 
+                                                      start_time.strftime("%H:%M"), 
+                                                      end_time.strftime("%H:%M"))
+                
+                if not is_available:
+                    st.error("❌ This room is already booked for the selected time slot!")
+                else:
+                    st.success("✅ This time slot is available!")
+            
+            submitted = st.form_submit_button("📅 Book Room", use_container_width=True)
+            
+            if submitted:
+                if not all([room_type, room_name, booking_date, purpose, department, attendees_count]):
+                    st.error("⚠️ Please fill in all required fields (*)")
+                elif end_time <= start_time:
+                    st.error("❌ End time must be after start time")
+                elif not is_available:
+                    st.error("❌ Room not available for selected time slot")
+                else:
+                    if add_space_booking(room_name, room_type, booking_date, 
+                                       start_time.strftime("%H:%M"), 
+                                       end_time.strftime("%H:%M"), 
+                                       purpose, st.session_state.user['username'],
+                                       department, attendees_count, catering_required, 
+                                       special_requirements):
+                        st.success("✅ Room booked successfully!")
+                        st.rerun()
+    
+    with tab3:
+        st.subheader("🏢 Room Management")
+        
+        if st.session_state.user['role'] in ['facility_manager', 'space_manager']:
+            # Room availability calendar view
+            st.write("### 📅 Room Availability Calendar")
+            
+            selected_date = st.date_input("Select Date to View", value=datetime.now().date(), key="calendar_date")
+            room_types = ["Conference Room A", "Conference Room B", "Meeting Room 1", "Meeting Room 2", "Cafeteria"]
+            
+            for room in room_types:
+                st.write(f"#### {room}")
+                
+                # Get bookings for this room on selected date
+                room_bookings = get_space_bookings({'room_name': room, 'booking_date': selected_date})
+                
+                if not room_bookings:
+                    st.success("✅ No bookings - Room available all day")
+                else:
+                    # Display time slots
+                    slots = []
+                    for booking in room_bookings:
+                        if booking.get('status') == 'Confirmed':
+                            slots.append(f"⛔ {booking['start_time']} - {booking['end_time']}: {booking['purpose']}")
+                    
+                    if slots:
+                        st.warning("🚫 Booked time slots:")
+                        for slot in slots:
+                            st.write(f"• {slot}")
+                    else:
+                        st.success("✅ Room available all day")
+        
+        # Statistics
+        st.subheader("📊 Booking Statistics")
+        
+        all_bookings = get_space_bookings()
+        if all_bookings:
+            total_bookings = len(all_bookings)
+            confirmed_bookings = len([b for b in all_bookings if b.get('status') == 'Confirmed'])
+            cancelled_bookings = len([b for b in all_bookings if b.get('status') == 'Cancelled'])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Bookings", total_bookings)
+            with col2:
+                st.metric("Confirmed", confirmed_bookings)
+            with col3:
+                st.metric("Cancelled", cancelled_bookings)
+
+def show_hse_management():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🚨 HSE (Health, Safety & Environment) Management")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 HSE Schedule", "🚨 Incident Reports", "➕ New Inspection", "📊 Compliance Dashboard"])
+    
+    with tab1:
+        st.subheader("📅 HSE Inspection Schedule")
+        
+        # Filters
+        col1, col2 = st.columns(2)
+        with col1:
+            status_filter = st.selectbox("Filter by Status", ["All", "Upcoming", "Completed", "Overdue"], key="hse_status")
+        with col2:
+            compliance_filter = st.selectbox("Filter by Compliance", ["All", "Compliant", "Non-Compliant"], key="hse_compliance")
+        
+        filters = {}
+        if status_filter != "All":
+            filters['status'] = status_filter
+        if compliance_filter != "All":
+            filters['compliance_level'] = compliance_filter
+        
+        hse_schedule = get_hse_schedule(filters)
+        
+        if not hse_schedule:
+            st.info("📭 No HSE inspections scheduled")
+        else:
+            # Display schedule
+            for item in hse_schedule:
+                next_date = safe_date(item.get('next_inspection_date'))
+                status = item.get('status', 'Upcoming')
+                
+                # Determine if overdue
+                if status != 'Completed' and next_date and next_date < datetime.now().date():
+                    status = "Overdue"
+                
+                with st.expander(f"{item['inspection_type']} - {item['area']} ({status})"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write(f"**Inspection Type:** {item.get('inspection_type')}")
+                        st.write(f"**Area:** {item.get('area')}")
+                        st.write(f"**Frequency:** {item.get('frequency')}")
+                        st.write(f"**Last Inspection:** {item.get('last_inspection_date', 'Never')}")
+                        st.write(f"**Next Inspection:** {item.get('next_inspection_date')}")
+                        st.write(f"**Assigned To:** {item.get('assigned_to')}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        compliance_level = item.get('compliance_level', 'Not Assessed')
+                        compliance_class = 'hse-compliant' if compliance_level == 'Compliant' else 'hse-non-compliant'
+                        
+                        st.write(f"**Compliance Level:** <span class='{compliance_class}'>{compliance_level}</span>", unsafe_allow_html=True)
+                        
+                        if item.get('findings'):
+                            st.write(f"**Findings:** {item.get('findings')}")
+                        if item.get('corrective_actions'):
+                            st.write(f"**Corrective Actions:** {item.get('corrective_actions')}")
+                        if item.get('follow_up_date'):
+                            st.write(f"**Follow-up Date:** {item.get('follow_up_date')}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Action buttons for HSE officers
+                    if st.session_state.user['role'] in ['hse_officer', 'facility_manager'] and status != 'Completed':
+                        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+                        with st.form(f"complete_inspection_{item['id']}"):
+                            st.write("**✅ Complete Inspection**")
+                            
+                            compliance = st.selectbox("Compliance Level", ["Compliant", "Non-Compliant"], 
+                                                    key=f"comp_{item['id']}")
+                            findings = st.text_area("Findings", key=f"find_{item['id']}")
+                            corrective_actions = st.text_area("Corrective Actions", key=f"corr_{item['id']}")
+                            follow_up_date = st.date_input("Follow-up Date", 
+                                                          value=datetime.now().date() + timedelta(days=30),
+                                                          key=f"follow_{item['id']}")
+                            
+                            if st.form_submit_button("✅ Mark as Completed"):
+                                if update_hse_inspection(item['id'], compliance, findings, 
+                                                       corrective_actions, follow_up_date):
+                                    st.success("✅ Inspection completed!")
+                                    st.rerun()
+        
+        # Overdue inspections alert
+        overdue_inspections = [i for i in hse_schedule if i.get('status') != 'Completed' 
+                              and safe_date(i.get('next_inspection_date')) 
+                              and safe_date(i.get('next_inspection_date')) < datetime.now().date()]
+        
+        if overdue_inspections:
+            st.markdown('<div class="alert-danger">', unsafe_allow_html=True)
+            st.error(f"⚠️ **CRITICAL:** {len(overdue_inspections)} HSE inspection(s) overdue!")
+            for item in overdue_inspections:
+                st.write(f"• {item.get('inspection_type')} at {item.get('area')} (Due: {item.get('next_inspection_date')})")
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        st.subheader("🚨 Incident Reports")
+        
+        # Filters for incidents
+        col1, col2 = st.columns(2)
+        with col1:
+            severity_filter = st.selectbox("Filter by Severity", ["All", "Low", "Medium", "High", "Critical"], key="incident_severity")
+        with col2:
+            status_filter = st.selectbox("Filter by Status", ["All", "Open", "Under Investigation", "Closed"], key="incident_status")
+        
+        filters = {}
+        if severity_filter != "All":
+            filters['severity'] = severity_filter
+        if status_filter != "All":
+            filters['status'] = status_filter
+        
+        incidents = get_hse_incidents(filters)
+        
+        if not incidents:
+            st.info("📭 No incident reports found")
+        else:
+            for incident in incidents:
+                severity = incident.get('severity', 'Medium')
+                severity_color = {
+                    'Critical': '#C62828',
+                    'High': '#EF6C00',
+                    'Medium': '#FFC107',
+                    'Low': '#4CAF50'
+                }.get(severity, '#FFC107')
+                
+                with st.expander(f"Incident #{incident['id']}: {incident['incident_type']} ({severity})"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write(f"**Date & Time:** {incident['incident_date']} {incident['incident_time']}")
+                        st.write(f"**Location:** {incident['location']}")
+                        st.write(f"**Type:** {incident['incident_type']}")
+                        st.write(f"**Severity:** <span style='color:{severity_color}; font-weight:bold;'>{severity}</span>", unsafe_allow_html=True)
+                        st.write(f"**Reported By:** {incident['reported_by']}")
+                        if incident.get('affected_persons'):
+                            st.write(f"**Affected Persons:** {incident.get('affected_persons')}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown('<div class="card">', unsafe_allow_html=True)
+                        st.write(f"**Description:** {incident['description']}")
+                        if incident.get('immediate_actions'):
+                            st.write(f"**Immediate Actions:** {incident['immediate_actions']}")
+                        st.write(f"**Investigation Status:** {incident.get('investigation_status', 'Open')}")
+                        st.write(f"**Status:** {incident.get('status', 'Open')}")
+                        if incident.get('corrective_measures'):
+                            st.write(f"**Corrective Measures:** {incident.get('corrective_measures')}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Action buttons for HSE officers
+                    if st.session_state.user['role'] in ['hse_officer', 'facility_manager']:
+                        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+                        with st.form(f"update_incident_{incident['id']}"):
+                            st.write("**🔄 Update Incident Status**")
+                            
+                            investigation_status = st.selectbox("Investigation Status", 
+                                                              ["Open", "Under Investigation", "Resolved"],
+                                                              key=f"inv_{incident['id']}")
+                            corrective_measures = st.text_area("Corrective Measures", 
+                                                             value=incident.get('corrective_measures', ''),
+                                                             key=f"cm_{incident['id']}")
+                            status = st.selectbox("Status", ["Open", "Closed"], 
+                                                key=f"stat_{incident['id']}")
+                            
+                            if st.form_submit_button("💾 Update Incident"):
+                                if update_incident_status(incident['id'], investigation_status, 
+                                                         corrective_measures, status):
+                                    st.success("✅ Incident updated!")
+                                    st.rerun()
+        
+        # Add new incident button
+        if st.session_state.user['role'] in ['hse_officer', 'facility_user', 'facility_manager']:
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+            if st.button("➕ Report New Incident", use_container_width=True):
+                st.session_state['show_new_incident'] = True
+        
+        # New incident form
+        if st.session_state.get('show_new_incident', False):
+            st.subheader("➕ Report New Incident")
+            
+            with st.form("new_incident_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    incident_date = st.date_input("Incident Date *", value=datetime.now().date())
+                    incident_time = st.time_input("Incident Time *", value=datetime.now().time())
+                    location = st.text_input("Location *", placeholder="e.g., Generator Room, Office Building...")
+                    incident_type = st.selectbox("Incident Type *", 
+                                               ["Near Miss", "First Aid Case", "Medical Treatment Case", 
+                                                "Lost Time Injury", "Property Damage", "Environmental", "Other"])
+                
+                with col2:
+                    severity = st.selectbox("Severity *", ["Low", "Medium", "High", "Critical"])
+                    reported_by = st.text_input("Reported By *", value=st.session_state.user['username'])
+                    affected_persons = st.text_input("Affected Persons", placeholder="Names and departments...")
+                
+                description = st.text_area("Description of Incident *", 
+                                         placeholder="Provide detailed description of what happened...")
+                immediate_actions = st.text_area("Immediate Actions Taken", 
+                                               placeholder="First aid, evacuation, containment, etc.")
+                
+                col_submit1, col_submit2, col_submit3 = st.columns([1, 2, 1])
+                with col_submit2:
+                    submitted = st.form_submit_button("🚨 Submit Incident Report", use_container_width=True)
                 
                 if submitted:
-                    if title and description and location:
-                        # Generate request ID
-                        count = query_to_dataframe(
-                            "SELECT COUNT(*) as count FROM work_requests WHERE organization = ?",
-                            (st.session_state.organization,)
-                        ).iloc[0]['count']
-                        request_id = f"WR-{st.session_state.organization[:3]}-{count+1:04d}"
-                        
-                        # Insert request
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute("""
-                            INSERT INTO work_requests 
-                            (request_id, title, description, requested_by, organization,
-                             location, priority, category)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            request_id, title, description, st.session_state.username,
-                            st.session_state.organization, location, priority, category
-                        ))
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success(f"✅ Work request submitted! Request ID: **{request_id}**")
-                        st.balloons()
+                    if not all([incident_date, incident_time, location, incident_type, severity, description, reported_by]):
+                        st.error("⚠️ Please fill in all required fields (*)")
                     else:
-                        st.error("Please fill in all required fields (*)")
-        
-        with tab_objects[1]:  # My Requests
-            st.subheader("📋 My Requests")
+                        if add_hse_incident(incident_date, incident_time.strftime("%H:%M"), 
+                                          location, incident_type, severity, description, 
+                                          reported_by, affected_persons, immediate_actions):
+                            st.success("✅ Incident report submitted successfully!")
+                            st.session_state['show_new_incident'] = False
+                            st.rerun()
             
-            my_requests = query_to_dataframe("""
-                SELECT request_id, title, status, priority, created_at
-                FROM work_requests 
-                WHERE requested_by = ? AND organization = ?
-                ORDER BY created_at DESC
-            """, (st.session_state.username, st.session_state.organization))
-            
-            if not my_requests.empty:
-                for _, req in my_requests.iterrows():
-                    with st.container():
-                        col_a, col_b, col_c = st.columns([3, 1, 1])
-                        with col_a:
-                            st.write(f"**{req['request_id']}**")
-                            st.write(f"**{req['title']}**")
-                            st.caption(f"Created: {req['created_at'][:10]}")
-                        with col_b:
-                            priority_class = f"priority-{req['priority'].lower()}"
-                            st.markdown(f'<span class="{priority_class}">{req["priority"]}</span>', unsafe_allow_html=True)
-                        with col_c:
-                            if req['status'] == 'Completed':
-                                st.success("✅ Completed")
-                            elif req['status'] == 'Approved':
-                                st.info("📋 Approved")
-                            else:
-                                st.warning("⏳ {req['status']}")
-                        st.markdown("---")
-            else:
-                st.info("You have no work requests")
-
-# ============================================================================
-# MAIN APP LOGIC
-# ============================================================================
-
-def main():
-    """Main application logic"""
-    # Initialize database and session state
-    init_db()
-    init_session_state()
-    
-    # Sidebar
-    with st.sidebar:
-        st.markdown("""
-        <div style="text-align: center; padding: 1rem;">
-            <h1 style="color: white; margin-bottom: 0.5rem;">🏢</h1>
-            <h3 style="color: white; margin: 0;">A-B FM Pro™</h3>
-            <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">Facilities Management</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if not st.session_state.get("authenticated", False):
-            # Login form
-            st.markdown("---")
-            st.markdown("### 🔐 Login")
-            
-            username = st.text_input("Username", key="login_username")
-            password = st.text_input("Password", type="password", key="login_password")
-            
-            if st.button("Login", type="primary", use_container_width=True):
-                if authenticate_user(username, password):
-                    st.session_state.current_page = "Dashboard"
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
-            
-            st.markdown("---")
-            st.caption("**Demo Accounts:**")
-            st.caption("👑 Admin: `admin` / `admin123`")
-            st.caption("👨‍💼 Manager: `manager` / `manager123`")
-            st.caption("👤 User: `user` / `user123`")
-            st.caption("👷 Vendor: `vendor` / `vendor123`")
-        
-        else:
-            # User info
-            role_icon = {
-                "Admin": "👑",
-                "Facility Manager": "👨‍💼",
-                "Vendor": "👷",
-                "End User": "👤"
-            }.get(st.session_state.role, "👤")
-            
-            st.markdown(f"""
-            <div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin: 1rem 0;">
-                <div style="font-size: 2rem; text-align: center;">{role_icon}</div>
-                <h4 style="color: white; text-align: center; margin: 0.5rem 0;">{st.session_state.username}</h4>
-                <p style="color: rgba(255,255,255,0.8); text-align: center; margin: 0; font-size: 0.9rem;">
-                    {st.session_state.role}
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            # Navigation
-            if st.session_state.role == "End User":
-                nav_options = ["Dashboard", "Work Management"]
-            elif st.session_state.role == "Vendor":
-                nav_options = ["Dashboard", "Vendor Portal"]
-            else:  # Admin or Facility Manager
-                nav_options = ["Dashboard", "Work Management", "Vendor Management", 
-                               "Preventive Maintenance", "Diesel Tracking"]
-            
-            # Ensure current_page is valid
-            if st.session_state.current_page not in nav_options:
-                st.session_state.current_page = "Dashboard"
-            
-            page = st.selectbox(
-                "Navigate",
-                nav_options,
-                index=nav_options.index(st.session_state.current_page),
-                key="nav_select"
-            )
-            
-            st.session_state.current_page = page
-            
-            st.markdown("---")
-            if st.button("🚪 Logout", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
+            if st.button("❌ Cancel", key="cancel_incident"):
+                st.session_state['show_new_incident'] = False
                 st.rerun()
     
-    # Main content
-    if not st.session_state.get("authenticated", False):
-        # Landing page
-        st.markdown('<h1 class="main-header">A-B Facilities Management Pro™</h1>', unsafe_allow_html=True)
+    with tab3:
+        st.subheader("➕ Schedule New Inspection")
         
-        col1, col2 = st.columns([2, 1])
+        if st.session_state.user['role'] in ['hse_officer', 'facility_manager']:
+            with st.form("new_inspection_schedule"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    inspection_type = st.selectbox("Inspection Type *", 
+                                                 ["Fire Safety Inspection", "First Aid Kit Check", 
+                                                  "Emergency Exit Inspection", "Electrical Safety Check",
+                                                  "PPE Inspection", "Workplace Safety Audit", "Other"])
+                    area = st.text_input("Area *", placeholder="e.g., Main Building, Generator Room...")
+                    frequency = st.selectbox("Frequency *", ["Daily", "Weekly", "Monthly", "Quarterly", "Annual"])
+                
+                with col2:
+                    next_inspection_date = st.date_input("Next Inspection Date *", 
+                                                        value=datetime.now().date() + timedelta(days=7))
+                    assigned_to = st.text_input("Assigned To *", value=st.session_state.user['username'])
+                
+                submitted = st.form_submit_button("📅 Schedule Inspection", use_container_width=True)
+                
+                if submitted:
+                    if not all([inspection_type, area, frequency, next_inspection_date, assigned_to]):
+                        st.error("⚠️ Please fill in all required fields (*)")
+                    else:
+                        if add_hse_schedule(inspection_type, area, frequency, next_inspection_date, assigned_to):
+                            st.success("✅ Inspection scheduled successfully!")
+                            st.rerun()
+        else:
+            st.info("🔒 Only HSE officers and facility managers can schedule new inspections")
+    
+    with tab4:
+        st.subheader("📊 HSE Compliance Dashboard")
+        
+        # Get all HSE data
+        all_inspections = get_hse_schedule()
+        all_incidents = get_hse_incidents()
+        
+        if all_inspections:
+            # Compliance statistics
+            total_inspections = len(all_inspections)
+            completed_inspections = len([i for i in all_inspections if i.get('status') == 'Completed'])
+            compliant_inspections = len([i for i in all_inspections if i.get('compliance_level') == 'Compliant'])
+            overdue_inspections = len([i for i in all_inspections if i.get('status') != 'Completed' 
+                                     and safe_date(i.get('next_inspection_date')) 
+                                     and safe_date(i.get('next_inspection_date')) < datetime.now().date()])
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Inspections", total_inspections)
+            with col2:
+                st.metric("Completed", completed_inspections)
+            with col3:
+                st.metric("Compliant", compliant_inspections)
+            with col4:
+                st.metric("Overdue", overdue_inspections, delta=f"-{overdue_inspections}", delta_color="inverse")
+            
+            # Compliance rate
+            compliance_rate = (compliant_inspections / completed_inspections * 100) if completed_inspections > 0 else 0
+            st.progress(compliance_rate / 100, text=f"Overall Compliance Rate: {compliance_rate:.1f}%")
+            
+            # Incident statistics
+            if all_incidents:
+                st.subheader("🚨 Incident Statistics")
+                
+                incident_by_severity = {}
+                for incident in all_incidents:
+                    severity = incident.get('severity', 'Unknown')
+                    incident_by_severity[severity] = incident_by_severity.get(severity, 0) + 1
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if incident_by_severity:
+                        fig1 = px.pie(values=list(incident_by_severity.values()), 
+                                     names=list(incident_by_severity.keys()),
+                                     title="Incidents by Severity")
+                        st.plotly_chart(fig1, use_container_width=True)
+                
+                with col2:
+                    # Monthly incident trend
+                    incident_dates = [safe_date(i.get('incident_date')) for i in all_incidents if i.get('incident_date')]
+                    if incident_dates:
+                        date_counts = {}
+                        for d in incident_dates:
+                            if d:
+                                month_key = d.strftime('%Y-%m')
+                                date_counts[month_key] = date_counts.get(month_key, 0) + 1
+                        
+                        if date_counts:
+                            fig2 = px.bar(x=list(date_counts.keys()), y=list(date_counts.values()),
+                                         title="Monthly Incident Trend")
+                            st.plotly_chart(fig2, use_container_width=True)
+            
+            # Export options
+            st.subheader("📤 Export Reports")
+            col_exp1, col_exp2 = st.columns(2)
+            
+            with col_exp1:
+                if st.button("📥 Export Inspection Data", use_container_width=True):
+                    df = pd.DataFrame(all_inspections)
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="⬇️ Download CSV",
+                        data=csv,
+                        file_name=f"hse_inspections_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+            
+            with col_exp2:
+                if all_incidents and st.button("📥 Export Incident Data", use_container_width=True):
+                    df = pd.DataFrame(all_incidents)
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="⬇️ Download CSV",
+                        data=csv,
+                        file_name=f"hse_incidents_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+
+# Login Page
+def show_login():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        
+        st.markdown('<h1 class="login-title">🏢 FACILITIES MANAGEMENT SYSTEM™</h1>', unsafe_allow_html=True)
+        st.markdown('<h3 style="text-align: center; color: rgba(255,255,255,0.9);">Secure Login Portal</h3>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+        
+        with st.form("login_form", clear_on_submit=True):
+            st.markdown('<h3 style="color: white;">🔐 User Login</h3>', unsafe_allow_html=True)
+            
+            username = st.text_input("👤 Username", placeholder="Enter your username")
+            password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
+            
+            login_col1, login_col2, login_col3 = st.columns([1, 2, 1])
+            with login_col2:
+                login_button = st.form_submit_button("🚀 Login", use_container_width=True)
+            
+            if login_button:
+                if username and password:
+                    user = authenticate_user(username, password)
+                    if user:
+                        st.session_state.user = user
+                        st.success("Login successful! Redirecting...")
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid username or password")
+                else:
+                    st.warning("⚠️ Please enter both username and password")
+        
+        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+        
+        st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; margin-top: 20px;">', unsafe_allow_html=True)
+        st.markdown('<h4 style="color: white;">📋 Sample Credentials</h4>', unsafe_allow_html=True)
+        
+        credentials = """
+        👥 **Facility User:** 
+        • Username: facility_user
+        • Password: 0123456
+        
+        👨‍💼 **Facility Manager:** 
+        • Username: facility_manager
+        • Password: 0123456
+        
+        🚨 **HSE Officer:** 
+        • Username: hse_officer
+        • Password: 0123456
+        
+        🏢 **Space Manager:** 
+        • Username: space_manager
+        • Password: 0123456
+        
+        🏢 **Vendors:**
+        • HVAC Solutions: hvac_vendor / 0123456
+        • Generator Pros: generator_vendor / 0123456
+        • Fixture Masters: fixture_vendor / 0123456
+        • Building Care: building_vendor / 0123456
+        """
+        st.code(credentials, language=None)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+            <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2);">
+                <p style="color: rgba(255,255,255,0.8); font-size: 12px;">
+                    © 2024 Facilities Management System™ v3.0 | Developed by Abdulahi Ibrahim<br>
+                    All trademarks and copyrights belong to their respective owners
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Footer at bottom of page
+    st.markdown("""
+        <div class="app-footer">
+            FACILITIES MANAGEMENT SYSTEM™ v3.0 © 2024 | Currency: Nigerian Naira (₦) | Developed by Abdulahi Ibrahim
+        </div>
+    """, unsafe_allow_html=True)
+
+# Dashboard Functions - UPDATED TO INCLUDE NEW FEATURES
+def show_dashboard():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📊 Dashboard Overview")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    user = st.session_state.user
+    role = user['role']
+    
+    if role == 'facility_user':
+        show_user_dashboard()
+    elif role == 'facility_manager':
+        show_manager_dashboard()
+    elif role == 'hse_officer':
+        show_hse_dashboard()
+    elif role == 'space_manager':
+        show_space_dashboard()
+    else:
+        show_vendor_dashboard()
+
+def show_user_dashboard():
+    user_requests = get_user_requests(st.session_state.user['username'])
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Requests</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(user_requests)}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        pending_count = len([r for r in user_requests if safe_get(r, 'status') == 'Pending'])
+        st.markdown('<h4>Pending</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{pending_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        completed_count = len([r for r in user_requests if safe_get(r, 'status') == 'Completed'])
+        st.markdown('<h4>Completed</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Quick access to new features
+    st.subheader("🚀 Quick Access")
+    
+    col_q1, col_q2, col_q3 = st.columns(3)
+    
+    with col_q1:
+        if st.button("📅 Book a Room", use_container_width=True):
+            st.session_state.navigation_menu = "Space Management"
+            st.rerun()
+    
+    with col_q2:
+        if st.button("⛽ Generator Records", use_container_width=True):
+            st.session_state.navigation_menu = "Generator Records"
+            st.rerun()
+    
+    with col_q3:
+        if st.button("🚨 Report Incident", use_container_width=True):
+            st.session_state.navigation_menu = "HSE Management"
+            st.rerun()
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("📋 Recent Requests")
+    if user_requests:
+        display_data = []
+        for req in user_requests[:10]:
+            display_data.append({
+                'ID': safe_get(req, 'id'),
+                'Title': safe_str(safe_get(req, 'title'), 'N/A'),
+                'Location': safe_str(safe_get(req, 'location'), 'Common Area'),
+                'Facility': safe_str(safe_get(req, 'facility_type'), 'N/A'),
+                'Priority': safe_str(safe_get(req, 'priority'), 'N/A'),
+                'Status': safe_str(safe_get(req, 'status'), 'N/A'),
+                'Created': safe_str(safe_get(req, 'created_date'), 'N/A')[:10]
+            })
+        
+        df = pd.DataFrame(display_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("📭 No maintenance requests found")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def show_manager_dashboard():
+    all_requests = get_all_requests()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Requests</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(all_requests)}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        pending_count = len([r for r in all_requests if safe_get(r, 'status') == 'Pending'])
+        st.markdown('<h4>Pending</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{pending_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        assigned_count = len([r for r in all_requests if safe_get(r, 'status') == 'Assigned'])
+        st.markdown('<h4>Assigned</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{assigned_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        completed_count = len([r for r in all_requests if safe_get(r, 'status') == 'Completed'])
+        st.markdown('<h4>Completed</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Quick access to new features for managers
+    st.subheader("🚀 Management Quick Access")
+    
+    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
+    
+    with col_q1:
+        if st.button("📅 Maintenance Schedule", use_container_width=True):
+            st.session_state.navigation_menu = "Preventive Maintenance"
+            st.rerun()
+    
+    with col_q2:
+        if st.button("🏢 Space Management", use_container_width=True):
+            st.session_state.navigation_menu = "Space Management"
+            st.rerun()
+    
+    with col_q3:
+        if st.button("🚨 HSE Dashboard", use_container_width=True):
+            st.session_state.navigation_menu = "HSE Management"
+            st.rerun()
+    
+    with col_q4:
+        if st.button("⛽ Generator Reports", use_container_width=True):
+            st.session_state.navigation_menu = "Generator Records"
+            st.rerun()
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    if all_requests:
+        col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("""
-            ### Complete Facilities Management Solution
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            status_counts = {}
+            for req in all_requests:
+                status = safe_str(safe_get(req, 'status'), 'Unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
             
-            **Features:**
-            
-            ✅ Multi-role Workflow  
-            ✅ Preventive Maintenance  
-            ✅ Diesel & Generator Tracking  
-            ✅ Vendor Management  
-            ✅ Work Order Management  
-            ✅ PDF Reports  
-            
-            **Get started by logging in with demo accounts.**
-            """)
+            if status_counts:
+                fig = px.pie(values=list(status_counts.values()), names=list(status_counts.keys()), 
+                            title="📈 Request Status Distribution", color_discrete_sequence=px.colors.sequential.RdBu)
+                st.plotly_chart(fig, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
         
         with col2:
-            st.markdown("### 🚀 Quick Start")
-            st.info("**Demo Credentials:**")
-            st.code("Admin: admin / admin123")
-            st.code("Manager: manager / manager123")
-            st.code("User: user / user123")
-            st.code("Vendor: vendor / vendor123")
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            facility_counts = {}
+            for req in all_requests:
+                facility_type = safe_str(safe_get(req, 'facility_type'), 'Unknown')
+                facility_counts[facility_type] = facility_counts.get(facility_type, 0) + 1
+            
+            if facility_counts:
+                fig = px.bar(x=list(facility_counts.values()), y=list(facility_counts.keys()), 
+                            title="🏢 Requests by Facility Type", orientation='h',
+                            color=list(facility_counts.values()),
+                            color_continuous_scale='Viridis')
+                st.plotly_chart(fig, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
     
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("📋 Recent Requests")
+    if all_requests:
+        display_data = []
+        for req in all_requests[:10]:
+            display_data.append({
+                'ID': safe_get(req, 'id'),
+                'Title': safe_str(safe_get(req, 'title'), 'N/A'),
+                'Location': safe_str(safe_get(req, 'location'), 'Common Area'),
+                'Facility': safe_str(safe_get(req, 'facility_type'), 'N/A'),
+                'Priority': safe_str(safe_get(req, 'priority'), 'N/A'),
+                'Status': safe_str(safe_get(req, 'status'), 'N/A'),
+                'Created By': safe_str(safe_get(req, 'created_by'), 'N/A'),
+                'Created': safe_str(safe_get(req, 'created_date'), 'N/A')[:10]
+            })
+        
+        df = pd.DataFrame(display_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        # Authenticated view
-        if st.session_state.current_page == "Dashboard":
-            show_dashboard()
-        elif st.session_state.current_page == "Work Management":
-            show_work_management()
-        elif st.session_state.current_page == "Vendor Management":
-            show_vendor_portal()
-        elif st.session_state.current_page == "Vendor Portal":
-            show_vendor_portal()
-        elif st.session_state.current_page == "Preventive Maintenance":
-            show_preventive_maintenance()
-        elif st.session_state.current_page == "Diesel Tracking":
-            show_diesel_tracking()
-        else:
-            show_dashboard()
+        st.info("📭 No maintenance requests found")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# ============================================================================
-# RUN THE APP
-# ============================================================================
+def show_hse_dashboard():
+    st.subheader("🚨 HSE Officer Dashboard")
+    
+    # Get HSE data
+    hse_schedule_data = get_hse_schedule()
+    hse_incidents = get_hse_incidents()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Inspections</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(hse_schedule_data)}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        overdue = len([i for i in hse_schedule_data if i.get('status') != 'Completed' 
+                      and safe_date(i.get('next_inspection_date')) 
+                      and safe_date(i.get('next_inspection_date')) < datetime.now().date()])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Overdue Inspections</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3 style="color: #F44336;">{overdue}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Incidents</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(hse_incidents)}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        open_incidents = len([i for i in hse_incidents if i.get('status') == 'Open'])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Open Incidents</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3 style="color: #FF9800;">{open_incidents}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Quick actions
+    st.subheader("⚡ Quick Actions")
+    
+    col_q1, col_q2, col_q3 = st.columns(3)
+    
+    with col_q1:
+        if st.button("➕ Schedule Inspection", use_container_width=True):
+            st.session_state.navigation_menu = "HSE Management"
+            st.rerun()
+    
+    with col_q2:
+        if st.button("🚨 Report Incident", use_container_width=True):
+            st.session_state.navigation_menu = "HSE Management"
+            st.rerun()
+    
+    with col_q3:
+        if st.button("📊 View Compliance", use_container_width=True):
+            st.session_state.navigation_menu = "HSE Management"
+            st.rerun()
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Urgent items
+    col_urg1, col_urg2 = st.columns(2)
+    
+    with col_urg1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("⚠️ Overdue Inspections")
+        overdue_items = [i for i in hse_schedule_data if i.get('status') != 'Completed' 
+                        and safe_date(i.get('next_inspection_date')) 
+                        and safe_date(i.get('next_inspection_date')) < datetime.now().date()]
+        
+        if overdue_items:
+            for item in overdue_items[:5]:
+                st.write(f"• **{item['inspection_type']}** at {item['area']} (Due: {item['next_inspection_date']})")
+            if len(overdue_items) > 5:
+                st.write(f"... and {len(overdue_items) - 5} more")
+        else:
+            st.success("✅ No overdue inspections")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col_urg2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("🚨 Recent Incidents")
+        if hse_incidents:
+            for incident in hse_incidents[:5]:
+                st.write(f"• **{incident['incident_type']}** at {incident['location']} ({incident['severity']})")
+            if len(hse_incidents) > 5:
+                st.write(f"... and {len(hse_incidents) - 5} more")
+        else:
+            st.success("✅ No recent incidents")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def show_space_dashboard():
+    st.subheader("🏢 Space Manager Dashboard")
+    
+    # Get space booking data
+    bookings = get_space_bookings()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Bookings</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(bookings)}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        today_bookings = len([b for b in bookings if b.get('booking_date') == datetime.now().date().isoformat()])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Today\'s Bookings</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{today_bookings}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        confirmed_bookings = len([b for b in bookings if b.get('status') == 'Confirmed'])
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Confirmed</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{confirmed_bookings}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Quick actions
+    st.subheader("⚡ Quick Actions")
+    
+    col_q1, col_q2 = st.columns(2)
+    
+    with col_q1:
+        if st.button("➕ New Booking", use_container_width=True):
+            st.session_state.navigation_menu = "Space Management"
+            st.rerun()
+    
+    with col_q2:
+        if st.button("📅 View All Bookings", use_container_width=True):
+            st.session_state.navigation_menu = "Space Management"
+            st.rerun()
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    # Today's schedule
+    st.subheader("📅 Today's Schedule")
+    
+    today = datetime.now().date().isoformat()
+    todays_bookings = [b for b in bookings if b.get('booking_date') == today and b.get('status') == 'Confirmed']
+    
+    if todays_bookings:
+        for booking in todays_bookings:
+            with st.expander(f"{booking['room_name']} - {booking['start_time']} to {booking['end_time']}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Purpose:** {booking['purpose']}")
+                    st.write(f"**Department:** {booking['department']}")
+                    st.write(f"**Attendees:** {booking['attendees_count']}")
+                with col2:
+                    st.write(f"**Booked By:** {booking['booked_by']}")
+                    if booking.get('catering_required'):
+                        st.write("**Catering:** ✅ Required")
+                    if booking.get('special_requirements'):
+                        st.write(f"**Special:** {booking['special_requirements']}")
+    else:
+        st.info("📭 No bookings scheduled for today")
+
+def show_vendor_dashboard():
+    vendor_requests = get_vendor_requests(st.session_state.user['username'])
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        assigned_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Assigned'])
+        st.markdown('<h4>Assigned Jobs</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{assigned_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        completed_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Completed'])
+        st.markdown('<h4>Completed Jobs</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{completed_count}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.markdown('<h4>Total Jobs</h4>', unsafe_allow_html=True)
+        st.markdown(f'<h3>{len(vendor_requests)}</h3>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("🔧 Currently Assigned Jobs")
+    assigned_jobs = [r for r in vendor_requests if safe_get(r, 'status') == 'Assigned']
+    
+    if assigned_jobs:
+        display_data = []
+        for job in assigned_jobs:
+            display_data.append({
+                'ID': safe_get(job, 'id'),
+                'Title': safe_str(safe_get(job, 'title'), 'N/A'),
+                'Location': safe_str(safe_get(job, 'location'), 'Common Area'),
+                'Facility': safe_str(safe_get(job, 'facility_type'), 'N/A'),
+                'Priority': safe_str(safe_get(job, 'priority'), 'N/A'),
+                'Created': safe_str(safe_get(job, 'created_date'), 'N/A')[:10]
+            })
+        
+        df = pd.DataFrame(display_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.success("🎉 All jobs are completed! No currently assigned jobs.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Existing functions that remain the same (shortened for brevity)
+def show_create_request():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📝 Create Maintenance Request")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    with st.form("create_request_form", clear_on_submit=True):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            title = st.text_input("📌 Request Title", placeholder="Enter request title", key="req_title")
+            location = st.selectbox(
+                "📍 Location",
+                ["Water Treatment Plant", "Finance", "HR", "Admin", "Common Area", 
+                 "Production", "Warehouse", "Office Building", "Laboratory"],
+                key="req_location"
+            )
+            facility_type = st.selectbox(
+                "🏢 Facility Type",
+                ["HVAC (Cooling Systems)", "Generator Maintenance", "Fixture and Fittings", 
+                 "Building Maintenance", "HSE", "Space Management"],
+                key="req_facility"
+            )
+        
+        with col2:
+            priority = st.selectbox("🚨 Priority", ["Low", "Medium", "High", "Critical"], key="req_priority")
+        
+        description = st.text_area("📄 Description of the Request", height=100, 
+                                 placeholder="Please provide detailed description of the maintenance request...",
+                                 key="req_description")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        submitted = st.form_submit_button("🚀 Submit Request", use_container_width=True)
+        
+        if submitted:
+            if not all([title, description, location, facility_type, priority]):
+                st.error("⚠️ Please fill in all fields")
+            else:
+                success = execute_update(
+                    'INSERT INTO maintenance_requests (title, description, location, facility_type, priority, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+                    (title, description, location, facility_type, priority, st.session_state.user['username'])
+                )
+                if success:
+                    st.success("✅ Maintenance request created successfully!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to create request")
+
+def show_my_requests():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📋 My Maintenance Requests")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    user_requests = get_user_requests(st.session_state.user['username'])
+    
+    if not user_requests:
+        st.info("📭 No maintenance requests found")
+        return
+    
+    display_data = []
+    for req in user_requests:
+        display_data.append({
+            'ID': safe_get(req, 'id'),
+            'Title': safe_str(safe_get(req, 'title'), 'N/A'),
+            'Location': safe_str(safe_get(req, 'location'), 'Common Area'),
+            'Facility': safe_str(safe_get(req, 'facility_type'), 'N/A'),
+            'Priority': safe_str(safe_get(req, 'priority'), 'N/A'),
+            'Status': safe_str(safe_get(req, 'status'), 'N/A'),
+            'Created': safe_str(safe_get(req, 'created_date'), 'N/A')[:10]
+        })
+    
+    df = pd.DataFrame(display_data)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        status_options = ["All"] + list(df['Status'].unique())
+        status_filter = st.selectbox("Filter by Status", status_options, key="status_filter")
+    with col2:
+        priority_options = ["All"] + list(df['Priority'].unique())
+        priority_filter = st.selectbox("Filter by Priority", priority_options, key="priority_filter")
+    with col3:
+        facility_options = ["All"] + list(df['Facility'].unique())
+        facility_filter = st.selectbox("Filter by Facility Type", facility_options, key="facility_filter")
+    with col4:
+        location_options = ["All"] + list(df['Location'].unique())
+        location_filter = st.selectbox("Filter by Location", location_options, key="location_filter")
+    
+    filtered_df = df
+    if status_filter != "All":
+        filtered_df = filtered_df[filtered_df['Status'] == status_filter]
+    if priority_filter != "All":
+        filtered_df = filtered_df[filtered_df['Priority'] == priority_filter]
+    if facility_filter != "All":
+        filtered_df = filtered_df[filtered_df['Facility'] == facility_filter]
+    if location_filter != "All":
+        filtered_df = filtered_df[filtered_df['Location'] == location_filter]
+    
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    st.subheader("📄 Request Details")
+    selected_id = st.selectbox("Select Request to View Details", [""] + [str(safe_get(req, 'id')) for req in user_requests], key="request_select")
+    
+    if selected_id:
+        request = next((r for r in user_requests if str(safe_get(r, 'id')) == selected_id), None)
+        if request:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**📋 Basic Information**")
+                st.write(f"**Title:** {safe_str(safe_get(request, 'title'), 'N/A')}")
+                st.write(f"**Description:** {safe_str(safe_get(request, 'description'), 'N/A')}")
+                st.write(f"**Location:** {safe_str(safe_get(request, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(request, 'facility_type'), 'N/A')}")
+                st.write(f"**Priority:** {safe_str(safe_get(request, 'priority'), 'N/A')}")
+                st.write(f"**Status:** {safe_str(safe_get(request, 'status'), 'N/A')}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**📊 Additional Information**")
+                st.write(f"**Created Date:** {safe_str(safe_get(request, 'created_date'), 'N/A')}")
+                if safe_get(request, 'assigned_vendor'):
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(request, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(request, 'assigned_vendor')
+                    st.write(f"**Assigned Vendor:** {vendor_name}")
+                if safe_get(request, 'completion_notes'):
+                    st.write(f"**Completion Notes:** {safe_str(safe_get(request, 'completion_notes'))}")
+                if safe_get(request, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:** {safe_str(safe_get(request, 'job_breakdown'))}")
+                if safe_get(request, 'invoice_amount'):
+                    st.write(f"**Invoice Amount:** {format_naira(safe_get(request, 'invoice_amount'))}")
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(request, 'invoice_number'), 'N/A')}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            if (safe_get(request, 'status') == 'Completed' and 
+                not safe_get(request, 'requesting_dept_approval') and
+                safe_get(request, 'created_by') == st.session_state.user['username']):
+                
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                if st.button("✅ Approve (Department)", use_container_width=True, key=f"approve_{safe_get(request, 'id')}"):
+                    if execute_update(
+                        'UPDATE maintenance_requests SET requesting_dept_approval = 1 WHERE id = ?',
+                        (safe_get(request, 'id'),)
+                    ):
+                        st.success("✅ Department approval granted!")
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+def show_manage_requests():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🛠️ Manage Maintenance Requests")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    all_requests = get_all_requests()
+    
+    if not all_requests:
+        st.info("📭 No maintenance requests found")
+        return
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        status_options = ["All"] + ["Pending", "Assigned", "Completed", "Approved"]
+        status_filter = st.selectbox("Filter by Status", status_options, key="mgr_status")
+    with col2:
+        priority_options = ["All"] + ["Low", "Medium", "High", "Critical"]
+        priority_filter = st.selectbox("Filter by Priority", priority_options, key="mgr_priority")
+    with col3:
+        facility_types = list(set(safe_str(req.get('facility_type')) for req in all_requests))
+        facility_options = ["All"] + facility_types
+        facility_filter = st.selectbox("Filter by Facility Type", facility_options, key="mgr_facility")
+    with col4:
+        locations = list(set(safe_str(req.get('location'), 'Common Area') for req in all_requests))
+        location_options = ["All"] + locations
+        location_filter = st.selectbox("Filter by Location", location_options, key="mgr_location")
+    
+    filtered_requests = all_requests
+    if status_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('status')) == status_filter]
+    if priority_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('priority')) == priority_filter]
+    if facility_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('facility_type')) == facility_filter]
+    if location_filter != "All":
+        filtered_requests = [req for req in filtered_requests if safe_str(req.get('location'), 'Common Area') == location_filter]
+    
+    st.subheader(f"📊 Showing {len(filtered_requests)} request(s)")
+    
+    for request in filtered_requests:
+        with st.expander(f"Request #{safe_get(request, 'id')}: {safe_str(safe_get(request, 'title'), 'N/A')} - {safe_str(safe_get(request, 'status'), 'N/A')}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**📋 Basic Information**")
+                st.write(f"**Title:** {safe_str(safe_get(request, 'title'), 'N/A')}")
+                st.write(f"**Description:** {safe_str(safe_get(request, 'description'), 'N/A')}")
+                st.write(f"**Location:** {safe_str(safe_get(request, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(request, 'facility_type'), 'N/A')}")
+                st.write(f"**Priority:** {safe_str(safe_get(request, 'priority'), 'N/A')}")
+                st.write(f"**Status:** {safe_str(safe_get(request, 'status'), 'N/A')}")
+                st.write(f"**Created By:** {safe_str(safe_get(request, 'created_by'), 'N/A')}")
+                st.write(f"**Created Date:** {safe_str(safe_get(request, 'created_date'), 'N/A')}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**🛠️ Management Actions**")
+                
+                if safe_get(request, 'status') == 'Pending':
+                    st.subheader("👥 Assign to Vendor")
+                    
+                    facility_type = safe_str(safe_get(request, 'facility_type'))
+                    
+                    facility_to_vendor_map = {
+                        "HVAC (Cooling Systems)": "HVAC",
+                        "Generator Maintenance": "Generator",
+                        "Fixture and Fittings": "Fixture and Fittings",
+                        "Building Maintenance": "Building Maintenance",
+                        "HSE": "HSE",
+                        "Space Management": "Space Management"
+                    }
+                    
+                    vendor_type = facility_to_vendor_map.get(facility_type, facility_type)
+                    
+                    vendors = execute_query('''
+                        SELECT v.*, u.username 
+                        FROM vendors v 
+                        JOIN users u ON v.username = u.username 
+                        WHERE u.vendor_type = ? OR v.vendor_type = ?
+                    ''', (vendor_type, vendor_type))
+                    
+                    if vendors:
+                        vendor_options = {f"{vendor['company_name']} ({vendor['username']})": vendor['username'] for vendor in vendors}
+                        selected_vendor_key = st.selectbox(
+                            f"Select vendor for {facility_type}",
+                            options=list(vendor_options.keys()),
+                            key=f"vendor_{safe_get(request, 'id')}"
+                        )
+                        
+                        if selected_vendor_key:
+                            selected_vendor = vendor_options[selected_vendor_key]
+                            
+                            if st.button(f"👥 Assign to {selected_vendor}", key=f"assign_{safe_get(request, 'id')}"):
+                                if execute_update(
+                                    'UPDATE maintenance_requests SET status = ?, assigned_vendor = ? WHERE id = ?',
+                                    ('Assigned', selected_vendor, safe_get(request, 'id'))
+                                ):
+                                    st.success(f"✅ Request assigned to {selected_vendor}!")
+                                    st.rerun()
+                    else:
+                        st.warning(f"⚠️ No registered vendors found for {facility_type}")
+                
+                elif safe_get(request, 'status') == 'Completed':
+                    st.subheader("✅ Manager Approval")
+                    
+                    if safe_get(request, 'requesting_dept_approval'):
+                        st.success("✅ Department approval received")
+                        
+                        if not safe_get(request, 'facilities_manager_approval'):
+                            if st.button("✅ Approve as Facilities Manager", key=f"approve_{safe_get(request, 'id')}"):
+                                if execute_update(
+                                    'UPDATE maintenance_requests SET status = ?, facilities_manager_approval = ? WHERE id = ?',
+                                    ('Approved', True, safe_get(request, 'id'))
+                                ):
+                                    st.success("✅ Facilities manager approval granted!")
+                                    st.rerun()
+                        else:
+                            st.success("✅ Facilities manager approval granted")
+                    else:
+                        st.warning("⏳ Waiting for department approval")
+                
+                if safe_get(request, 'assigned_vendor'):
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(request, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(request, 'assigned_vendor')
+                    st.write(f"**👥 Assigned Vendor:** {vendor_name}")
+                
+                if safe_get(request, 'completion_notes'):
+                    st.write(f"**📝 Completion Notes:** {safe_str(safe_get(request, 'completion_notes'))}")
+                
+                if safe_get(request, 'job_breakdown'):
+                    st.write(f"**🔧 Job Breakdown:** {safe_str(safe_get(request, 'job_breakdown'))}")
+                
+                if safe_get(request, 'completed_date'):
+                    st.write(f"**📅 Completed Date:** {safe_str(safe_get(request, 'completed_date'))}")
+                
+                if safe_get(request, 'invoice_amount'):
+                    st.write(f"**💰 Invoice Amount:** {format_naira(safe_get(request, 'invoice_amount'))}")
+                
+                if safe_get(request, 'invoice_number'):
+                    st.write(f"**🔢 Invoice Number:** {safe_str(safe_get(request, 'invoice_number'))}")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+def show_vendor_management():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("👥 Vendor Management")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    vendors = execute_query('SELECT * FROM vendors ORDER BY company_name')
+    
+    if not vendors:
+        st.info("📭 No vendors registered yet")
+        return
+    
+    st.subheader(f"📊 Registered Vendors ({len(vendors)})")
+    
+    for vendor in vendors:
+        with st.expander(f"{safe_str(safe_get(vendor, 'company_name'))} - {safe_str(safe_get(vendor, 'vendor_type'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**🏢 Company Information**")
+                st.write(f"**Company Name:** {safe_str(safe_get(vendor, 'company_name'), 'N/A')}")
+                st.write(f"**Contact Person:** {safe_str(safe_get(vendor, 'contact_person'), 'N/A')}")
+                st.write(f"**Email:** {safe_str(safe_get(vendor, 'email'), 'N/A')}")
+                st.write(f"**Phone:** {safe_str(safe_get(vendor, 'phone'), 'N/A')}")
+                st.write(f"**Vendor Type:** {safe_str(safe_get(vendor, 'vendor_type'), 'N/A')}")
+                annual_turnover = safe_get(vendor, 'annual_turnover')
+                if annual_turnover:
+                    st.write(f"**Annual Turnover:** {format_naira(annual_turnover)}")
+                else:
+                    st.write("**Annual Turnover:** Not specified")
+                tax_id = safe_get(vendor, 'tax_identification_number')
+                st.write(f"**Tax ID:** {safe_str(tax_id)}" if tax_id else "**Tax ID:** Not specified")
+                rc_number = safe_get(vendor, 'rc_number')
+                st.write(f"**RC Number:** {safe_str(rc_number)}" if rc_number else "**RC Number:** Not specified")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**🔧 Services & Details**")
+                st.write(f"**Services Offered:** {safe_str(safe_get(vendor, 'services_offered'), 'N/A')}")
+                key_staff = safe_get(vendor, 'key_management_staff')
+                st.write(f"**Key Management Staff:** {safe_str(key_staff)}" if key_staff else "**Key Management Staff:** Not specified")
+                account_details = safe_get(vendor, 'account_details')
+                st.write(f"**Account Details:** {safe_str(account_details)}" if account_details else "**Account Details:** Not specified")
+                st.write(f"**Certification:** {safe_str(safe_get(vendor, 'certification'), 'Not specified')}")
+                st.write(f"**Address:** {safe_str(safe_get(vendor, 'address'), 'N/A')}")
+                st.write(f"**Registration Date:** {safe_str(safe_get(vendor, 'registration_date'), 'N/A')}")
+                st.write(f"**Username:** {safe_str(safe_get(vendor, 'username'), 'N/A')}")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+def show_reports():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📈 Reports & Analytics")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    all_requests = get_all_requests()
+    
+    if not all_requests:
+        st.info("📭 No data available for reports")
+        return
+    
+    report_data = []
+    for req in all_requests:
+        report_data.append({
+            'id': safe_get(req, 'id'),
+            'title': safe_str(safe_get(req, 'title'), 'N/A'),
+            'location': safe_str(safe_get(req, 'location'), 'Common Area'),
+            'facility_type': safe_str(safe_get(req, 'facility_type'), 'N/A'),
+            'priority': safe_str(safe_get(req, 'priority'), 'N/A'),
+            'status': safe_str(safe_get(req, 'status'), 'N/A'),
+            'created_by': safe_str(safe_get(req, 'created_by'), 'N/A'),
+            'assigned_vendor': safe_str(safe_get(req, 'assigned_vendor'), 'Not assigned'),
+            'created_date': safe_str(safe_get(req, 'created_date'), 'N/A'),
+            'completed_date': safe_str(safe_get(req, 'completed_date'), ''),
+            'invoice_amount': safe_float(safe_get(req, 'invoice_amount'))
+        })
+    
+    df = pd.DataFrame(report_data)
+    
+    if not df.empty:
+        df['created_date'] = pd.to_datetime(df['created_date'], errors='coerce')
+        df['completed_date'] = pd.to_datetime(df['completed_date'], errors='coerce')
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_requests = len(df)
+        st.markdown(f'<div class="metric-card"><h4>Total Requests</h4><h3>{total_requests}</h3></div>', unsafe_allow_html=True)
+    
+    with col2:
+        completed_requests = len(df[df['status'] == 'Completed'])
+        st.markdown(f'<div class="metric-card"><h4>Completed</h4><h3>{completed_requests}</h3></div>', unsafe_allow_html=True)
+    
+    with col3:
+        pending_requests = len(df[df['status'] == 'Pending'])
+        st.markdown(f'<div class="metric-card"><h4>Pending</h4><h3>{pending_requests}</h3></div>', unsafe_allow_html=True)
+    
+    with col4:
+        total_invoice_amount = df['invoice_amount'].sum()
+        st.markdown(f'<div class="metric-card"><h4>Total Invoice Amount</h4><h3 class="currency-naira">{format_naira(total_invoice_amount)}</h3></div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            status_counts = df['status'].value_counts()
+            fig = px.pie(values=status_counts.values, names=status_counts.index, 
+                        title="📊 Request Status Distribution")
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            priority_counts = df['priority'].value_counts()
+            fig = px.bar(x=priority_counts.index, y=priority_counts.values,
+                        title="🚨 Requests by Priority", labels={'x': 'Priority', 'y': 'Count'})
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            facility_counts = df['facility_type'].value_counts()
+            fig = px.bar(y=facility_counts.index, x=facility_counts.values,
+                        title="🏢 Requests by Facility Type", orientation='h',
+                        labels={'x': 'Count', 'y': 'Facility Type'})
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        if not df.empty:
+            location_counts = df['location'].value_counts().head(10)
+            fig = px.bar(y=location_counts.index, x=location_counts.values,
+                        title="📍 Top 10 Locations", orientation='h',
+                        labels={'x': 'Count', 'y': 'Location'})
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("📅 Monthly Trends")
+    if not df.empty and 'created_date' in df.columns:
+        df['month'] = df['created_date'].dt.to_period('M')
+        monthly_trends = df.groupby('month').size().reset_index(name='count')
+        monthly_trends['month'] = monthly_trends['month'].astype(str)
+        
+        fig = px.line(monthly_trends, x='month', y='count', 
+                     title="📈 Monthly Request Trends", markers=True)
+        st.plotly_chart(fig, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+    st.subheader("📤 Export Data")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Export to CSV", use_container_width=True, key="export_csv"):
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="⬇️ Download CSV",
+                data=csv,
+                file_name=f"facilities_management_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="download_csv"
+            )
+    
+    with col2:
+        if st.button("📄 Export to PDF", use_container_width=True, key="export_pdf"):
+            # Generate a summary PDF report
+            buffer = io.BytesIO()
+            c = canvas.Canvas(buffer, pagesize=letter)
+            
+            # Add content to PDF
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(100, 750, "Facilities Management System - Report")
+            
+            c.setFont("Helvetica", 12)
+            c.drawString(100, 730, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            c.drawString(100, 710, f"Total Requests: {len(df)}")
+            c.drawString(100, 690, f"Completed: {len(df[df['status'] == 'Completed'])}")
+            c.drawString(100, 670, f"Pending: {len(df[df['status'] == 'Pending'])}")
+            c.drawString(100, 650, f"Total Invoice Amount: {format_naira(df['invoice_amount'].sum())}")
+            
+            c.showPage()
+            c.save()
+            
+            buffer.seek(0)
+            st.download_button(
+                label="⬇️ Download PDF Report",
+                data=buffer,
+                file_name=f"facilities_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                key="download_pdf"
+            )
+
+def show_assigned_jobs():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🔧 Assigned Jobs")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    vendor_requests = get_vendor_requests(st.session_state.user['username'])
+    assigned_jobs = [r for r in vendor_requests if safe_get(r, 'status') == 'Assigned']
+    
+    if not assigned_jobs:
+        st.success("🎉 No assigned jobs found - all caught up!")
+        return
+    
+    st.subheader(f"📊 You have {len(assigned_jobs)} assigned job(s)")
+    
+    for job in assigned_jobs:
+        with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')} - {safe_str(safe_get(job, 'priority'), 'N/A')} Priority"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write(f"**📍 Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**🏢 Facility Type:** {safe_str(safe_get(job, 'facility_type'), 'N/A')}")
+                st.write(f"**📄 Description:** {safe_str(safe_get(job, 'description'), 'N/A')}")
+                st.write(f"**👤 Created By:** {safe_str(safe_get(job, 'created_by'), 'N/A')}")
+                st.write(f"**📅 Created Date:** {safe_str(safe_get(job, 'created_date'), 'N/A')}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.subheader("✅ Complete Job")
+                with st.form(f"complete_job_{safe_get(job, 'id')}", clear_on_submit=True):
+                    completion_notes = st.text_area("📝 Completion Notes")
+                    job_breakdown = st.text_area("🔧 Breakdown of Job Done", height=100, 
+                                               placeholder="Provide detailed breakdown of work completed...")
+                    completion_date = st.date_input("📅 Date Completed")
+                    invoice_amount = st.number_input("💰 Invoice Amount (₦)", min_value=0.0, step=0.01, format="%.2f")
+                    invoice_number = st.text_input("🔢 Invoice Number")
+                    
+                    submit_button = st.form_submit_button("✅ Submit Completion", use_container_width=True)
+                    
+                    if submit_button:
+                        if not all([completion_notes, job_breakdown, completion_date, invoice_amount, invoice_number]):
+                            st.error("⚠️ Please fill in all fields")
+                        else:
+                            if execute_update(
+                                '''UPDATE maintenance_requests SET status = ?, completion_notes = ?, job_breakdown = ?, 
+                                completed_date = ?, invoice_amount = ?, invoice_number = ? WHERE id = ?''',
+                                ('Completed', completion_notes, job_breakdown, completion_date.strftime('%Y-%m-%d'), 
+                                 invoice_amount, invoice_number, safe_get(job, 'id'))
+                            ):
+                                st.success("✅ Job completed successfully! Waiting for approvals.")
+                                st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+def show_completed_jobs():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("✅ Completed Jobs")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    vendor_requests = get_vendor_requests(st.session_state.user['username'])
+    completed_jobs = [r for r in vendor_requests if safe_get(r, 'status') in ['Completed', 'Approved']]
+    
+    if not completed_jobs:
+        st.info("📭 No completed jobs found")
+        return
+    
+    st.subheader(f"📊 You have completed {len(completed_jobs)} job(s)")
+    
+    display_data = []
+    for job in completed_jobs:
+        display_data.append({
+            'ID': safe_get(job, 'id'),
+            'Title': safe_str(safe_get(job, 'title'), 'N/A'),
+            'Location': safe_str(safe_get(job, 'location'), 'Common Area'),
+            'Facility': safe_str(safe_get(job, 'facility_type'), 'N/A'),
+            'Invoice Amount': format_naira(safe_get(job, 'invoice_amount')),
+            'Invoice Number': safe_str(safe_get(job, 'invoice_number'), 'N/A'),
+            'Status': safe_str(safe_get(job, 'status'), 'N/A'),
+            'Completed Date': safe_str(safe_get(job, 'completed_date'), 'N/A')[:10]
+        })
+    
+    df = pd.DataFrame(display_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+def show_vendor_registration():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🏢 Vendor Registration")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    existing_vendor = execute_query(
+        'SELECT * FROM vendors WHERE username = ?',
+        (st.session_state.user['username'],)
+    )
+    
+    if existing_vendor:
+        st.success("✅ You are already registered as a vendor!")
+        vendor = existing_vendor[0]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.write("**🏢 Company Information**")
+            st.write(f"**Company Name:** {safe_str(safe_get(vendor, 'company_name'), 'N/A')}")
+            st.write(f"**Contact Person:** {safe_str(safe_get(vendor, 'contact_person'), 'N/A')}")
+            st.write(f"**Email:** {safe_str(safe_get(vendor, 'email'), 'N/A')}")
+            st.write(f"**Phone:** {safe_str(safe_get(vendor, 'phone'), 'N/A')}")
+            st.write(f"**Vendor Type:** {safe_str(safe_get(vendor, 'vendor_type'), 'N/A')}")
+            annual_turnover = safe_get(vendor, 'annual_turnover')
+            if annual_turnover:
+                st.write(f"**Annual Turnover:** {format_naira(annual_turnover)}")
+            else:
+                st.write("**Annual Turnover:** Not specified")
+            tax_id = safe_get(vendor, 'tax_identification_number')
+            st.write(f"**Tax ID:** {safe_str(tax_id)}" if tax_id else "**Tax ID:** Not specified")
+            rc_number = safe_get(vendor, 'rc_number')
+            st.write(f"**RC Number:** {safe_str(rc_number)}" if rc_number else "**RC Number:** Not specified")
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.write("**🔧 Services & Details**")
+            st.write(f"**Services Offered:** {safe_str(safe_get(vendor, 'services_offered'), 'N/A')}")
+            key_staff = safe_get(vendor, 'key_management_staff')
+            st.write(f"**Key Management Staff:** {safe_str(key_staff)}" if key_staff else "**Key Management Staff:** Not specified")
+            account_details = safe_get(vendor, 'account_details')
+            st.write(f"**Account Details:** {safe_str(account_details)}" if account_details else "**Account Details:** Not specified")
+            st.write(f"**Certification:** {safe_str(safe_get(vendor, 'certification'), 'Not specified')}")
+            st.write(f"**Address:** {safe_str(safe_get(vendor, 'address'), 'N/A')}")
+            st.write(f"**Registration Date:** {safe_str(safe_get(vendor, 'registration_date'), 'N/A')}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        return
+    
+    st.info("📝 Please complete your vendor registration details below:")
+    
+    with st.form("vendor_registration", clear_on_submit=True):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            company_name = st.text_input("🏢 Company Name *")
+            contact_person = st.text_input("👤 Contact Person *")
+            email = st.text_input("📧 Email *")
+            phone = st.text_input("📞 Phone *")
+            vendor_type = st.text_input("🔧 Vendor Type", value=st.session_state.user['vendor_type'], disabled=True)
+            annual_turnover = st.number_input("💰 Annual Turnover (₦)", min_value=0.0, step=1000.0, format="%.2f")
+            tax_identification_number = st.text_input("🏛️ Tax Identification Number")
+            rc_number = st.text_input("📄 RC Number")
+        
+        with col2:
+            services_offered = st.text_area("🔧 Services Offered *", height=100)
+            key_management_staff = st.text_area("👥 Key Management Staff", height=80, 
+                                              placeholder="List key management staff and their positions...")
+            account_details = st.text_area("🏦 Account Details", height=80, 
+                                         placeholder="Bank name, account number, routing number...")
+            certification = st.text_input("📜 Certification (Optional)")
+            address = st.text_area("📍 Address *", height=80)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        submitted = st.form_submit_button("🚀 Register Vendor", use_container_width=True)
+        
+        if submitted:
+            if not all([company_name, contact_person, email, phone, services_offered, address]):
+                st.error("⚠️ Please fill in all required fields (*)")
+            else:
+                success = execute_update(
+                    '''INSERT INTO vendors 
+                    (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                    annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                    account_details, certification, address) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (st.session_state.user['username'], company_name, contact_person, email, phone, 
+                     st.session_state.user['vendor_type'], services_offered, annual_turnover, 
+                     tax_identification_number, rc_number, key_management_staff, 
+                     account_details, certification, address)
+                )
+                if success:
+                    st.success("✅ Vendor registration completed successfully!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to complete registration")
+
+def show_invoice_creation():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("🧾 Invoice Creation")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    vendor_jobs = execute_query('''
+        SELECT mr.* 
+        FROM maintenance_requests mr
+        LEFT JOIN invoices i ON mr.id = i.request_id
+        WHERE mr.assigned_vendor = ? AND mr.status = 'Completed' AND i.id IS NULL
+        ORDER BY mr.completed_date DESC
+    ''', (st.session_state.user['username'],))
+    
+    if not vendor_jobs:
+        st.info("📭 No jobs available for invoicing")
+        return
+    
+    st.subheader("📋 Select Job for Invoice Creation")
+    job_options = {f"#{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')} - {safe_str(safe_get(job, 'location'), 'Common Area')}": safe_get(job, 'id') for job in vendor_jobs}
+    selected_job_key = st.selectbox("Choose a completed job", list(job_options.keys()), key="invoice_job_select")
+    selected_job_id = job_options[selected_job_key]
+    
+    selected_job = next((job for job in vendor_jobs if safe_get(job, 'id') == selected_job_id), None)
+    
+    if selected_job:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.write(f"**📌 Job Details:** {safe_str(safe_get(selected_job, 'title'), 'N/A')}")
+        st.write(f"**📍 Location:** {safe_str(safe_get(selected_job, 'location'), 'Common Area')}")
+        st.write(f"**📄 Description:** {safe_str(safe_get(selected_job, 'description'), 'N/A')}")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+        st.subheader("💰 Invoice Details")
+        
+        with st.form("invoice_creation_form", clear_on_submit=True):
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                invoice_number = st.text_input("🔢 Invoice Number *")
+                invoice_date = st.date_input("📅 Invoice Date *")
+                details_of_work = st.text_area("🔧 Details of Work Done *", height=100,
+                                             value=safe_str(safe_get(selected_job, 'job_breakdown'), ''))
+                quantity = st.number_input("📦 Quantity *", min_value=1, value=1)
+            
+            with col2:
+                unit_cost = st.number_input("💵 Unit Cost (₦) *", min_value=0.0, step=0.01, format="%.2f")
+                labour_charge = st.number_input("👷 Labour/Service Charge (₦)", min_value=0.0, step=0.01, format="%.2f")
+                vat_applicable = st.checkbox("🏛️ Apply VAT (7.5%)")
+            
+            amount = quantity * unit_cost
+            subtotal = amount + labour_charge
+            vat_amount = subtotal * 0.075 if vat_applicable else 0
+            total_amount = subtotal + vat_amount
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+            st.subheader("🧮 Invoice Summary")
+            
+            calc_col1, calc_col2, calc_col3, calc_col4 = st.columns(4)
+            with calc_col1:
+                st.markdown(f'<div class="metric-card"><h4>Amount</h4><h3 class="currency-naira">{format_naira(amount)}</h3></div>', unsafe_allow_html=True)
+            with calc_col2:
+                st.markdown(f'<div class="metric-card"><h4>Labour Charge</h4><h3 class="currency-naira">{format_naira(labour_charge)}</h3></div>', unsafe_allow_html=True)
+            with calc_col3:
+                st.markdown(f'<div class="metric-card"><h4>VAT Amount</h4><h3 class="currency-naira">{format_naira(vat_amount)}</h3></div>', unsafe_allow_html=True)
+            with calc_col4:
+                st.markdown(f'<div class="metric-card"><h4>Total Amount</h4><h3 class="currency-naira">{format_naira(total_amount)}</h3></div>', unsafe_allow_html=True)
+            
+            submitted = st.form_submit_button("📄 Create Invoice", use_container_width=True)
+            
+            if submitted:
+                if not all([invoice_number, details_of_work]):
+                    st.error("⚠️ Please fill in all required fields (*)")
+                else:
+                    existing_invoice = execute_query('SELECT * FROM invoices WHERE invoice_number = ?', (invoice_number,))
+                    if existing_invoice:
+                        st.error("❌ Invoice number already exists. Please use a different invoice number.")
+                    else:
+                        success = execute_update(
+                            '''INSERT INTO invoices (invoice_number, request_id, vendor_username, invoice_date, 
+                            details_of_work, quantity, unit_cost, amount, labour_charge, vat_applicable, vat_amount, total_amount, currency) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (invoice_number, selected_job_id, st.session_state.user['username'], 
+                             invoice_date.strftime('%Y-%m-%d'), details_of_work, quantity, unit_cost, 
+                             amount, labour_charge, vat_applicable, vat_amount, total_amount, '₦')
+                        )
+                        
+                        if success:
+                            st.success("✅ Invoice created successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to create invoice")
+
+def show_job_invoice_reports():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.title("📋 Job & Invoice Reports")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    completed_jobs = execute_query('''
+        SELECT mr.*, i.invoice_number, i.invoice_date, i.total_amount as invoice_total, i.status as invoice_status
+        FROM maintenance_requests mr
+        LEFT JOIN invoices i ON mr.id = i.request_id
+        WHERE mr.status IN ('Completed', 'Approved')
+        ORDER BY mr.completed_date DESC
+    ''')
+    
+    if not completed_jobs:
+        st.info("📭 No completed jobs with invoices found")
+        return
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_options = ["All"] + list(set(safe_str(safe_get(job, 'status')) for job in completed_jobs))
+        status_filter = st.selectbox("Filter by Job Status", status_options, key="job_status")
+    with col2:
+        location_options = ["All"] + list(set(safe_str(safe_get(job, 'location'), 'Common Area') for job in completed_jobs))
+        location_filter = st.selectbox("Filter by Location", location_options, key="job_location")
+    with col3:
+        has_invoice_filter = st.selectbox("Filter by Invoice", ["All", "With Invoice", "Without Invoice"], key="job_invoice")
+    
+    filtered_jobs = completed_jobs
+    if status_filter != "All":
+        filtered_jobs = [job for job in filtered_jobs if safe_str(safe_get(job, 'status')) == status_filter]
+    if location_filter != "All":
+        filtered_jobs = [job for job in filtered_jobs if safe_str(safe_get(job, 'location'), 'Common Area') == location_filter]
+    if has_invoice_filter == "With Invoice":
+        filtered_jobs = [job for job in filtered_jobs if safe_get(job, 'invoice_number') is not None]
+    elif has_invoice_filter == "Without Invoice":
+        filtered_jobs = [job for job in filtered_jobs if safe_get(job, 'invoice_number') is None]
+    
+    st.subheader(f"📊 Found {len(filtered_jobs)} job(s)")
+    
+    for job in filtered_jobs:
+        with st.expander(f"Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'), 'N/A')} - {safe_str(safe_get(job, 'location'), 'Common Area')} - {safe_str(safe_get(job, 'status'), 'N/A')}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**📋 Job Information**")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'), 'N/A')}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'), 'N/A')}")
+                st.write(f"**Priority:** {safe_str(safe_get(job, 'priority'), 'N/A')}")
+                st.write(f"**Status:** {safe_str(safe_get(job, 'status'), 'N/A')}")
+                st.write(f"**Created By:** {safe_str(safe_get(job, 'created_by'), 'N/A')}")
+                st.write(f"**Assigned Vendor:** {safe_str(safe_get(job, 'assigned_vendor'), 'Not assigned')}")
+                if safe_get(job, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:** {safe_str(safe_get(job, 'job_breakdown'))}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="card">', unsafe_allow_html=True)
+                st.write("**🧾 Invoice Information**")
+                if safe_get(job, 'invoice_number'):
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(job, 'invoice_number'))}")
+                    st.write(f"**Invoice Date:** {safe_str(safe_get(job, 'invoice_date'))}")
+                    st.write(f"**Invoice Amount:** {format_naira(safe_get(job, 'invoice_total'))}")
+                    st.write(f"**Invoice Status:** {safe_str(safe_get(job, 'invoice_status'), 'N/A')}")
+                else:
+                    st.write("**No invoice created yet**")
+                
+                st.write("**✅ Approval Status**")
+                st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
+                st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # PDF Generation Section
+            st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+            st.subheader("📄 Generate Reports")
+            
+            col_pdf1, col_pdf2 = st.columns(2)
+            
+            with col_pdf1:
+                if st.button(f"📥 Generate Job Report (PDF)", key=f"job_pdf_{safe_get(job, 'id')}", 
+                           use_container_width=True):
+                    # Get full job data with invoice if exists
+                    full_job_data = get_completed_job_with_invoice(safe_get(job, 'id'))
+                    
+                    if full_job_data:
+                        # Check if job is approved by facility manager
+                        if safe_get(full_job_data, 'facilities_manager_approval'):
+                            # Generate PDF
+                            pdf_buffer = generate_job_completion_pdf(full_job_data)
+                            
+                            # Create download button
+                            st.download_button(
+                                label="⬇️ Download Job Report PDF",
+                                data=pdf_buffer,
+                                file_name=f"Job_Report_{safe_get(job, 'id')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"download_job_{safe_get(job, 'id')}"
+                            )
+                        else:
+                            st.warning("⚠️ Job must be approved by facility manager before generating report")
+                    else:
+                        st.error("❌ Could not retrieve job data")
+            
+            with col_pdf2:
+                if safe_get(job, 'invoice_number'):
+                    if st.button(f"🧾 Generate Invoice Report (PDF)", key=f"invoice_pdf_{safe_get(job, 'id')}", 
+                               use_container_width=True):
+                        # Get full job data with invoice
+                        full_job_data = get_completed_job_with_invoice(safe_get(job, 'id'))
+                        
+                        if full_job_data:
+                            # Check if job is approved by facility manager
+                            if safe_get(full_job_data, 'facilities_manager_approval'):
+                                # Generate PDF with invoice
+                                pdf_buffer = generate_job_completion_pdf(full_job_data, full_job_data)
+                                
+                                # Create download button
+                                st.download_button(
+                                    label="⬇️ Download Invoice Report PDF",
+                                    data=pdf_buffer,
+                                    file_name=f"Invoice_Report_{safe_get(job, 'invoice_number')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf",
+                                    key=f"download_invoice_{safe_get(job, 'id')}"
+                                )
+                            else:
+                                st.warning("⚠️ Job must be approved by facility manager before generating invoice report")
+                        else:
+                            st.error("❌ Could not retrieve invoice data")
+                else:
+                    st.info("ℹ️ No invoice available for this job")
+
+# Updated navigation menu to include new features
+def show_main_app():
+    user = st.session_state.user
+    role = user['role']
+    
+    st.markdown(f"""
+        <div class="header-container">
+            <h1 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                🏢 FACILITIES MANAGEMENT SYSTEM™
+                <span style="font-size: 14px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                    v3.0
+                </span>
+            </h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">
+                Welcome, <strong>{user['username']}</strong> | Role: {role.replace('_', ' ').title()} | 
+                Currency: Nigerian Naira (₦) | © 2024 Developed by Abdulahi Ibrahim
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    with st.sidebar:
+        st.markdown(f"""
+            <div style="text-align: center; padding: 10px; background: linear-gradient(45deg, #4CAF50, #2E7D32); 
+                     border-radius: 10px; margin-bottom: 20px;">
+                <h3 style="color: white; margin: 0;">👋 Welcome</h3>
+                <p style="color: white; margin: 5px 0;">{user['username']}</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown(f"""
+            <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                <p style="margin: 0;"><strong>Role:</strong> {role.replace('_', ' ').title()}</p>
+                {f'<p style="margin: 0;"><strong>Vendor Type:</strong> {user["vendor_type"]}</p>' if user.get('vendor_type') else ''}
+                <p style="margin: 0;"><strong>Currency:</strong> Nigerian Naira (₦)</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+        
+        # Navigation menu based on role
+        if role == 'facility_user':
+            menu_options = ["Dashboard", "Create Request", "My Requests", 
+                          "Space Management", "Generator Records", "HSE Management"]
+        elif role == 'facility_manager':
+            menu_options = ["Dashboard", "Manage Requests", "Vendor Management", 
+                          "Reports", "Job & Invoice Reports", "Preventive Maintenance",
+                          "Space Management", "Generator Records", "HSE Management"]
+        elif role == 'hse_officer':
+            menu_options = ["Dashboard", "HSE Management"]
+        elif role == 'space_manager':
+            menu_options = ["Dashboard", "Space Management"]
+        else:  # vendor
+            menu_options = ["Dashboard", "Assigned Jobs", "Completed Jobs", 
+                          "Vendor Registration", "Invoice Creation"]
+        
+        # Initialize navigation_menu in session state if not exists
+        if 'navigation_menu' not in st.session_state:
+            st.session_state.navigation_menu = "Dashboard"
+        
+        selected_menu = st.radio("🗺️ Navigation", menu_options, 
+                               key="navigation_menu_radio", 
+                               index=menu_options.index(st.session_state.navigation_menu)
+                               if st.session_state.navigation_menu in menu_options else 0,
+                               label_visibility="collapsed")
+        
+        # Update session state
+        st.session_state.navigation_menu = selected_menu
+        
+        st.markdown('<div class="separator"></div>', unsafe_allow_html=True)
+        
+        # Fixed logout button
+        if st.button("🚪 Logout", type="secondary", use_container_width=True, key="logout_button"):
+            # Clear session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+        
+        # Simple copyright footer
+        st.markdown("""
+            <div style="margin-top: 30px; padding: 10px; text-align: center; font-size: 10px; color: rgba(255,255,255,0.6);">
+                <hr style="margin: 10px 0;">
+                © 2024 FMS™ v3.0<br>
+                All Rights Reserved
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Route to the selected menu
+    if selected_menu == "Dashboard":
+        show_dashboard()
+    elif selected_menu == "Create Request":
+        show_create_request()
+    elif selected_menu == "My Requests":
+        show_my_requests()
+    elif selected_menu == "Manage Requests":
+        show_manage_requests()
+    elif selected_menu == "Vendor Management":
+        show_vendor_management()
+    elif selected_menu == "Reports":
+        show_reports()
+    elif selected_menu == "Job & Invoice Reports":
+        show_job_invoice_reports()
+    elif selected_menu == "Assigned Jobs":
+        show_assigned_jobs()
+    elif selected_menu == "Completed Jobs":
+        show_completed_jobs()
+    elif selected_menu == "Vendor Registration":
+        show_vendor_registration()
+    elif selected_menu == "Invoice Creation":
+        show_invoice_creation()
+    elif selected_menu == "Preventive Maintenance":
+        show_preventive_maintenance()
+    elif selected_menu == "Space Management":
+        show_space_management()
+    elif selected_menu == "Generator Records":
+        show_generator_diesel_records()
+    elif selected_menu == "HSE Management":
+        show_hse_management()
+
+def main():
+    # Initialize session state for user if not exists
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    
+    if st.session_state.user is None:
+        show_login()
+    else:
+        show_main_app()
 
 if __name__ == "__main__":
+    # Initialize fresh database
+    init_database()
+    
+    # Run the app
     main()
+
