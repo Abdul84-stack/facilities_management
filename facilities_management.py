@@ -679,8 +679,8 @@ def generate_final_report_pdf(request_data, invoice_data=None):
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
-        story.append(invoice_table)
-        story.append(Spacer(1, 15))
+    story.append(invoice_table)
+    story.append(Spacer(1, 15))
     
     # Approval Status with Dates
     story.append(Paragraph("APPROVAL HISTORY", subtitle_style))
@@ -1049,6 +1049,7 @@ def show_create_request():
                     st.error("❌ Failed to create request")
 
 def show_my_requests():
+    """Enhanced version of show_my_requests with better UI and approval workflow"""
     st.markdown("<h1 class='app-title'>📋 My Maintenance Requests</h1>", unsafe_allow_html=True)
     
     user_requests = get_user_requests(st.session_state.user['username'])
@@ -1085,105 +1086,138 @@ def show_my_requests():
     
     st.markdown("---")
     
-    # Tabs for different views
-    tab1, tab2, tab3 = st.tabs(["All Requests", "Pending Approval", "Approved Jobs"])
-    
-    with tab1:
-        for req in user_requests:
-            status = safe_get(req, 'status')
-            status_icon = {
-                'Pending': '⏳',
-                'Assigned': '👷',
-                'Completed': '✅',
-                'Approved': '👍'
-            }.get(status, '📋')
+    # Display all requests
+    for req in user_requests:
+        status = safe_get(req, 'status')
+        status_icon = {
+            'Pending': '⏳',
+            'Assigned': '👷',
+            'Completed': '✅',
+            'Approved': '👍'
+        }.get(status, '📋')
+        
+        priority = safe_get(req, 'priority')
+        priority_color = {
+            'Low': '#10b981',
+            'Medium': '#f59e0b',
+            'High': '#ef4444',
+            'Critical': '#dc2626'
+        }.get(priority, '#6b7280')
+        
+        with st.expander(f"{status_icon} Request #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))}"):
+            col1, col2 = st.columns(2)
             
-            with st.expander(f"{status_icon} Request #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))}"):
-                col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Location:** {safe_str(safe_get(req, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
+                st.write(f"**Priority:** <span style='color:{priority_color}; font-weight:bold;'>{priority}</span>", unsafe_allow_html=True)
+                st.write(f"**Status:** {status_icon} {status}")
+                st.write(f"**Created Date:** {safe_str(safe_get(req, 'created_date'))}")
                 
-                with col1:
-                    st.write(f"**Location:** {safe_str(safe_get(req, 'location'), 'Common Area')}")
-                    st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
-                    st.write(f"**Priority:** {safe_str(safe_get(req, 'priority'))}")
-                    st.write(f"**Status:** {status}")
-                    st.write(f"**Created Date:** {safe_str(safe_get(req, 'created_date'))}")
+                # Show workflow status
+                if status in ['Completed', 'Approved']:
+                    st.markdown("---")
+                    st.markdown("### 📋 Approval Status")
+                    st.write(f"**Department Approval:** {'✅ Approved' if safe_get(req, 'requesting_dept_approval') else '⏳ Pending'}")
+                    st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(req, 'facilities_manager_approval') else '⏳ Pending'}")
+            
+            with col2:
+                st.write(f"**Description:** {safe_str(safe_get(req, 'description'))}")
+                if safe_get(req, 'assigned_vendor'):
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(req, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(req, 'assigned_vendor')
+                    st.write(f"**Assigned Vendor:** {vendor_name}")
                 
-                with col2:
-                    st.write(f"**Description:** {safe_str(safe_get(req, 'description'))}")
-                    if safe_get(req, 'assigned_vendor'):
-                        vendor_info = execute_query(
-                            'SELECT company_name FROM vendors WHERE username = ?',
-                            (safe_get(req, 'assigned_vendor'),)
-                        )
-                        vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(req, 'assigned_vendor')
-                        st.write(f"**Assigned Vendor:** {vendor_name}")
-                    
-                    # Show approval status
-                    if status in ['Completed', 'Approved']:
-                        st.write(f"**Department Approval:** {'✅ Approved' if safe_get(req, 'requesting_dept_approval') else '⏳ Pending'}")
-                        st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(req, 'facilities_manager_approval') else '⏳ Pending'}")
-    
-    with tab2:
-        # Show jobs pending department approval
-        pending_approval = [r for r in user_requests if safe_get(r, 'status') == 'Completed' and not safe_get(r, 'requesting_dept_approval')]
-        
-        if pending_approval:
-            st.info(f"📋 You have {len(pending_approval)} job(s) waiting for your department approval")
-            for req in pending_approval:
-                st.write(f"**{safe_str(safe_get(req, 'title'))}** - Completed: {safe_str(safe_get(req, 'completed_date'))}")
+                if safe_get(req, 'completion_notes'):
+                    st.write(f"**Completion Notes:**")
+                    st.info(safe_str(safe_get(req, 'completion_notes')))
                 
-                # Quick approve button
-                if st.button(f"Approve Job #{safe_get(req, 'id')}", key=f"quick_approve_{safe_get(req, 'id')}"):
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if execute_update(
-                        '''UPDATE maintenance_requests 
-                        SET requesting_dept_approval = 1, 
-                            department_approval_date = ?
-                        WHERE id = ?''',
-                        (current_time, safe_get(req, 'id'))
-                    ):
-                        st.success("✅ Approved!")
-                        st.rerun()
-        else:
-            st.info("✅ No jobs pending your approval")
-    
-    with tab3:
-        # Show fully approved jobs
-        approved_jobs = [r for r in user_requests if safe_get(r, 'status') == 'Approved']
-        
-        if approved_jobs:
-            for req in approved_jobs:
-                with st.expander(f"✅ Job #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))}"):
-                    col1, col2 = st.columns(2)
+                if safe_get(req, 'job_breakdown'):
+                    with st.expander("View Job Breakdown"):
+                        st.write(safe_str(safe_get(req, 'job_breakdown')))
+                
+                if safe_get(req, 'invoice_amount'):
+                    st.write(f"**Invoice Amount:** {format_ngn(safe_get(req, 'invoice_amount'))}")
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(req, 'invoice_number'), 'N/A')}")
                     
-                    with col1:
-                        st.write(f"**Completed:** {safe_str(safe_get(req, 'completed_date'))}")
-                        st.write(f"**Department Approved:** {safe_str(safe_get(req, 'department_approval_date'))}")
-                        st.write(f"**Manager Approved:** {safe_str(safe_get(req, 'manager_approval_date'))}")
+                    # Get detailed invoice
+                    invoice_details = execute_query(
+                        'SELECT * FROM invoices WHERE invoice_number = ?', 
+                        (safe_get(req, 'invoice_number'),)
+                    )
                     
-                    with col2:
-                        if safe_get(req, 'invoice_amount'):
-                            st.write(f"**Invoice Amount:** {format_ngn(safe_get(req, 'invoice_amount'))}")
+                    if invoice_details:
+                        invoice = invoice_details[0]
+                        with st.expander("View Invoice Details"):
+                            st.write(f"**Details:** {safe_str(safe_get(invoice, 'details_of_work'))}")
+                            st.write(f"**Quantity:** {safe_str(safe_get(invoice, 'quantity'))}")
+                            st.write(f"**Unit Cost:** {format_ngn(safe_get(invoice, 'unit_cost'))}")
+                            st.write(f"**Total:** {format_ngn(safe_get(invoice, 'total_amount'))}")
+                
+                # ✅ IMPORTANT: Department Approval Button for Completed Jobs
+                if (status == 'Completed' and 
+                    not safe_get(req, 'requesting_dept_approval') and
+                    safe_get(req, 'created_by') == st.session_state.user['username']):
+                    
+                    st.markdown("---")
+                    st.markdown("### ✅ Department Approval Required")
+                    
+                    col_a, col_b = st.columns(2)
+                    
+                    with col_a:
+                        if st.button(f"Approve Job Completion", 
+                                   key=f"dept_approve_myreq_{safe_get(req, 'id')}", 
+                                   use_container_width=True,
+                                   type="primary"):
+                            # Update department approval
+                            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            if execute_update(
+                                '''UPDATE maintenance_requests 
+                                SET requesting_dept_approval = 1, 
+                                    department_approval_date = ?
+                                WHERE id = ?''',
+                                (current_time, safe_get(req, 'id'))
+                            ):
+                                st.success("✅ Department approval granted! Sent to facility manager for final approval.")
+                                st.rerun()
+                    
+                    with col_b:
+                        if st.button("Request Changes", 
+                                   key=f"dept_reject_myreq_{safe_get(req, 'id')}", 
+                                   use_container_width=True,
+                                   type="secondary"):
+                            st.warning("Changes requested from vendor")
+                            # In a real app, you would add a notes field and send back to vendor
+                
+                # ✅ Show download button for fully approved jobs
+                elif (status == 'Approved' and 
+                      safe_get(req, 'requesting_dept_approval') and 
+                      safe_get(req, 'facilities_manager_approval')):
+                    
+                    st.markdown("---")
+                    st.markdown("### 📄 Final Report Available")
+                    
+                    # Get invoice for PDF
+                    invoice_details = execute_query(
+                        'SELECT * FROM invoices WHERE request_id = ?', 
+                        (safe_get(req, 'id'),)
+                    )
+                    
+                    if invoice_details:
+                        invoice = invoice_details[0]
+                        pdf_buffer = generate_final_report_pdf(req, invoice)
                         
-                        # Get invoice for PDF
-                        invoice_details = execute_query(
-                            'SELECT * FROM invoices WHERE request_id = ?', 
-                            (safe_get(req, 'id'),)
+                        st.download_button(
+                            label="📄 Download Final Approved Report",
+                            data=pdf_buffer.getvalue(),
+                            file_name=f"Final_Approved_Report_Job_{safe_get(req, 'id')}.pdf",
+                            mime="application/pdf",
+                            key=f"user_final_download_{safe_get(req, 'id')}",
+                            use_container_width=True
                         )
-                        
-                        if invoice_details:
-                            invoice = invoice_details[0]
-                            pdf_buffer = generate_final_report_pdf(req, invoice)
-                            
-                            st.download_button(
-                                label="📄 Download Final Report",
-                                data=pdf_buffer.getvalue(),
-                                file_name=f"Final_Report_Job_{safe_get(req, 'id')}.pdf",
-                                mime="application/pdf",
-                                key=f"user_download_{safe_get(req, 'id')}"
-                            )
-        else:
-            st.info("📭 No fully approved jobs yet")
 
 # =============================================
 # UPDATED MANAGE REQUESTS FOR FACILITY MANAGER
