@@ -291,6 +291,46 @@ st.set_page_config(
 inject_custom_css()
 
 # =============================================
+# DATABASE FUNCTIONS - MOVED TO TOP
+# =============================================
+def get_connection():
+    return sqlite3.connect('facilities_management.db', check_same_thread=False)
+
+def execute_query(query, params=()):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        
+        columns = [column[0] for column in cursor.description] if cursor.description else []
+        rows = cursor.fetchall()
+        
+        results = []
+        for row in rows:
+            result = {}
+            for i, column in enumerate(columns):
+                result[column] = row[i]
+            results.append(result)
+        
+        conn.close()
+        return results
+    except Exception as e:
+        print(f"Query error: {e}")
+        return []
+
+def execute_update(query, params=()):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Update error: {e}")
+        return False
+
+# =============================================
 # PASSWORD HASHING FUNCTIONS
 # =============================================
 def hash_password(password):
@@ -421,6 +461,35 @@ def init_database():
 # =============================================
 # ENSURE DEFAULT ACCOUNTS FUNCTION
 # =============================================
+def ensure_vendor_records():
+    """Ensure vendor records exist for vendor accounts"""
+    vendors_info = [
+        ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
+         'HVAC installation, maintenance and repair services'),
+        ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
+         'Generator installation and maintenance'),
+        ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
+         'Fixture installation and repairs'),
+        ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
+         'General building maintenance and repairs')
+    ]
+    
+    for vendor_info in vendors_info:
+        username, company_name, contact_person, email, phone, vendor_type, services_offered = vendor_info
+        
+        existing = execute_query("SELECT * FROM vendors WHERE username = ?", (username,))
+        
+        if not existing:
+            execute_update(
+                '''INSERT INTO vendors 
+                (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                 address, status, created_by, approved_by, approval_date) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (username, company_name, contact_person, email, phone, vendor_type, services_offered,
+                 '123 Main Street, City, State', 'approved', 'system', 'system', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            )
+            print(f"Created vendor record for {company_name}")
+
 def ensure_default_accounts():
     """Ensure default accounts exist with correct passwords"""
     default_accounts = [
@@ -463,78 +532,9 @@ def ensure_default_accounts():
     # Also ensure vendor records exist
     ensure_vendor_records()
 
-def ensure_vendor_records():
-    """Ensure vendor records exist for vendor accounts"""
-    vendors_info = [
-        ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
-         'HVAC installation, maintenance and repair services'),
-        ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
-         'Generator installation and maintenance'),
-        ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
-         'Fixture installation and repairs'),
-        ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
-         'General building maintenance and repairs')
-    ]
-    
-    for vendor_info in vendors_info:
-        username, company_name, contact_person, email, phone, vendor_type, services_offered = vendor_info
-        
-        existing = execute_query("SELECT * FROM vendors WHERE username = ?", (username,))
-        
-        if not existing:
-            execute_update(
-                '''INSERT INTO vendors 
-                (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
-                 address, status, created_by, approved_by, approval_date) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (username, company_name, contact_person, email, phone, vendor_type, services_offered,
-                 '123 Main Street, City, State', 'approved', 'system', 'system', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            )
-            print(f"Created vendor record for {company_name}")
-
 # Initialize database and create default accounts
 init_database()
 ensure_default_accounts()
-
-# =============================================
-# DATABASE FUNCTIONS
-# =============================================
-def get_connection():
-    return sqlite3.connect('facilities_management.db', check_same_thread=False)
-
-def execute_query(query, params=()):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        
-        columns = [column[0] for column in cursor.description] if cursor.description else []
-        rows = cursor.fetchall()
-        
-        results = []
-        for row in rows:
-            result = {}
-            for i, column in enumerate(columns):
-                result[column] = row[i]
-            results.append(result)
-        
-        conn.close()
-        return results
-    except Exception as e:
-        print(f"Query error: {e}")
-        return []
-
-def execute_update(query, params=()):
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"Update error: {e}")
-        return False
 
 # =============================================
 # SAFE DATA ACCESS FUNCTIONS
