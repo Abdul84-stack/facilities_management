@@ -331,10 +331,22 @@ def execute_update(query, params=()):
         return False
 
 # =============================================
-# SIMPLE PASSWORD MANAGEMENT (0123456 for all)
+# PASSWORD MANAGEMENT FUNCTIONS
+# =============================================
+def hash_password(password):
+    """Hash a password for storing."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def generate_password(length=8):
+    """Generate a random password"""
+    characters = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(secrets.choice(characters) for _ in range(length))
+
+# =============================================
+# FIX 1: CORRECT AUTHENTICATION FUNCTION
 # =============================================
 def authenticate_user(username, password):
-    """Simple authentication - all accounts use password '0123456'"""
+    """Authenticate user with hashed password"""
     # Check if user exists
     user = execute_query('SELECT * FROM users WHERE username = ?', (username,))
     
@@ -347,20 +359,14 @@ def authenticate_user(username, password):
     if user_data.get('status') != 'approved':
         return None
     
-    # SIMPLE PASSWORD CHECK: All accounts use '0123456'
-    if password == '0123456':
+    # FIXED: Compare hashed password
+    stored_hash = user_data.get('password_hash')
+    input_hash = hash_password(password)
+    
+    if input_hash == stored_hash:
         return user_data
     
     return None
-
-def hash_password(password):
-    """Hash a password for storing."""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def generate_password(length=8):
-    """Generate a random password"""
-    characters = string.ascii_letters + string.digits + "!@#$%^&*"
-    return ''.join(secrets.choice(characters) for _ in range(length))
 
 # =============================================
 # DATABASE SETUP
@@ -469,7 +475,7 @@ def init_database():
         print(f"Database initialization error: {e}")
 
 # =============================================
-# CREATE DEFAULT ACCOUNTS (All with password '0123456')
+# FIX 2: CREATE DEFAULT ACCOUNTS WITH CORRECT PASSWORDS
 # =============================================
 def create_default_accounts():
     """Create default accounts with password '0123456'"""
@@ -494,7 +500,7 @@ def create_default_accounts():
                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
                 (username, password_hash, role, 'approved', full_name, vendor_type, 'system')
             )
-            print(f"✅ Created user: {username}")
+            print(f"✅ Created user: {username} (password: 0123456)")
 
 def create_vendor_records():
     """Create vendor records for vendor accounts"""
@@ -525,10 +531,49 @@ def create_vendor_records():
             )
             print(f"✅ Created vendor record: {company_name}")
 
+# =============================================
+# TEST DEFAULT ACCOUNTS
+# =============================================
+def test_default_accounts():
+    """Test if default accounts are working"""
+    print("\n" + "="*50)
+    print("TESTING DEFAULT ACCOUNTS")
+    print("="*50)
+    
+    test_accounts = [
+        ('facility_manager', '0123456'),
+        ('facility_user', '0123456'),
+        ('hvac_vendor', '0123456'),
+        ('generator_vendor', '0123456'),
+        ('fixture_vendor', '0123456'),
+        ('building_vendor', '0123456')
+    ]
+    
+    all_pass = True
+    for username, password in test_accounts:
+        user = authenticate_user(username, password)
+        if user:
+            print(f"✅ Login successful: {username} - Role: {user.get('role')}")
+        else:
+            print(f"❌ Login failed: {username}")
+            all_pass = False
+    
+    print("="*50)
+    if all_pass:
+        print("✅ ALL DEFAULT ACCOUNTS ARE WORKING CORRECTLY")
+    else:
+        print("❌ SOME ACCOUNTS HAVE ISSUES")
+    print("="*50)
+    
+    return all_pass
+
 # Initialize database and create default accounts
 init_database()
 create_default_accounts()
 create_vendor_records()
+
+# Test the default accounts
+test_default_accounts()
 
 # =============================================
 # SAFE DATA ACCESS FUNCTIONS
@@ -697,6 +742,18 @@ def show_enhanced_login():
             st.markdown("<div class='card'>", unsafe_allow_html=True)
             st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>🔐 Login to Your Account</h3>", unsafe_allow_html=True)
             
+            # Display default credentials for testing
+            with st.expander("📋 Default Credentials (for testing)"):
+                st.info("""
+                **Default Accounts (Password: 0123456 for all):**
+                - **Facility Manager:** facility_manager / 0123456
+                - **Facility User:** facility_user / 0123456
+                - **HVAC Vendor:** hvac_vendor / 0123456
+                - **Generator Vendor:** generator_vendor / 0123456
+                - **Fixture Vendor:** fixture_vendor / 0123456
+                - **Building Vendor:** building_vendor / 0123456
+                """)
+            
             with st.form("login_form"):
                 username = st.text_input("👤 Username", placeholder="Enter your username")
                 password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
@@ -712,10 +769,10 @@ def show_enhanced_login():
                         user = authenticate_user(username, password)
                         if user:
                             st.session_state.user = user
-                            st.success("✅ Login successful! Redirecting...")
+                            st.success(f"✅ Login successful! Welcome {user.get('full_name')}")
                             st.rerun()
                         else:
-                            st.error("❌ Invalid username or password")
+                            st.error("❌ Invalid username or password. Try '0123456' as password for default accounts.")
             
             st.markdown("</div>", unsafe_allow_html=True)
     
