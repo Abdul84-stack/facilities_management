@@ -808,8 +808,8 @@ def generate_final_report_pdf(request_data, invoice_data=None):
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
-    story.append(invoice_table)
-    story.append(Spacer(1, 15))
+        story.append(invoice_table)
+        story.append(Spacer(1, 15))
     
     # Approval Status with Dates
     story.append(Paragraph("APPROVAL HISTORY", subtitle_style))
@@ -2363,17 +2363,20 @@ def show_user_dashboard():
     
     with col1:
         if st.button("📝 Create New Request", use_container_width=True, key="create_new_dash"):
-            show_create_request()
+            st.session_state.page = "create_request"
+            st.rerun()
     
     with col2:
         pending_approvals = get_requests_for_user_approval(st.session_state.user['username'])
         if pending_approvals:
             if st.button(f"✅ Approve Jobs ({len(pending_approvals)})", use_container_width=True, type="primary", key="approve_jobs_dash"):
-                show_department_approval()
+                st.session_state.page = "department_approval"
+                st.rerun()
     
     with col3:
         if st.button("📋 View My Requests", use_container_width=True, key="view_requests_dash"):
-            show_my_requests()
+            st.session_state.page = "my_requests"
+            st.rerun()
 
 def show_manager_dashboard():
     st.markdown("<h1 class='dashboard-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
@@ -2426,17 +2429,20 @@ def show_manager_dashboard():
     
     with col1:
         if st.button("🛠️ Manage Requests", use_container_width=True, key="manage_req_dash"):
-            show_manage_requests()
+            st.session_state.page = "manage_requests"
+            st.rerun()
     
     with col2:
         pending_final_approvals = get_requests_for_manager_approval()
         if pending_final_approvals:
             if st.button(f"✅ Final Approval ({len(pending_final_approvals)})", use_container_width=True, type="primary", key="final_approve_dash"):
-                show_final_approval()
+                st.session_state.page = "final_approval"
+                st.rerun()
     
     with col3:
         if st.button("👥 Manage Users", use_container_width=True, key="manage_users_dash"):
-            show_manage_users()
+            st.session_state.page = "manage_users"
+            st.rerun()
 
 def show_vendor_dashboard():
     st.markdown("<h1 class='dashboard-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
@@ -2473,9 +2479,9 @@ def show_vendor_dashboard():
     with col1:
         assigned_jobs = len([r for r in vendor_requests if safe_get(r, 'status') == 'Assigned'])
         if assigned_jobs > 0:
-            if st.button(f"🔧 Work on Jobs ({assigned_jobs})", use_container_width=True
-                                     if st.button(f"🔧 Work on Jobs ({assigned_jobs})", use_container_width=True, key="work_jobs_dash"):
-                show_assigned_jobs()
+            if st.button(f"🔧 Work on Jobs ({assigned_jobs})", use_container_width=True, key="work_jobs_dash"):
+                st.session_state.page = "assigned_jobs"
+                st.rerun()
         else:
             st.info("📭 No assigned jobs")
     
@@ -2483,7 +2489,8 @@ def show_vendor_dashboard():
         completed_jobs = len([r for r in vendor_requests if safe_get(r, 'status') in ['Completed', 'Approved']])
         if completed_jobs > 0:
             if st.button(f"✅ View Completed ({completed_jobs})", use_container_width=True, key="view_completed_dash"):
-                show_completed_jobs()
+                st.session_state.page = "completed_jobs"
+                st.rerun()
     
     with col3:
         # Check if there are jobs needing invoices
@@ -2497,7 +2504,8 @@ def show_vendor_dashboard():
         invoice_count = jobs_needing_invoices[0]['count'] if jobs_needing_invoices else 0
         if invoice_count > 0:
             if st.button(f"🧾 Create Invoices ({invoice_count})", use_container_width=True, type="primary", key="create_invoice_dash"):
-                show_invoice_creation()
+                st.session_state.page = "invoice_creation"
+                st.rerun()
 
 # =============================================
 # REPORT GENERATION FUNCTIONALITY
@@ -2845,53 +2853,66 @@ def show_sidebar_navigation():
                 st.markdown("### 📊 Dashboard")
                 if st.sidebar.button("📊 Dashboard", key="manager_dash", use_container_width=True):
                     st.session_state.page = "dashboard"
+                    st.rerun()
                 
                 st.markdown("### 🛠️ Request Management")
                 if st.sidebar.button("🛠️ Manage Requests", key="manage_req", use_container_width=True):
                     st.session_state.page = "manage_requests"
+                    st.rerun()
                 
                 if st.sidebar.button("✅ Final Approval", key="final_approval", use_container_width=True):
                     st.session_state.page = "final_approval"
+                    st.rerun()
                 
                 st.markdown("### 👥 User Management")
                 if st.sidebar.button("👥 Manage Users", key="manage_users", use_container_width=True):
                     st.session_state.page = "manage_users"
+                    st.rerun()
                 
                 st.markdown("### 📊 Reports")
                 if st.sidebar.button("📊 Reports & Analytics", key="reports", use_container_width=True):
                     st.session_state.page = "reports"
+                    st.rerun()
             
             elif user_role == 'facility_user':
                 # Facility User Navigation
                 st.markdown("### 📊 Dashboard")
                 if st.sidebar.button("📊 Dashboard", key="user_dash", use_container_width=True):
                     st.session_state.page = "dashboard"
+                    st.rerun()
                 
                 st.markdown("### 📝 Requests")
                 if st.sidebar.button("📝 Create Request", key="create_req", use_container_width=True):
                     st.session_state.page = "create_request"
+                    st.rerun()
                 
                 if st.sidebar.button("📋 My Requests", key="my_req", use_container_width=True):
                     st.session_state.page = "my_requests"
+                    st.rerun()
                 
                 if st.sidebar.button("✅ Department Approval", key="dept_approval", use_container_width=True):
                     st.session_state.page = "department_approval"
+                    st.rerun()
             
             elif user_role == 'vendor':
                 # Vendor Navigation
                 st.markdown("### 📊 Dashboard")
                 if st.sidebar.button("📊 Dashboard", key="vendor_dash", use_container_width=True):
                     st.session_state.page = "dashboard"
+                    st.rerun()
                 
                 st.markdown("### 🔧 Job Management")
                 if st.sidebar.button("🔧 Assigned Jobs", key="assigned_jobs", use_container_width=True):
                     st.session_state.page = "assigned_jobs"
+                    st.rerun()
                 
                 if st.sidebar.button("✅ Completed Jobs", key="completed_jobs", use_container_width=True):
                     st.session_state.page = "completed_jobs"
+                    st.rerun()
                 
                 if st.sidebar.button("🧾 Create Invoice", key="create_invoice", use_container_width=True):
                     st.session_state.page = "invoice_creation"
+                    st.rerun()
         
         st.markdown("---")
         
