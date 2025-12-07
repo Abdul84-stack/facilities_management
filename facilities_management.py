@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 import base64
 import os
+import zipfile
 
 # =============================================
 # CUSTOM CSS FOR ENHANCED UI/UX
@@ -641,7 +642,7 @@ def safe_bool(value, default=False):
     return default
 
 # =============================================
-# ENHANCED PDF GENERATION
+# ENHANCED PDF GENERATION FUNCTIONS
 # =============================================
 def generate_final_report_pdf(request_data, invoice_data=None):
     """Generate final approved PDF report"""
@@ -762,8 +763,8 @@ def generate_final_report_pdf(request_data, invoice_data=None):
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
-        story.append(invoice_table)
-        story.append(Spacer(1, 15))
+    story.append(invoice_table)
+    story.append(Spacer(1, 15))
     
     # Approval Status with Dates
     story.append(Paragraph("APPROVAL HISTORY", subtitle_style))
@@ -809,6 +810,166 @@ def generate_final_report_pdf(request_data, invoice_data=None):
         ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.gray, alignment=1)
     )
     story.append(footer)
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generate_invoice_pdf(invoice_data):
+    """Generate invoice-only PDF"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    story.append(Paragraph("INVOICE", styles['Heading1']))
+    story.append(Spacer(1, 20))
+    
+    # Invoice details table
+    invoice_info = [
+        ["Invoice Number:", invoice_data.get('invoice_number', 'N/A')],
+        ["Invoice Date:", invoice_data.get('invoice_date', 'N/A')],
+        ["Job ID:", invoice_data.get('id', 'N/A')],
+        ["Job Title:", invoice_data.get('title', 'N/A')],
+        ["Vendor:", invoice_data.get('assigned_vendor', 'N/A')],
+    ]
+    
+    invoice_table = Table(invoice_info, colWidths=[150, 300])
+    invoice_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#3b82f6')),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f8fafc')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(invoice_table)
+    story.append(Spacer(1, 20))
+    
+    # Amount details
+    amount_data = [
+        ["Description", "Quantity", "Unit Price", "Amount"],
+        [invoice_data.get('details_of_work', 'Work performed'), 
+         invoice_data.get('quantity', 1), 
+         format_ngn(invoice_data.get('unit_cost', 0)), 
+         format_ngn(invoice_data.get('amount', 0))],
+        ["Labour/Service Charge", "", "", format_ngn(invoice_data.get('labour_charge', 0))],
+        ["Subtotal", "", "", format_ngn(invoice_data.get('amount', 0) + invoice_data.get('labour_charge', 0))],
+        ["VAT (7.5%)" if invoice_data.get('vat_applicable') else "VAT", "", "", format_ngn(invoice_data.get('vat_amount', 0))],
+        ["TOTAL", "", "", format_ngn(invoice_data.get('total_amount', 0))]
+    ]
+    
+    amount_table = Table(amount_data, colWidths=[250, 60, 80, 80])
+    amount_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#10b981')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(amount_table)
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generate_job_summary_pdf(job_data):
+    """Generate job summary PDF"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    story.append(Paragraph("JOB SUMMARY REPORT", styles['Heading1']))
+    story.append(Spacer(1, 20))
+    
+    # Job details
+    job_info = [
+        ["Job ID:", job_data.get('id', 'N/A')],
+        ["Title:", job_data.get('title', 'N/A')],
+        ["Description:", job_data.get('description', 'N/A')],
+        ["Location:", job_data.get('location', 'Common Area')],
+        ["Facility Type:", job_data.get('facility_type', 'N/A')],
+        ["Priority:", job_data.get('priority', 'N/A')],
+        ["Status:", job_data.get('status', 'N/A')],
+        ["Created By:", job_data.get('created_by', 'N/A')],
+        ["Created Date:", job_data.get('created_date', 'N/A')],
+        ["Completed Date:", job_data.get('completed_date', 'N/A')],
+        ["Assigned Vendor:", job_data.get('assigned_vendor', 'N/A')],
+    ]
+    
+    job_table = Table(job_info, colWidths=[150, 300])
+    job_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#10b981')),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f0fdf4')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(job_table)
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generate_monthly_summary_report(jobs):
+    """Generate monthly summary report"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    story.append(Paragraph(f"MONTHLY SUMMARY REPORT - {datetime.now().strftime('%B %Y')}", styles['Heading1']))
+    story.append(Spacer(1, 20))
+    
+    # Summary statistics
+    total_jobs = len(jobs)
+    approved_jobs = len([j for j in jobs if j.get('facilities_manager_approval') == 1])
+    total_amount = sum([j.get('total_amount', 0) for j in jobs])
+    vat_total = sum([j.get('vat_amount', 0) for j in jobs])
+    
+    summary_data = [
+        ["Total Jobs", total_jobs],
+        ["Fully Approved Jobs", approved_jobs],
+        ["Total Invoice Amount", format_ngn(total_amount)],
+        ["Total VAT", format_ngn(vat_total)],
+        ["Net Amount", format_ngn(total_amount - vat_total)],
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[200, 200])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 20))
+    
+    # Job list table
+    if jobs:
+        job_list_data = [["Job ID", "Title", "Vendor", "Amount", "Status"]]
+        
+        for job in jobs:
+            status = "Approved" if job.get('facilities_manager_approval') == 1 else "Pending"
+            job_list_data.append([
+                job.get('id'),
+                job.get('title'),
+                job.get('assigned_vendor', 'N/A'),
+                format_ngn(job.get('total_amount', 0)),
+                status
+            ])
+        
+        job_list_table = Table(job_list_data, colWidths=[60, 150, 100, 100, 80])
+        job_list_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b82f6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),
+        ]))
+        story.append(job_list_table)
     
     doc.build(story)
     buffer.seek(0)
@@ -1850,7 +2011,7 @@ def show_dashboard():
         show_vendor_dashboard()
 
 # =============================================
-# OTHER PAGES (Simplified versions - needs to be defined)
+# OTHER PAGES
 # =============================================
 def show_vendor_registration():
     st.markdown("<h1 class='app-title'>🏢 Vendor Registration</h1>", unsafe_allow_html=True)
@@ -1970,11 +2131,15 @@ def show_vendor_reports():
     total_revenue = sum([safe_float(j['invoice_amount']) for j in vendor_jobs if j['invoice_amount']])
     st.metric("Total Revenue", format_ngn(total_revenue))
 
+# =============================================
+# ENHANCED JOB & INVOICE REPORTS WITH PDF DOWNLOAD
+# =============================================
 def show_job_invoice_reports():
     st.markdown("<h1 class='app-title'>📄 Job & Invoice Reports</h1>", unsafe_allow_html=True)
     
+    # Get all jobs with invoices, including approval status
     jobs_with_invoices = execute_query('''
-        SELECT mr.*, i.invoice_date, i.total_amount
+        SELECT mr.*, i.*
         FROM maintenance_requests mr
         LEFT JOIN invoices i ON mr.id = i.request_id
         WHERE mr.invoice_number IS NOT NULL
@@ -1987,20 +2152,235 @@ def show_job_invoice_reports():
     
     st.markdown(f"<div class='card'><h4>🧾 {len(jobs_with_invoices)} Job(s) with Invoices</h4></div>", unsafe_allow_html=True)
     
-    # Simple table
-    data = []
-    for job in jobs_with_invoices:
-        data.append({
-            'Job ID': job['id'],
-            'Title': job['title'],
-            'Status': job['status'],
-            'Invoice #': job['invoice_number'],
-            'Amount': format_ngn(job['total_amount']),
-            'Invoice Date': job['invoice_date']
-        })
+    # Add filter options
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_filter = st.selectbox(
+            "Filter by Approval Status", 
+            ["All", "Fully Approved", "Pending Approval", "Department Approved"]
+        )
+    with col2:
+        vendor_filter = st.selectbox(
+            "Filter by Vendor",
+            ["All"] + list(set([j['assigned_vendor'] for j in jobs_with_invoices if j['assigned_vendor']]))
+        )
+    with col3:
+        date_filter = st.selectbox(
+            "Filter by Month",
+            ["All", "Current Month", "Last Month", "Last 3 Months"]
+        )
     
-    df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True)
+    # Apply filters
+    filtered_jobs = jobs_with_invoices
+    
+    if status_filter == "Fully Approved":
+        filtered_jobs = [j for j in filtered_jobs if j.get('facilities_manager_approval') == 1]
+    elif status_filter == "Pending Approval":
+        filtered_jobs = [j for j in filtered_jobs if j.get('facilities_manager_approval') != 1]
+    elif status_filter == "Department Approved":
+        filtered_jobs = [j for j in filtered_jobs if j.get('requesting_dept_approval') == 1 and j.get('facilities_manager_approval') != 1]
+    
+    if vendor_filter != "All":
+        filtered_jobs = [j for j in filtered_jobs if j.get('assigned_vendor') == vendor_filter]
+    
+    if date_filter != "All":
+        current_date = datetime.now()
+        if date_filter == "Current Month":
+            filtered_jobs = [j for j in filtered_jobs 
+                           if j.get('completed_date') 
+                           and datetime.strptime(j['completed_date'][:10], '%Y-%m-%d').month == current_date.month]
+        elif date_filter == "Last Month":
+            last_month = current_date.month - 1 if current_date.month > 1 else 12
+            filtered_jobs = [j for j in filtered_jobs 
+                           if j.get('completed_date') 
+                           and datetime.strptime(j['completed_date'][:10], '%Y-%m-%d').month == last_month]
+    
+    st.markdown(f"<div class='card'><h4>📋 Showing {len(filtered_jobs)} Filtered Job(s)</h4></div>", unsafe_allow_html=True)
+    
+    # Display jobs in a more detailed table
+    for job in filtered_jobs:
+        status = job.get('status', 'N/A')
+        approval_status = "✅ Fully Approved" if job.get('facilities_manager_approval') == 1 else \
+                         "🟡 Department Approved" if job.get('requesting_dept_approval') == 1 else \
+                         "⏳ Pending Approval"
+        
+        with st.expander(f"{approval_status} - Job #{job.get('id')}: {job.get('title')} - Amount: {format_ngn(job.get('total_amount', 0))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Job ID:** {job.get('id')}")
+                st.write(f"**Title:** {job.get('title')}")
+                st.write(f"**Description:** {job.get('description')}")
+                st.write(f"**Location:** {job.get('location', 'Common Area')}")
+                st.write(f"**Facility Type:** {job.get('facility_type')}")
+                st.write(f"**Priority:** {job.get('priority')}")
+                st.write(f"**Created By:** {job.get('created_by')}")
+                st.write(f"**Created Date:** {job.get('created_date')}")
+                st.write(f"**Completed Date:** {job.get('completed_date', 'N/A')}")
+                st.write(f"**Status:** {status}")
+                
+                if job.get('assigned_vendor'):
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (job.get('assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else job.get('assigned_vendor')
+                    st.write(f"**Assigned Vendor:** {vendor_name}")
+            
+            with col2:
+                st.markdown("### 🧾 Invoice Details")
+                st.write(f"**Invoice Number:** {job.get('invoice_number', 'N/A')}")
+                st.write(f"**Invoice Date:** {job.get('invoice_date', 'N/A')}")
+                st.write(f"**Details of Work:** {job.get('details_of_work', 'N/A')}")
+                st.write(f"**Quantity:** {job.get('quantity', 1)}")
+                st.write(f"**Unit Cost:** {format_ngn(job.get('unit_cost', 0))}")
+                st.write(f"**Amount:** {format_ngn(job.get('amount', 0))}")
+                st.write(f"**Labour/Service Charge:** {format_ngn(job.get('labour_charge', 0))}")
+                st.write(f"**VAT Applicable:** {'Yes (7.5%)' if job.get('vat_applicable') else 'No'}")
+                st.write(f"**VAT Amount:** {format_ngn(job.get('vat_amount', 0))}")
+                st.write(f"**Total Amount:** {format_ngn(job.get('total_amount', 0))}")
+                st.write(f"**Invoice Status:** {job.get('status', 'N/A')}")
+                
+                st.markdown("### ✅ Approval Status")
+                st.write(f"**Department Approval:** {'✅ Approved' if job.get('requesting_dept_approval') else '❌ Pending'}")
+                st.write(f"**Department Approval Date:** {job.get('department_approval_date', 'N/A')}")
+                st.write(f"**Manager Approval:** {'✅ Approved' if job.get('facilities_manager_approval') else '❌ Pending'}")
+                st.write(f"**Manager Approval Date:** {job.get('manager_approval_date', 'N/A')}")
+            
+            # Action buttons section
+            st.markdown("---")
+            st.markdown("### 📄 Report Actions")
+            
+            col_a, col_b, col_c = st.columns(3)
+            
+            with col_a:
+                # Generate and download detailed report
+                if job.get('facilities_manager_approval') == 1:
+                    # Final approved report
+                    pdf_buffer = generate_final_report_pdf(job, job)
+                    
+                    st.download_button(
+                        label="📥 Download Final Approved Report",
+                        data=pdf_buffer.getvalue(),
+                        file_name=f"Final_Approved_Report_Job_{job.get('id')}_{job.get('invoice_number')}.pdf",
+                        mime="application/pdf",
+                        key=f"final_report_{job.get('id')}",
+                        use_container_width=True
+                    )
+                else:
+                    # Intermediate report (not fully approved)
+                    st.warning("⚠️ Job not fully approved yet")
+            
+            with col_b:
+                # Generate invoice-only PDF
+                if job.get('invoice_number'):
+                    invoice_pdf = generate_invoice_pdf(job)
+                    st.download_button(
+                        label="🧾 Download Invoice Only",
+                        data=invoice_pdf.getvalue(),
+                        file_name=f"Invoice_{job.get('invoice_number')}.pdf",
+                        mime="application/pdf",
+                        key=f"invoice_only_{job.get('id')}",
+                        use_container_width=True
+                    )
+            
+            with col_c:
+                # Generate job summary PDF
+                job_summary_pdf = generate_job_summary_pdf(job)
+                st.download_button(
+                    label="📋 Download Job Summary",
+                    data=job_summary_pdf.getvalue(),
+                    file_name=f"Job_Summary_{job.get('id')}.pdf",
+                    mime="application/pdf",
+                    key=f"job_summary_{job.get('id')}",
+                    use_container_width=True
+                )
+            
+            # Statistics section
+            st.markdown("---")
+            st.markdown("### 📊 Financial Summary")
+            
+            col_x, col_y, col_z = st.columns(3)
+            with col_x:
+                st.metric("Total Amount", format_ngn(job.get('total_amount', 0)))
+            with col_y:
+                vat_percent = 7.5 if job.get('vat_applicable') else 0
+                st.metric("VAT", f"{vat_percent}%")
+            with col_z:
+                net_amount = job.get('total_amount', 0) - job.get('vat_amount', 0)
+                st.metric("Net Amount", format_ngn(net_amount))
+    
+    # Add bulk download option for manager
+    if st.session_state.user['role'] == 'facility_manager':
+        st.markdown("---")
+        st.markdown("### 📦 Bulk Report Generation")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📥 Generate All Final Approved Reports", use_container_width=True):
+                approved_jobs = [j for j in filtered_jobs if j.get('facilities_manager_approval') == 1]
+                
+                if approved_jobs:
+                    # Create a ZIP file with all PDFs
+                    import zipfile
+                    zip_buffer = io.BytesIO()
+                    
+                    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+                        for job in approved_jobs:
+                            pdf_buffer = generate_final_report_pdf(job, job)
+                            file_name = f"Approved_Job_{job.get('id')}_{job.get('invoice_number')}.pdf"
+                            zip_file.writestr(file_name, pdf_buffer.getvalue())
+                    
+                    zip_buffer.seek(0)
+                    
+                    st.download_button(
+                        label="📦 Download All Approved Reports (ZIP)",
+                        data=zip_buffer.getvalue(),
+                        file_name="All_Approved_Job_Reports.zip",
+                        mime="application/zip",
+                        key="bulk_download",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("No fully approved jobs to download")
+        
+        with col2:
+            if st.button("📊 Generate Monthly Summary Report", use_container_width=True):
+                # Generate monthly summary report
+                monthly_summary_pdf = generate_monthly_summary_report(filtered_jobs)
+                
+                st.download_button(
+                    label="📈 Download Monthly Summary",
+                    data=monthly_summary_pdf.getvalue(),
+                    file_name=f"Monthly_Summary_{datetime.now().strftime('%Y_%m')}.pdf",
+                    mime="application/pdf",
+                    key="monthly_summary",
+                    use_container_width=True
+                )
+    
+    # Add summary statistics
+    st.markdown("---")
+    st.markdown("### 📊 Report Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_amount = sum([j.get('total_amount', 0) for j in filtered_jobs])
+        st.metric("Total Invoice Value", format_ngn(total_amount))
+    
+    with col2:
+        approved_count = len([j for j in filtered_jobs if j.get('facilities_manager_approval') == 1])
+        st.metric("Fully Approved Jobs", approved_count)
+    
+    with col3:
+        pending_count = len([j for j in filtered_jobs if j.get('facilities_manager_approval') != 1])
+        st.metric("Pending Approval", pending_count)
+    
+    with col4:
+        vat_total = sum([j.get('vat_amount', 0) for j in filtered_jobs])
+        st.metric("Total VAT", format_ngn(vat_total))
 
 # =============================================
 # MAIN APPLICATION ROUTING
