@@ -310,6 +310,48 @@ def generate_password(length=8):
 # DATABASE SETUP - ENHANCED VERSION
 # =============================================
 def init_database():
+    def ensure_default_accounts():
+    """Ensure default accounts exist with correct passwords"""
+    default_accounts = [
+        ('facility_manager', 'manager123', 'facility_manager', 'System Manager'),
+        ('facility_user', 'user123', 'facility_user', 'Sample User'),
+        ('hvac_vendor', 'vendor123', 'vendor', 'HVAC Vendor', 'HVAC'),
+        ('generator_vendor', 'vendor123', 'vendor', 'Generator Vendor', 'Generator'),
+        ('fixture_vendor', 'vendor123', 'vendor', 'Fixture Vendor', 'Fixture and Fittings'),
+        ('building_vendor', 'vendor123', 'vendor', 'Building Vendor', 'Building Maintenance'),
+    ]
+    
+    for account in default_accounts:
+        if len(account) == 4:  # User account
+            username, password, role, full_name = account
+            vendor_type = None
+        else:  # Vendor account
+            username, password, role, full_name, vendor_type = account
+        
+        # Check if user exists
+        existing = execute_query("SELECT * FROM users WHERE username = ?", (username,))
+        
+        if not existing:
+            # Create new user
+            password_hash = hash_password(password)
+            execute_update(
+                '''INSERT INTO users (username, password_hash, role, status, full_name, vendor_type) 
+                VALUES (?, ?, ?, ?, ?, ?)''',
+                (username, password_hash, role, 'approved', full_name, vendor_type)
+            )
+            print(f"Created {username}")
+        else:
+            # Update password
+            password_hash = hash_password(password)
+            execute_update(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (password_hash, username)
+            )
+            print(f"Updated password for {username}")
+
+# Call this after init_database
+init_database()
+ensure_default_accounts()
     try:
         conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
         cursor = conn.cursor()
@@ -2901,3 +2943,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
