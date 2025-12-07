@@ -331,19 +331,58 @@ def execute_update(query, params=()):
         return False
 
 # =============================================
-# PASSWORD MANAGEMENT FUNCTIONS
+# DEBUG FUNCTION - ADD THIS
 # =============================================
-def hash_password(password):
-    """Hash a password for storing."""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def generate_password(length=8):
-    """Generate a random password"""
-    characters = string.ascii_letters + string.digits + "!@#$%^&*"
-    return ''.join(secrets.choice(characters) for _ in range(length))
+def debug_login_issue():
+    """Debug the login issue"""
+    print("\n" + "="*70)
+    print("DEBUG LOGIN ISSUE")
+    print("="*70)
+    
+    # Test facility_user specifically
+    username = "facility_user"
+    password = "0123456"
+    
+    print(f"\nTesting login for: {username} / {password}")
+    
+    # Check if user exists
+    user = execute_query("SELECT * FROM users WHERE username = ?", (username,))
+    
+    if not user:
+        print(f"❌ ERROR: User '{username}' not found in database!")
+        # Check all users
+        all_users = execute_query("SELECT username FROM users")
+        print(f"\nAll users in database:")
+        for u in all_users:
+            print(f"  - {u['username']}")
+    else:
+        user_data = user[0]
+        print(f"✅ User found: {user_data['username']}")
+        print(f"  Status: {user_data.get('status')}")
+        print(f"  Stored password hash: {user_data.get('password_hash')}")
+        
+        # What hash_password('0123456') produces
+        test_hash = hash_password('0123456')
+        print(f"  Hash of '0123456': {test_hash}")
+        
+        # Are they the same?
+        if user_data.get('password_hash') == test_hash:
+            print("  ✅ Hashes MATCH! Login should work.")
+        else:
+            print("  ❌ Hashes DO NOT MATCH! This is the problem.")
+            
+            # Fix it automatically
+            print("\n🔧 Fixing the password...")
+            execute_update(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (test_hash, username)
+            )
+            print(f"✅ Password fixed for {username}")
+    
+    print("="*70)
 
 # =============================================
-# FIX 1: CORRECT AUTHENTICATION FUNCTION
+# SIMPLE WORKING AUTHENTICATION FUNCTION
 # =============================================
 def authenticate_user(username, password):
     """WORKING authentication - all accounts use password '0123456'"""
@@ -397,6 +436,15 @@ def authenticate_user(username, password):
     
     print(f"❌ Login failed: Password incorrect for {username}")
     return None
+
+def hash_password(password):
+    """Hash a password for storing."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def generate_password(length=8):
+    """Generate a random password"""
+    characters = string.ascii_letters + string.digits + "!@#$%^&*"
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 # =============================================
 # DATABASE SETUP
@@ -503,59 +551,9 @@ def init_database():
         
     except Exception as e:
         print(f"Database initialization error: {e}")
-        def debug_login_issue():
-    """Debug the login issue"""
-    print("\n" + "="*70)
-    print("DEBUG LOGIN ISSUE")
-    print("="*70)
-    
-    # Test facility_user specifically
-    username = "facility_user"
-    password = "0123456"
-    
-    print(f"\nTesting login for: {username} / {password}")
-    
-    # Check if user exists
-    user = execute_query("SELECT * FROM users WHERE username = ?", (username,))
-    
-    if not user:
-        print(f"❌ ERROR: User '{username}' not found in database!")
-        # Check all users
-        all_users = execute_query("SELECT username FROM users")
-        print(f"\nAll users in database:")
-        for u in all_users:
-            print(f"  - {u['username']}")
-    else:
-        user_data = user[0]
-        print(f"✅ User found: {user_data['username']}")
-        print(f"  Status: {user_data.get('status')}")
-        print(f"  Stored password hash: {user_data.get('password_hash')}")
-        
-        # What hash_password('0123456') produces
-        test_hash = hash_password('0123456')
-        print(f"  Hash of '0123456': {test_hash}")
-        
-        # Are they the same?
-        if user_data.get('password_hash') == test_hash:
-            print("  ✅ Hashes MATCH! Login should work.")
-        else:
-            print("  ❌ Hashes DO NOT MATCH! This is the problem.")
-            
-            # Fix it automatically
-            print("\n🔧 Fixing the password...")
-            execute_update(
-                "UPDATE users SET password_hash = ? WHERE username = ?",
-                (test_hash, username)
-            )
-            print(f"✅ Password fixed for {username}")
-    
-    print("="*70)
-
-# Call this function after database initialization
-debug_login_issue()
 
 # =============================================
-# FIX 2: CREATE DEFAULT ACCOUNTS WITH CORRECT PASSWORDS
+# CREATE DEFAULT ACCOUNTS WITH WORKING PASSWORDS
 # =============================================
 def create_default_accounts():
     """Create default accounts with PROPERLY hashed password '0123456'"""
@@ -618,6 +616,14 @@ def create_vendor_records():
                  '123 Main Street, City, State', 'approved', 'system', 'system', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             )
             print(f"✅ Created vendor record: {company_name}")
+
+# Initialize database and create default accounts
+init_database()
+create_default_accounts()
+create_vendor_records()
+
+# Run debug to check login issue
+debug_login_issue()
 
 # =============================================
 # TEST DEFAULT ACCOUNTS
@@ -3155,4 +3161,5 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
