@@ -679,8 +679,8 @@ def generate_final_report_pdf(request_data, invoice_data=None):
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
-    story.append(invoice_table)
-    story.append(Spacer(1, 15))
+        story.append(invoice_table)
+        story.append(Spacer(1, 15))
     
     # Approval Status with Dates
     story.append(Paragraph("APPROVAL HISTORY", subtitle_style))
@@ -1343,9 +1343,834 @@ def show_manage_requests():
                         st.warning(f"No vendors found for {facility_type}")
 
 # =============================================
+# VENDOR FUNCTIONS - COMPLETELY UPDATED
+# =============================================
+def show_assigned_jobs():
+    """Show assigned jobs to vendor with completion form"""
+    st.markdown("<h1 class='app-title'>🔧 Assigned Jobs</h1>", unsafe_allow_html=True)
+    
+    vendor_username = st.session_state.user['username']
+    assigned_jobs = get_vendor_requests(vendor_username)
+    
+    # Filter only assigned jobs
+    assigned_jobs = [job for job in assigned_jobs if safe_get(job, 'status') == 'Assigned']
+    
+    if not assigned_jobs:
+        st.info("🎉 No jobs assigned to you at the moment")
+        return
+    
+    st.markdown(f"<div class='card'><h4>🔧 {len(assigned_jobs)} Job(s) Assigned to You</h4></div>", unsafe_allow_html=True)
+    
+    for job in assigned_jobs:
+        with st.expander(f"🛠️ Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                st.write(f"**Description:** {safe_str(safe_get(job, 'description'))}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'))}")
+                st.write(f"**Priority:** {safe_str(safe_get(job, 'priority'))}")
+                st.write(f"**Created By:** {safe_str(safe_get(job, 'created_by'))}")
+                st.write(f"**Created Date:** {safe_str(safe_get(job, 'created_date'))}")
+            
+            with col2:
+                st.markdown("### 📋 Complete Job Form")
+                
+                with st.form(key=f"complete_job_{safe_get(job, 'id')}"):
+                    job_breakdown = st.text_area(
+                        "Job Breakdown/Details *",
+                        height=100,
+                        placeholder="Describe the work performed, materials used, hours spent, etc."
+                    )
+                    
+                    completion_notes = st.text_area(
+                        "Completion Notes",
+                        height=80,
+                        placeholder="Any additional notes about the job completion"
+                    )
+                    
+                    # Invoice details section
+                    st.markdown("### 🧾 Invoice Details")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        details_of_work = st.text_input("Work Description *", placeholder="Description of work")
+                        quantity = st.number_input("Quantity *", min_value=1, value=1)
+                    with col2:
+                        unit_cost = st.number_input("Unit Cost (₦) *", min_value=0.0, value=0.0, step=100.0)
+                        labour_charge = st.number_input("Labour/Service Charge (₦)", min_value=0.0, value=0.0, step=100.0)
+                    with col3:
+                        vat_applicable = st.checkbox("Apply 7.5% VAT", value=True)
+                    
+                    # Calculate amounts
+                    amount = quantity * unit_cost
+                    vat_amount = (amount + labour_charge) * 0.075 if vat_applicable else 0.0
+                    total_amount = amount + labour_charge + vat_amount
+                    
+                    # Display calculated amounts
+                    st.markdown("### 💰 Amount Summary")
+                    st.write(f"**Amount:** ₦{amount:,.2f}")
+                    st.write(f"**Labour Charge:** ₦{labour_charge:,.2f}")
+                    st.write(f"**VAT ({'7.5%' if vat_applicable else '0%'}):** ₦{vat_amount:,.2f}")
+                    st.write(f"**Total Amount:** ₦{total_amount:,.2f}")
+                    
+                    submitted = st.form_submit_button("✅ Mark Job as Completed", use_container_width=True)
+                    
+                    if submitted:
+                        if not job_breakdown or not details_of_work:
+                            st.error("❌ Please fill in all required fields (*)")
+                        else:
+                            # Generate invoice number
+                            invoice_number = f"INV-{safe_get(job, 'id')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            
+                            # Update job status and add completion details
+                            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            
+                            # First update the job
+                            job_update_success = execute_update(
+                                '''UPDATE maintenance_requests 
+                                SET status = 'Completed',
+                                    completion_notes = ?,
+                                    job_breakdown = ?,
+                                    completed_date = ?,
+                                    invoice_amount = ?,
+                                    invoice_number = ?
+                                WHERE id = ?''',
+                                (completion_notes, job_breakdown, current_time, total_amount, invoice_number, safe_get(job, 'id'))
+                            )
+                            
+                            # Then create invoice
+                            if job_update_success:
+                                invoice_success = execute_update(
+                                    '''INSERT INTO invoices 
+                                    (invoice_number, request_id, vendor_username, details_of_work, 
+                                     quantity, unit_cost, amount, labour_charge, vat_applicable, 
+                                     vat_amount, total_amount) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                    (invoice_number, safe_get(job, 'id'), vendor_username, details_of_work,
+                                     quantity, unit_cost, amount, labour_charge, 1 if vat_applicable else 0,
+                                     vat_amount, total_amount)
+                                )
+                                
+                                if invoice_success:
+                                    st.success("✅ Job marked as completed! Invoice created. Waiting for department approval.")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to create invoice")
+
+def show_completed_jobs():
+    """Show completed jobs by vendor"""
+    st.markdown("<h1 class='app-title'>✅ Completed Jobs</h1>", unsafe_allow_html=True)
+    
+    vendor_username = st.session_state.user['username']
+    completed_jobs = get_vendor_requests(vendor_username)
+    
+    # Filter only completed jobs
+    completed_jobs = [job for job in completed_jobs if safe_get(job, 'status') in ['Completed', 'Approved']]
+    
+    if not completed_jobs:
+        st.info("📭 No completed jobs yet")
+        return
+    
+    st.markdown(f"<div class='card'><h4>✅ {len(completed_jobs)} Job(s) Completed</h4></div>", unsafe_allow_html=True)
+    
+    for job in completed_jobs:
+        status = safe_get(job, 'status')
+        status_icon = '✅' if status == 'Completed' else '👍' if status == 'Approved' else '📋'
+        
+        with st.expander(f"{status_icon} Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'))}")
+                st.write(f"**Status:** {status}")
+                st.write(f"**Completed Date:** {safe_str(safe_get(job, 'completed_date'))}")
+                
+                # Show approval status
+                if status in ['Completed', 'Approved']:
+                    st.write(f"**Department Approval:** {'✅ Approved' if safe_get(job, 'requesting_dept_approval') else '⏳ Pending'}")
+                    st.write(f"**Manager Approval:** {'✅ Approved' if safe_get(job, 'facilities_manager_approval') else '⏳ Pending'}")
+            
+            with col2:
+                if safe_get(job, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:**")
+                    st.info(safe_str(safe_get(job, 'job_breakdown')))
+                
+                if safe_get(job, 'completion_notes'):
+                    st.write(f"**Completion Notes:**")
+                    st.info(safe_str(safe_get(job, 'completion_notes')))
+                
+                if safe_get(job, 'invoice_amount'):
+                    st.write(f"**Invoice Amount:** {format_ngn(safe_get(job, 'invoice_amount'))}")
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(job, 'invoice_number'), 'N/A')}")
+
+# =============================================
+# VENDOR REGISTRATION
+# =============================================
+def show_vendor_registration():
+    """Vendor registration page"""
+    st.markdown("<h1 class='app-title'>🏢 Vendor Registration</h1>", unsafe_allow_html=True)
+    
+    # Check if vendor is already registered
+    vendor_username = st.session_state.user['username']
+    existing_vendor = execute_query('SELECT * FROM vendors WHERE username = ?', (vendor_username,))
+    
+    if existing_vendor:
+        st.info("✅ You are already registered as a vendor.")
+        
+        vendor = existing_vendor[0]
+        with st.expander("View Your Registration Details", expanded=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**Company Name:** {safe_str(safe_get(vendor, 'company_name'))}")
+                st.write(f"**Contact Person:** {safe_str(safe_get(vendor, 'contact_person'))}")
+                st.write(f"**Email:** {safe_str(safe_get(vendor, 'email'))}")
+                st.write(f"**Phone:** {safe_str(safe_get(vendor, 'phone'))}")
+                st.write(f"**Vendor Type:** {safe_str(safe_get(vendor, 'vendor_type'))}")
+                st.write(f"**Registration Date:** {safe_str(safe_get(vendor, 'registration_date'))}")
+            
+            with col2:
+                st.write(f"**Services Offered:** {safe_str(safe_get(vendor, 'services_offered'))}")
+                st.write(f"**Annual Turnover:** {format_ngn(safe_get(vendor, 'annual_turnover'))}")
+                st.write(f"**Tax ID:** {safe_str(safe_get(vendor, 'tax_identification_number'))}")
+                st.write(f"**RC Number:** {safe_str(safe_get(vendor, 'rc_number'))}")
+                st.write(f"**Address:** {safe_str(safe_get(vendor, 'address'))}")
+        
+        return
+    
+    # Registration form for new vendors
+    st.info("📋 Please complete your vendor registration form below")
+    
+    with st.form("vendor_registration_form"):
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            company_name = st.text_input("Company Name *", placeholder="Enter your company name")
+            contact_person = st.text_input("Contact Person *", placeholder="Full name of contact person")
+            email = st.text_input("Email Address *", placeholder="company@example.com")
+            phone = st.text_input("Phone Number *", placeholder="123-456-7890")
+            vendor_type = st.selectbox(
+                "Vendor Type *",
+                ["HVAC", "Generator", "Fixture and Fittings", "Building Maintenance", 
+                 "HSE", "Space Management", "Electrical", "Plumbing", "Other"]
+            )
+        
+        with col2:
+            services_offered = st.text_area("Services Offered *", height=80, 
+                                          placeholder="Describe the services you offer")
+            annual_turnover = st.number_input("Annual Turnover (₦)", min_value=0.0, 
+                                            value=0.0, step=10000.0)
+            tax_id = st.text_input("Tax Identification Number")
+            rc_number = st.text_input("RC/Business Registration Number")
+            address = st.text_area("Company Address *", height=60, 
+                                 placeholder="Full physical address")
+        
+        # Additional fields
+        st.markdown("### Additional Information")
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            key_management_staff = st.text_area("Key Management Staff", height=60,
+                                              placeholder="Names and positions of key staff")
+            account_details = st.text_area("Bank Account Details", height=60,
+                                         placeholder="Bank name and account number")
+        
+        with col4:
+            certification = st.text_area("Certifications/Licenses", height=60,
+                                       placeholder="Any professional certifications")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        submitted = st.form_submit_button("📋 Register as Vendor", use_container_width=True)
+        
+        if submitted:
+            if not all([company_name, contact_person, email, phone, vendor_type, 
+                       services_offered, address]):
+                st.error("❌ Please fill in all required fields (*)")
+            else:
+                success = execute_update(
+                    '''INSERT INTO vendors 
+                    (username, company_name, contact_person, email, phone, vendor_type, 
+                     services_offered, annual_turnover, tax_identification_number, 
+                     rc_number, key_management_staff, account_details, certification, address) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (vendor_username, company_name, contact_person, email, phone, vendor_type,
+                     services_offered, annual_turnover, tax_id, rc_number,
+                     key_management_staff, account_details, certification, address)
+                )
+                if success:
+                    st.success("✅ Vendor registration successful! You can now receive job assignments.")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to register vendor")
+
+# =============================================
+# INVOICE CREATION (FOR VENDORS)
+# =============================================
+def show_invoice_creation():
+    """Invoice creation page for vendors"""
+    st.markdown("<h1 class='app-title'>🧾 Invoice Creation</h1>", unsafe_allow_html=True)
+    
+    vendor_username = st.session_state.user['username']
+    
+    # Get completed jobs without invoices
+    completed_jobs = execute_query('''
+        SELECT * FROM maintenance_requests 
+        WHERE assigned_vendor = ? 
+        AND status = 'Completed' 
+        AND invoice_number IS NULL
+        ORDER BY completed_date DESC
+    ''', (vendor_username,))
+    
+    if not completed_jobs:
+        st.info("🎉 All your completed jobs already have invoices.")
+        return
+    
+    st.markdown(f"<div class='card'><h4>📋 {len(completed_jobs)} Job(s) Need Invoice</h4></div>", unsafe_allow_html=True)
+    
+    for job in completed_jobs:
+        with st.expander(f"🧾 Create Invoice for Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                st.write(f"**Description:** {safe_str(safe_get(job, 'description'))}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**Completed Date:** {safe_str(safe_get(job, 'completed_date'))}")
+                
+                if safe_get(job, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:**")
+                    st.info(safe_str(safe_get(job, 'job_breakdown')))
+            
+            with col2:
+                st.markdown("### 🧾 Invoice Details")
+                
+                with st.form(key=f"invoice_form_{safe_get(job, 'id')}"):
+                    details_of_work = st.text_input(
+                        "Details of Work *",
+                        value=safe_str(safe_get(job, 'job_breakdown'), ""),
+                        placeholder="Description of work performed"
+                    )
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        quantity = st.number_input("Quantity *", min_value=1, value=1, key=f"qty_{safe_get(job, 'id')}")
+                        unit_cost = st.number_input("Unit Cost (₦) *", min_value=0.0, value=0.0, step=100.0, 
+                                                  key=f"unit_{safe_get(job, 'id')}")
+                    with col_b:
+                        labour_charge = st.number_input("Labour/Service Charge (₦)", min_value=0.0, value=0.0, 
+                                                      step=100.0, key=f"labour_{safe_get(job, 'id')}")
+                        vat_applicable = st.checkbox("Apply 7.5% VAT", value=True, key=f"vat_{safe_get(job, 'id')}")
+                    
+                    # Calculate amounts
+                    amount = quantity * unit_cost
+                    vat_amount = (amount + labour_charge) * 0.075 if vat_applicable else 0.0
+                    total_amount = amount + labour_charge + vat_amount
+                    
+                    # Display summary
+                    st.markdown("### 💰 Amount Summary")
+                    st.write(f"**Amount:** {format_ngn(amount)}")
+                    st.write(f"**Labour Charge:** {format_ngn(labour_charge)}")
+                    st.write(f"**VAT ({'7.5%' if vat_applicable else '0%'}):** {format_ngn(vat_amount)}")
+                    st.write(f"**Total Amount:** {format_ngn(total_amount)}")
+                    
+                    submitted = st.form_submit_button("📤 Create Invoice", use_container_width=True)
+                    
+                    if submitted:
+                        if not details_of_work:
+                            st.error("❌ Please enter details of work")
+                        else:
+                            # Generate invoice number
+                            invoice_number = f"INV-{safe_get(job, 'id')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            
+                            # Create invoice
+                            invoice_success = execute_update(
+                                '''INSERT INTO invoices 
+                                (invoice_number, request_id, vendor_username, details_of_work, 
+                                 quantity, unit_cost, amount, labour_charge, vat_applicable, 
+                                 vat_amount, total_amount) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (invoice_number, safe_get(job, 'id'), vendor_username, details_of_work,
+                                 quantity, unit_cost, amount, labour_charge, 1 if vat_applicable else 0,
+                                 vat_amount, total_amount)
+                            )
+                            
+                            # Update job with invoice info
+                            if invoice_success:
+                                job_update_success = execute_update(
+                                    '''UPDATE maintenance_requests 
+                                    SET invoice_amount = ?, invoice_number = ?
+                                    WHERE id = ?''',
+                                    (total_amount, invoice_number, safe_get(job, 'id'))
+                                )
+                                
+                                if job_update_success:
+                                    st.success(f"✅ Invoice {invoice_number} created successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to update job with invoice info")
+
+# =============================================
+# VENDOR REPORTS
+# =============================================
+def show_vendor_reports():
+    """Vendor reports page"""
+    st.markdown("<h1 class='app-title'>📊 My Vendor Reports</h1>", unsafe_allow_html=True)
+    
+    vendor_username = st.session_state.user['username']
+    
+    # Get vendor stats
+    vendor_jobs = get_vendor_requests(vendor_username)
+    vendor_invoices = execute_query(
+        'SELECT * FROM invoices WHERE vendor_username = ? ORDER BY invoice_date DESC',
+        (vendor_username,)
+    )
+    
+    # Stats cards
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_jobs = len(vendor_jobs)
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        create_metric_card("Total Jobs", total_jobs, "📋")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col2:
+        completed_jobs = len([j for j in vendor_jobs if safe_get(j, 'status') == 'Completed'])
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        create_metric_card("Completed", completed_jobs, "✅")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col3:
+        approved_jobs = len([j for j in vendor_jobs if safe_get(j, 'status') == 'Approved'])
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        create_metric_card("Approved", approved_jobs, "👍")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col4:
+        total_invoices = len(vendor_invoices)
+        total_revenue = sum([safe_float(inv['total_amount']) for inv in vendor_invoices])
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        create_metric_card("Total Revenue", format_ngn(total_revenue), "💰")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Tabs for different views
+    tab1, tab2 = st.tabs(["Job Analytics", "Invoice History"])
+    
+    with tab1:
+        if vendor_jobs:
+            # Create job status chart
+            status_counts = {}
+            for job in vendor_jobs:
+                status = safe_get(job, 'status')
+                status_counts[status] = status_counts.get(status, 0) + 1
+            
+            if status_counts:
+                df_status = pd.DataFrame({
+                    'Status': list(status_counts.keys()),
+                    'Count': list(status_counts.values())
+                })
+                
+                fig = px.pie(df_status, values='Count', names='Status', 
+                           title="Job Status Distribution",
+                           color_discrete_sequence=px.colors.qualitative.Set3)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Monthly trend
+            try:
+                monthly_data = []
+                for job in vendor_jobs:
+                    if safe_get(job, 'completed_date'):
+                        month = datetime.strptime(safe_get(job, 'completed_date'), '%Y-%m-%d %H:%M:%S').strftime('%Y-%m')
+                        monthly_data.append(month)
+                
+                if monthly_data:
+                    month_counts = pd.Series(monthly_data).value_counts().sort_index()
+                    df_monthly = pd.DataFrame({
+                        'Month': month_counts.index,
+                        'Jobs Completed': month_counts.values
+                    })
+                    
+                    fig2 = px.bar(df_monthly, x='Month', y='Jobs Completed',
+                                 title="Monthly Jobs Completed Trend",
+                                 color='Jobs Completed')
+                    st.plotly_chart(fig2, use_container_width=True)
+            except:
+                pass
+        else:
+            st.info("📭 No job data available for analytics")
+    
+    with tab2:
+        if vendor_invoices:
+            # Display invoices table
+            invoice_data = []
+            for inv in vendor_invoices:
+                invoice_data.append({
+                    'Invoice #': safe_str(safe_get(inv, 'invoice_number')),
+                    'Date': safe_str(safe_get(inv, 'invoice_date')),
+                    'Details': safe_str(safe_get(inv, 'details_of_work')),
+                    'Amount': format_ngn(safe_get(inv, 'total_amount')),
+                    'Status': safe_str(safe_get(inv, 'status'))
+                })
+            
+            df_invoices = pd.DataFrame(invoice_data)
+            st.dataframe(df_invoices, use_container_width=True, hide_index=True)
+            
+            # Download invoices as CSV
+            csv = df_invoices.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Invoices as CSV",
+                data=csv,
+                file_name=f"vendor_invoices_{vendor_username}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("📭 No invoices found")
+
+# =============================================
+# VENDOR MANAGEMENT (FOR FACILITY MANAGER)
+# =============================================
+def show_vendor_management():
+    """Vendor management page for facility manager"""
+    st.markdown("<h1 class='app-title'>👥 Vendor Management</h1>", unsafe_allow_html=True)
+    
+    # Get all vendors
+    vendors = execute_query('SELECT * FROM vendors ORDER BY company_name')
+    
+    if not vendors:
+        st.info("📭 No vendors registered yet")
+        return
+    
+    st.markdown(f"<div class='card'><h4>🏢 {len(vendors)} Registered Vendor(s)</h4></div>", unsafe_allow_html=True)
+    
+    # Vendor stats
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        vendor_types = set([v['vendor_type'] for v in vendors])
+        st.metric("Vendor Types", len(vendor_types))
+    with col2:
+        active_vendors = len([v for v in vendors])
+        st.metric("Total Vendors", active_vendors)
+    with col3:
+        # Get vendor performance (jobs completed)
+        vendor_performance = []
+        for vendor in vendors:
+            jobs = execute_query(
+                'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = "Approved"',
+                (vendor['username'],)
+            )
+            vendor_performance.append(jobs[0]['count'] if jobs else 0)
+        avg_jobs = sum(vendor_performance) / len(vendor_performance) if vendor_performance else 0
+        st.metric("Avg Jobs Completed", f"{avg_jobs:.1f}")
+    
+    st.markdown("---")
+    
+    # Display vendors with expandable details
+    for vendor in vendors:
+        with st.expander(f"🏢 {safe_str(safe_get(vendor, 'company_name'))} - {safe_str(safe_get(vendor, 'vendor_type'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### Company Information")
+                st.write(f"**Company:** {safe_str(safe_get(vendor, 'company_name'))}")
+                st.write(f"**Contact:** {safe_str(safe_get(vendor, 'contact_person'))}")
+                st.write(f"**Email:** {safe_str(safe_get(vendor, 'email'))}")
+                st.write(f"**Phone:** {safe_str(safe_get(vendor, 'phone'))}")
+                st.write(f"**Vendor Type:** {safe_str(safe_get(vendor, 'vendor_type'))}")
+                st.write(f"**Services:** {safe_str(safe_get(vendor, 'services_offered'))}")
+                st.write(f"**Address:** {safe_str(safe_get(vendor, 'address'))}")
+                st.write(f"**Registered:** {safe_str(safe_get(vendor, 'registration_date'))}")
+            
+            with col2:
+                st.markdown("### Business Details")
+                st.write(f"**Annual Turnover:** {format_ngn(safe_get(vendor, 'annual_turnover'))}")
+                st.write(f"**Tax ID:** {safe_str(safe_get(vendor, 'tax_identification_number'))}")
+                st.write(f"**RC Number:** {safe_str(safe_get(vendor, 'rc_number'))}")
+                
+                if safe_get(vendor, 'certification'):
+                    st.write(f"**Certifications:** {safe_str(safe_get(vendor, 'certification'))}")
+                
+                # Get vendor performance stats
+                vendor_username = safe_get(vendor, 'username')
+                vendor_jobs = execute_query(
+                    'SELECT status, COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? GROUP BY status',
+                    (vendor_username,)
+                )
+                
+                if vendor_jobs:
+                    st.markdown("### 📊 Performance Stats")
+                    for job_stat in vendor_jobs:
+                        status = safe_str(safe_get(job_stat, 'status'))
+                        count = safe_int(safe_get(job_stat, 'count'))
+                        st.write(f"**{status} Jobs:** {count}")
+                
+                # Action buttons
+                st.markdown("### ⚙️ Actions")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("View Jobs", key=f"view_jobs_{vendor_username}"):
+                        st.session_state.selected_vendor = vendor_username
+                        st.rerun()
+                with col_b:
+                    if st.button("Remove Vendor", key=f"remove_{vendor_username}", type="secondary"):
+                        if execute_update('DELETE FROM vendors WHERE username = ?', (vendor_username,)):
+                            st.success("✅ Vendor removed successfully")
+                            st.rerun()
+
+# =============================================
+# REPORTS & ANALYTICS
+# =============================================
+def show_reports():
+    """Comprehensive reports and analytics"""
+    st.markdown("<h1 class='app-title'>📈 Reports & Analytics</h1>", unsafe_allow_html=True)
+    
+    # Get all data
+    all_requests = get_all_requests()
+    all_vendors = execute_query('SELECT * FROM vendors')
+    all_invoices = execute_query('SELECT * FROM invoices')
+    
+    if not all_requests:
+        st.info("📭 No data available for reports")
+        return
+    
+    # Overall stats
+    st.markdown("<div class='section-header'>📊 Overall Statistics</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_requests = len(all_requests)
+        st.metric("Total Requests", total_requests)
+    
+    with col2:
+        pending_requests = len([r for r in all_requests if safe_get(r, 'status') == 'Pending'])
+        st.metric("Pending Requests", pending_requests)
+    
+    with col3:
+        completed_requests = len([r for r in all_requests if safe_get(r, 'status') == 'Completed'])
+        st.metric("Completed Jobs", completed_requests)
+    
+    with col4:
+        approved_requests = len([r for r in all_requests if safe_get(r, 'status') == 'Approved'])
+        st.metric("Approved Jobs", approved_requests)
+    
+    st.markdown("---")
+    
+    # Tabs for different reports
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 Time Analysis", "🏢 Facility Analysis", "💰 Financial Reports", "📋 Detailed View"])
+    
+    with tab1:
+        # Monthly trend analysis
+        st.markdown("### 📅 Monthly Request Trend")
+        try:
+            monthly_data = {}
+            for req in all_requests:
+                if safe_get(req, 'created_date'):
+                    month = datetime.strptime(safe_get(req, 'created_date'), '%Y-%m-%d %H:%M:%S').strftime('%Y-%m')
+                    monthly_data[month] = monthly_data.get(month, 0) + 1
+            
+            if monthly_data:
+                df_monthly = pd.DataFrame({
+                    'Month': list(monthly_data.keys()),
+                    'Requests': list(monthly_data.values())
+                }).sort_values('Month')
+                
+                fig = px.line(df_monthly, x='Month', y='Requests', 
+                            title="Monthly Maintenance Requests",
+                            markers=True)
+                st.plotly_chart(fig, use_container_width=True)
+        except:
+            st.info("No time-based data available")
+    
+    with tab2:
+        # Facility type analysis
+        st.markdown("### 🏢 Facility Type Distribution")
+        facility_counts = {}
+        for req in all_requests:
+            facility = safe_get(req, 'facility_type')
+            facility_counts[facility] = facility_counts.get(facility, 0) + 1
+        
+        if facility_counts:
+            df_facility = pd.DataFrame({
+                'Facility Type': list(facility_counts.keys()),
+                'Count': list(facility_counts.values())
+            })
+            
+            fig = px.bar(df_facility, x='Facility Type', y='Count',
+                       title="Requests by Facility Type",
+                       color='Count')
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        # Financial reports
+        st.markdown("### 💰 Financial Summary")
+        
+        if all_invoices:
+            # Total revenue
+            total_revenue = sum([safe_float(inv['total_amount']) for inv in all_invoices])
+            avg_invoice = total_revenue / len(all_invoices) if all_invoices else 0
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("Total Revenue", format_ngn(total_revenue))
+            with col_b:
+                st.metric("Average Invoice", format_ngn(avg_invoice))
+            
+            # Revenue by vendor
+            vendor_revenue = {}
+            for inv in all_invoices:
+                vendor = safe_get(inv, 'vendor_username')
+                amount = safe_float(inv['total_amount'])
+                vendor_revenue[vendor] = vendor_revenue.get(vendor, 0) + amount
+            
+            if vendor_revenue:
+                df_vendor_rev = pd.DataFrame({
+                    'Vendor': list(vendor_revenue.keys()),
+                    'Revenue': list(vendor_revenue.values())
+                }).sort_values('Revenue', ascending=False)
+                
+                fig = px.bar(df_vendor_rev.head(10), x='Vendor', y='Revenue',
+                           title="Top 10 Vendors by Revenue",
+                           color='Revenue')
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No invoice data available")
+    
+    with tab4:
+        # Detailed data view
+        st.markdown("### 📋 Detailed Data View")
+        
+        # Create detailed dataframe
+        detailed_data = []
+        for req in all_requests:
+            detailed_data.append({
+                'ID': safe_get(req, 'id'),
+                'Title': safe_str(safe_get(req, 'title')),
+                'Facility Type': safe_str(safe_get(req, 'facility_type')),
+                'Priority': safe_str(safe_get(req, 'priority')),
+                'Status': safe_str(safe_get(req, 'status')),
+                'Created By': safe_str(safe_get(req, 'created_by')),
+                'Created Date': safe_str(safe_get(req, 'created_date')),
+                'Assigned Vendor': safe_str(safe_get(req, 'assigned_vendor')),
+                'Invoice Amount': format_ngn(safe_get(req, 'invoice_amount'))
+            })
+        
+        df_detailed = pd.DataFrame(detailed_data)
+        st.dataframe(df_detailed, use_container_width=True)
+        
+        # Download options
+        csv = df_detailed.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download as CSV",
+            data=csv,
+            file_name="facilities_management_report.csv",
+            mime="text/csv"
+        )
+
+# =============================================
+# JOB & INVOICE REPORTS
+# =============================================
+def show_job_invoice_reports():
+    """Job and invoice reports"""
+    st.markdown("<h1 class='app-title'>📄 Job & Invoice Reports</h1>", unsafe_allow_html=True)
+    
+    # Get all jobs with invoices
+    jobs_with_invoices = execute_query('''
+        SELECT mr.*, i.invoice_date, i.total_amount, i.status as invoice_status
+        FROM maintenance_requests mr
+        LEFT JOIN invoices i ON mr.id = i.request_id
+        WHERE mr.invoice_number IS NOT NULL
+        ORDER BY mr.completed_date DESC
+    ''')
+    
+    if not jobs_with_invoices:
+        st.info("📭 No jobs with invoices found")
+        return
+    
+    st.markdown(f"<div class='card'><h4>🧾 {len(jobs_with_invoices)} Job(s) with Invoices</h4></div>", unsafe_allow_html=True)
+    
+    # Filter options
+    col1, col2 = st.columns(2)
+    with col1:
+        status_filter = st.selectbox("Filter by Job Status", ["All", "Completed", "Approved"], key="job_status_filter")
+    with col2:
+        invoice_filter = st.selectbox("Filter by Invoice Status", ["All", "Paid", "Pending"], key="invoice_status_filter")
+    
+    # Apply filters
+    filtered_jobs = jobs_with_invoices
+    if status_filter != "All":
+        filtered_jobs = [j for j in filtered_jobs if safe_get(j, 'status') == status_filter]
+    if invoice_filter != "All":
+        filtered_jobs = [j for j in filtered_jobs if safe_get(j, 'invoice_status') == invoice_filter]
+    
+    # Display filtered jobs
+    for job in filtered_jobs:
+        with st.expander(f"📄 Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))} - Invoice: {safe_str(safe_get(job, 'invoice_number'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                st.write(f"**Description:** {safe_str(safe_get(job, 'description'))}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(job, 'facility_type'))}")
+                st.write(f"**Priority:** {safe_str(safe_get(job, 'priority'))}")
+                st.write(f"**Status:** {safe_str(safe_get(job, 'status'))}")
+                st.write(f"**Created By:** {safe_str(safe_get(job, 'created_by'))}")
+                st.write(f"**Completed Date:** {safe_str(safe_get(job, 'completed_date'))}")
+            
+            with col2:
+                st.markdown("### 🧾 Invoice Details")
+                st.write(f"**Invoice Number:** {safe_str(safe_get(job, 'invoice_number'))}")
+                st.write(f"**Invoice Date:** {safe_str(safe_get(job, 'invoice_date'))}")
+                st.write(f"**Total Amount:** {format_ngn(safe_get(job, 'total_amount'))}")
+                st.write(f"**Invoice Status:** {safe_str(safe_get(job, 'invoice_status'))}")
+                
+                # Get detailed invoice
+                invoice_details = execute_query(
+                    'SELECT * FROM invoices WHERE invoice_number = ?', 
+                    (safe_get(job, 'invoice_number'),)
+                )
+                
+                if invoice_details:
+                    invoice = invoice_details[0]
+                    with st.expander("View Full Invoice Details"):
+                        st.write(f"**Details of Work:** {safe_str(safe_get(invoice, 'details_of_work'))}")
+                        st.write(f"**Quantity:** {safe_str(safe_get(invoice, 'quantity'))}")
+                        st.write(f"**Unit Cost:** {format_ngn(safe_get(invoice, 'unit_cost'))}")
+                        st.write(f"**Amount:** {format_ngn(safe_get(invoice, 'amount'))}")
+                        st.write(f"**Labour Charge:** {format_ngn(safe_get(invoice, 'labour_charge'))}")
+                        st.write(f"**VAT Amount:** {format_ngn(safe_get(invoice, 'vat_amount'))}")
+                        st.write(f"**Total:** {format_ngn(safe_get(invoice, 'total_amount'))}")
+                
+                # Generate PDF button
+                if safe_get(job, 'facilities_manager_approval'):
+                    pdf_buffer = generate_final_report_pdf(job, invoice_details[0] if invoice_details else None)
+                    
+                    st.download_button(
+                        label="📄 Download Invoice Report",
+                        data=pdf_buffer.getvalue(),
+                        file_name=f"Invoice_Report_Job_{safe_get(job, 'id')}.pdf",
+                        mime="application/pdf",
+                        key=f"invoice_report_{safe_get(job, 'id')}",
+                        use_container_width=True
+                    )
+
+# =============================================
 # DASHBOARD FUNCTIONS (UPDATED WITH APPROVAL STATS)
 # =============================================
 def show_user_dashboard():
+    st.markdown("<h1 class='app-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
+    
     user_requests = get_user_requests(st.session_state.user['username'])
     
     # Stats including approval stats
@@ -1379,18 +2204,30 @@ def show_user_dashboard():
     # Quick actions
     st.markdown("<div class='section-header'>🚀 Quick Actions</div>", unsafe_allow_html=True)
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📝 Create New Request", use_container_width=True):
-            st.switch_page("?page=Create Request")
+            # Show the create request form directly
+            show_create_request()
+            return
     
     with col2:
         pending_approvals = get_requests_for_user_approval(st.session_state.user['username'])
         if pending_approvals:
             if st.button(f"✅ Approve Jobs ({len(pending_approvals)})", use_container_width=True, type="primary"):
-                st.switch_page("?page=Department Approval")
+                # Show department approval directly
+                show_department_approval()
+                return
+    
+    with col3:
+        if st.button("📋 View My Requests", use_container_width=True):
+            # Show my requests directly
+            show_my_requests()
+            return
 
 def show_manager_dashboard():
+    st.markdown("<h1 class='app-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
+    
     all_requests = get_all_requests()
     
     # Stats including approval stats
@@ -1418,11 +2255,36 @@ def show_manager_dashboard():
         st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
         create_metric_card("Fully Approved", approved_count, "👍")
         st.markdown("</div>", unsafe_allow_html=True)
-
-def show_vendor_dashboard():
-    vendor_requests = get_vendor_requests(st.session_state.user['username'])
+    
+    st.markdown("---")
+    
+    # Quick actions
+    st.markdown("<div class='section-header'>🚀 Quick Actions</div>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🛠️ Manage Requests", use_container_width=True):
+            show_manage_requests()
+            return
+    
+    with col2:
+        pending_final_approvals = get_requests_for_manager_approval()
+        if pending_final_approvals:
+            if st.button(f"✅ Final Approval ({len(pending_final_approvals)})", use_container_width=True, type="primary"):
+                show_final_approval()
+                return
+    
+    with col3:
+        if st.button("👥 Vendor Management", use_container_width=True):
+            show_vendor_management()
+            return
+
+def show_vendor_dashboard():
+    st.markdown("<h1 class='app-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
+    
+    vendor_requests = get_vendor_requests(st.session_state.user['username'])
+    
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         assigned_count = len([r for r in vendor_requests if safe_get(r, 'status') == 'Assigned'])
@@ -1441,6 +2303,36 @@ def show_vendor_dashboard():
         st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
         create_metric_card("Approved", approved_count, "👍")
         st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col4:
+        # Calculate total revenue from completed jobs
+        total_revenue = sum([safe_float(r['invoice_amount']) for r in vendor_requests if r['invoice_amount']])
+        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        create_metric_card("Total Revenue", format_ngn(total_revenue), "💰")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Quick actions
+    st.markdown("<div class='section-header'>🚀 Quick Actions</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        assigned_jobs = len([r for r in vendor_requests if safe_get(r, 'status') == 'Assigned'])
+        if assigned_jobs > 0:
+            if st.button(f"🔧 Work on Jobs ({assigned_jobs})", use_container_width=True, type="primary"):
+                show_assigned_jobs()
+                return
+    
+    with col2:
+        if st.button("🏢 Vendor Registration", use_container_width=True):
+            show_vendor_registration()
+            return
+    
+    with col3:
+        if st.button("📊 My Reports", use_container_width=True):
+            show_vendor_reports()
+            return
 
 def show_dashboard():
     st.markdown("<h1 class='app-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
@@ -1508,47 +2400,14 @@ def show_main_app():
         "📊 My Reports": show_vendor_reports
     }
     
-    # Note: Need to define missing functions - using simplified versions
     if selected_menu in menu_map:
         menu_map[selected_menu]()
     else:
         st.error("Page not found")
 
 # =============================================
-# SIMPLIFIED VERSIONS OF MISSING FUNCTIONS
+# MAIN FUNCTION
 # =============================================
-def show_reports():
-    st.markdown("<h1 class='app-title'>📈 Reports & Analytics</h1>", unsafe_allow_html=True)
-    st.info("Reports page - showing analytics and statistics")
-
-def show_assigned_jobs():
-    st.markdown("<h1 class='app-title'>🔧 Assigned Jobs</h1>", unsafe_allow_html=True)
-    st.info("Assigned jobs page for vendors")
-
-def show_completed_jobs():
-    st.markdown("<h1 class='app-title'>✅ Completed Jobs</h1>", unsafe_allow_html=True)
-    st.info("Completed jobs page for vendors")
-
-def show_vendor_registration():
-    st.markdown("<h1 class='app-title'>🏢 Vendor Registration</h1>", unsafe_allow_html=True)
-    st.info("Vendor registration page")
-
-def show_invoice_creation():
-    st.markdown("<h1 class='app-title'>🧾 Invoice Creation</h1>", unsafe_allow_html=True)
-    st.info("Invoice creation page for vendors")
-
-def show_job_invoice_reports():
-    st.markdown("<h1 class='app-title'>📄 Job & Invoice Reports</h1>", unsafe_allow_html=True)
-    st.info("Job and invoice reports page")
-
-def show_vendor_reports():
-    st.markdown("<h1 class='app-title'>📊 My Vendor Reports</h1>", unsafe_allow_html=True)
-    st.info("Vendor reports page")
-
-def show_vendor_management():
-    st.markdown("<h1 class='app-title'>👥 Vendor Management</h1>", unsafe_allow_html=True)
-    st.info("Vendor management page for facility manager")
-
 def main():
     if 'user' not in st.session_state:
         st.session_state.user = None
