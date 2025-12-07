@@ -459,7 +459,7 @@ def init_database():
             pass
 
 # =============================================
-# ENSURE DEFAULT ACCOUNTS FUNCTION
+# ENSURE DEFAULT ACCOUNTS FUNCTION - FIXED VERSION
 # =============================================
 def ensure_vendor_records():
     """Ensure vendor records exist for vendor accounts"""
@@ -501,6 +501,16 @@ def ensure_default_accounts():
         ('building_vendor', 'vendor123', 'vendor', 'Building Vendor', 'Building Maintenance'),
     ]
     
+    # First check if database has any users
+    existing_users = execute_query("SELECT COUNT(*) as count FROM users")
+    user_count = existing_users[0]['count'] if existing_users else 0
+    
+    if user_count > 0:
+        print(f"Database already has {user_count} users, skipping default account creation")
+        return
+    
+    print("Creating default accounts...")
+    
     for account in default_accounts:
         if len(account) == 4:  # User account
             username, password, role, full_name = account
@@ -514,20 +524,17 @@ def ensure_default_accounts():
         if not existing:
             # Create new user
             password_hash = hash_password(password)
-            execute_update(
-                '''INSERT INTO users (username, password_hash, role, status, full_name, vendor_type) 
-                VALUES (?, ?, ?, ?, ?, ?)''',
-                (username, password_hash, role, 'approved', full_name, vendor_type)
+            success = execute_update(
+                '''INSERT INTO users (username, password_hash, role, status, full_name, vendor_type, approved_by) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (username, password_hash, role, 'approved', full_name, vendor_type, 'system')
             )
-            print(f"Created {username}")
+            if success:
+                print(f"✅ Created user: {username} (Role: {role})")
+            else:
+                print(f"❌ Failed to create user: {username}")
         else:
-            # Update password
-            password_hash = hash_password(password)
-            execute_update(
-                "UPDATE users SET password_hash = ? WHERE username = ?",
-                (password_hash, username)
-            )
-            print(f"Updated password for {username}")
+            print(f"⚠️ User {username} already exists")
     
     # Also ensure vendor records exist
     ensure_vendor_records()
@@ -535,6 +542,41 @@ def ensure_default_accounts():
 # Initialize database and create default accounts
 init_database()
 ensure_default_accounts()
+
+# =============================================
+# AUTHENTICATION & USER MANAGEMENT FUNCTIONS
+# =============================================
+def authenticate_user(username, password):
+    """Authenticate user with username and password"""
+    print(f"Attempting to authenticate user: {username}")
+    
+    # First, check if user exists and is approved
+    user = execute_query('SELECT * FROM users WHERE username = ? AND status = ?', (username, 'approved'))
+    
+    if not user:
+        print(f"❌ No approved user found with username: {username}")
+        # Check if user exists but not approved
+        pending_user = execute_query('SELECT * FROM users WHERE username = ?', (username,))
+        if pending_user:
+            print(f"⚠️ User {username} exists but status is: {pending_user[0].get('status')}")
+        return None
+    
+    user_data = user[0]
+    print(f"Found user: {user_data['username']}, Role: {user_data['role']}")
+    
+    # Verify password
+    provided_hash = hash_password(password)
+    stored_hash = user_data['password_hash']
+    
+    print(f"Stored hash: {stored_hash[:10]}...")
+    print(f"Provided hash: {provided_hash[:10]}...")
+    
+    if stored_hash == provided_hash:
+        print(f"✅ Password verified for user: {username}")
+        return user_data
+    else:
+        print(f"❌ Password verification failed for user: {username}")
+        return None
 
 # =============================================
 # SAFE DATA ACCESS FUNCTIONS
@@ -685,6 +727,219 @@ def safe_bool(value, default=False):
     if isinstance(value, str):
         return value.lower() in ['true', '1', 'yes', 'y']
     return default
+
+# =============================================
+# ENHANCED LOGIN PAGE WITH REGISTRATION OPTIONS
+# =============================================
+def show_enhanced_login():
+    st.markdown("<h1 class='app-title'>🏢 A-Z Facilities Management Pro APP™</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #6b7280;'>Professional Facilities Management Solution</p>", unsafe_allow_html=True)
+    
+    # Create tabs for login and registration
+    tab1, tab2, tab3 = st.tabs(["🔐 Login", "👥 User Registration", "🏢 Vendor Registration"])
+    
+    with tab1:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        
+        with col2:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>🔐 Login to Your Account</h3>", unsafe_allow_html=True)
+            
+            with st.form("login_form"):
+                username = st.text_input("👤 Username", placeholder="Enter your username")
+                password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
+                
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    login_button = st.form_submit_button("🚀 Login", use_container_width=True)
+                
+                if login_button:
+                    if not username or not password:
+                        st.error("❌ Please enter both username and password")
+                    else:
+                        user = authenticate_user(username, password)
+                        if user:
+                            st.session_state.user = user
+                            st.success("✅ Login successful! Redirecting...")
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid username or password")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+    
+    with tab2:
+        show_user_registration_form()
+    
+    with tab3:
+        show_vendor_registration_form()
+    
+    st.markdown("---")
+    st.markdown("<p style='text-align: center; color: #6b7280;'>© 2025 A-Z Facilities Management Pro APP™. Developed by Abdulahi Ibrahim.</p>", unsafe_allow_html=True)
+
+def check_username_availability(username):
+    """Check if username is available"""
+    user = execute_query('SELECT * FROM users WHERE username = ?', (username,))
+    vendor = execute_query('SELECT * FROM vendors WHERE username = ?', (username,))
+    return len(user) == 0 and len(vendor) == 0
+
+def get_pending_users():
+    """Get users pending approval"""
+    return execute_query('''
+        SELECT * FROM users 
+        WHERE status = 'pending' 
+        AND role IN ('facility_user', 'vendor')
+        ORDER BY created_date DESC
+    ''')
+
+def get_pending_vendors():
+    """Get vendors pending approval"""
+    return execute_query('''
+        SELECT * FROM vendors 
+        WHERE status = 'pending'
+        ORDER BY registration_date DESC
+    ''')
+
+def show_user_registration_form():
+    """Show user registration form"""
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>👥 Facility User Registration</h3>", unsafe_allow_html=True)
+    st.info("📋 Your account will be reviewed by the Facility Manager before activation.")
+    
+    with st.form("user_reg_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            full_name = st.text_input("Full Name *", placeholder="Enter your full name")
+            username = st.text_input("Username *", placeholder="Choose a username")
+            password = st.text_input("Password *", type="password", placeholder="Choose a password")
+        
+        with col2:
+            email = st.text_input("Email Address *", placeholder="Enter your email")
+            phone = st.text_input("Phone Number *", placeholder="Enter your phone number")
+            department = st.selectbox("Department *", 
+                ["Water Treatment Plant", "Finance", "HR", "Admin", "Production", 
+                 "Warehouse", "Office Management", "Laboratory", "Parking Lot"])
+        
+        role = 'facility_user'
+        
+        submitted = st.form_submit_button("📝 Register as Facility User", use_container_width=True)
+        
+        if submitted:
+            if not all([full_name, username, password, email, phone, department]):
+                st.error("❌ Please fill in all required fields (*)")
+            elif len(password) < 6:
+                st.error("❌ Password must be at least 6 characters long")
+            elif not check_username_availability(username):
+                st.error("❌ Username already exists. Please choose another.")
+            else:
+                # Hash password
+                password_hash = hash_password(password)
+                
+                # Create user with pending status
+                success = execute_update(
+                    '''INSERT INTO users (username, password_hash, role, status, full_name, email, phone, department, created_by) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (username, password_hash, role, 'pending', full_name, email, phone, department, 'self_registration')
+                )
+                
+                if success:
+                    st.success("✅ Registration submitted successfully! Your account is pending approval by the Facility Manager.")
+                    st.info("📧 You will be notified when your account is approved.")
+                else:
+                    st.error("❌ Registration failed. Please try again.")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def show_vendor_registration_form():
+    """Show vendor registration form"""
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>🏢 Vendor Registration</h3>", unsafe_allow_html=True)
+    st.info("📋 Your vendor account will be reviewed by the Facility Manager before activation.")
+    
+    with st.form("vendor_reg_form"):
+        # Company Information
+        st.markdown("### 🏢 Company Information")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            company_name = st.text_input("Company Name *", placeholder="Enter company name")
+            contact_person = st.text_input("Contact Person *", placeholder="Enter contact person name")
+            email = st.text_input("Email Address *", placeholder="Enter company email")
+        
+        with col2:
+            phone = st.text_input("Phone Number *", placeholder="Enter company phone")
+            vendor_type = st.selectbox("Vendor Type *", 
+                ["HVAC", "Generator", "Building Maintenance", "Electrical", "Plumbing", 
+                 "Fixture and Fittings", "HSE", "Space Management", "Other"])
+            services_offered = st.text_area("Services Offered *", 
+                placeholder="Describe services offered", height=80)
+        
+        # Account Information
+        st.markdown("### 👤 Account Information")
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            username = st.text_input("Username *", placeholder="Choose a username")
+            password = st.text_input("Password *", type="password", placeholder="Choose a password")
+        
+        with col4:
+            address = st.text_area("Company Address *", placeholder="Full company address", height=80)
+        
+        # Additional Information (optional)
+        st.markdown("### 📋 Additional Information (Optional)")
+        col5, col6 = st.columns(2)
+        
+        with col5:
+            tax_identification_number = st.text_input("Tax Identification Number", placeholder="TIN")
+            rc_number = st.text_input("RC Number", placeholder="Company registration number")
+        
+        with col6:
+            annual_turnover = st.number_input("Annual Turnover (₦)", min_value=0.0, value=0.0, step=10000.0)
+            certification = st.text_area("Certifications", placeholder="List certifications", height=60)
+        
+        submitted = st.form_submit_button("📝 Register as Vendor", use_container_width=True)
+        
+        if submitted:
+            required_fields = [company_name, contact_person, email, phone, vendor_type, 
+                             services_offered, username, password, address]
+            
+            if not all(required_fields):
+                st.error("❌ Please fill in all required fields (*)")
+            elif len(password) < 6:
+                st.error("❌ Password must be at least 6 characters long")
+            elif not check_username_availability(username):
+                st.error("❌ Username already exists. Please choose another.")
+            else:
+                # Hash password
+                password_hash = hash_password(password)
+                
+                # First create user account
+                user_success = execute_update(
+                    '''INSERT INTO users (username, password_hash, role, vendor_type, status, full_name, email, phone, created_by) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (username, password_hash, 'vendor', vendor_type, 'pending', contact_person, email, phone, 'self_registration')
+                )
+                
+                if user_success:
+                    # Then create vendor record
+                    vendor_success = execute_update(
+                        '''INSERT INTO vendors 
+                        (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                         annual_turnover, tax_identification_number, rc_number, certification, address, status, created_by) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (username, company_name, contact_person, email, phone, vendor_type, services_offered,
+                         annual_turnover, tax_identification_number, rc_number, certification, address, 'pending', 'self_registration')
+                    )
+                    
+                    if vendor_success:
+                        st.success("✅ Vendor registration submitted successfully! Your account is pending approval.")
+                        st.info("📧 You will be notified when your vendor account is approved.")
+                    else:
+                        st.error("❌ Vendor registration failed. Please try again.")
+                else:
+                    st.error("❌ Account creation failed. Please try again.")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # =============================================
 # ENHANCED PDF GENERATION FUNCTIONS
@@ -859,391 +1114,6 @@ def generate_final_report_pdf(request_data, invoice_data=None):
     doc.build(story)
     buffer.seek(0)
     return buffer
-
-def generate_invoice_pdf(invoice_data):
-    """Generate invoice-only PDF"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    styles = getSampleStyleSheet()
-    story = []
-    
-    # Title
-    story.append(Paragraph("INVOICE", styles['Heading1']))
-    story.append(Spacer(1, 20))
-    
-    # Invoice details table
-    invoice_info = [
-        ["Invoice Number:", invoice_data.get('invoice_number', 'N/A')],
-        ["Invoice Date:", invoice_data.get('invoice_date', 'N/A')],
-        ["Job ID:", invoice_data.get('id', 'N/A')],
-        ["Job Title:", invoice_data.get('title', 'N/A')],
-        ["Vendor:", invoice_data.get('assigned_vendor', 'N/A')],
-    ]
-    
-    invoice_table = Table(invoice_info, colWidths=[150, 300])
-    invoice_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#3b82f6')),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
-        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f8fafc')),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    story.append(invoice_table)
-    story.append(Spacer(1, 20))
-    
-    # Amount details
-    amount_data = [
-        ["Description", "Quantity", "Unit Price", "Amount"],
-        [invoice_data.get('details_of_work', 'Work performed'), 
-         invoice_data.get('quantity', 1), 
-         format_ngn(invoice_data.get('unit_cost', 0)), 
-         format_ngn(invoice_data.get('amount', 0))],
-        ["Labour/Service Charge", "", "", format_ngn(invoice_data.get('labour_charge', 0))],
-        ["Subtotal", "", "", format_ngn(invoice_data.get('amount', 0) + invoice_data.get('labour_charge', 0))],
-        ["VAT (7.5%)" if invoice_data.get('vat_applicable') else "VAT", "", "", format_ngn(invoice_data.get('vat_amount', 0))],
-        ["TOTAL", "", "", format_ngn(invoice_data.get('total_amount', 0))]
-    ]
-    
-    amount_table = Table(amount_data, colWidths=[250, 60, 80, 80])
-    amount_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#10b981')),
-        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
-        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    story.append(amount_table)
-    
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-def generate_job_summary_pdf(job_data):
-    """Generate job summary PDF"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    styles = getSampleStyleSheet()
-    story = []
-    
-    story.append(Paragraph("JOB SUMMARY REPORT", styles['Heading1']))
-    story.append(Spacer(1, 20))
-    
-    # Job details
-    job_info = [
-        ["Job ID:", job_data.get('id', 'N/A')],
-        ["Title:", job_data.get('title', 'N/A')],
-        ["Description:", job_data.get('description', 'N/A')],
-        ["Location:", job_data.get('location', 'Common Area')],
-        ["Facility Type:", job_data.get('facility_type', 'N/A')],
-        ["Priority:", job_data.get('priority', 'N/A')],
-        ["Status:", job_data.get('status', 'N/A')],
-        ["Created By:", job_data.get('created_by', 'N/A')],
-        ["Created Date:", job_data.get('created_date', 'N/A')],
-        ["Completed Date:", job_data.get('completed_date', 'N/A')],
-        ["Assigned Vendor:", job_data.get('assigned_vendor', 'N/A')],
-    ]
-    
-    job_table = Table(job_info, colWidths=[150, 300])
-    job_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#10b981')),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
-        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-        ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#f0fdf4')),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    story.append(job_table)
-    
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-def generate_monthly_summary_report(jobs):
-    """Generate monthly summary report"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    styles = getSampleStyleSheet()
-    story = []
-    
-    # Title
-    story.append(Paragraph(f"MONTHLY SUMMARY REPORT - {datetime.now().strftime('%B %Y')}", styles['Heading1']))
-    story.append(Spacer(1, 20))
-    
-    # Summary statistics
-    total_jobs = len(jobs)
-    approved_jobs = len([j for j in jobs if j.get('facilities_manager_approval') == 1])
-    total_amount = sum([j.get('total_amount', 0) for j in jobs])
-    vat_total = sum([j.get('vat_amount', 0) for j in jobs])
-    
-    summary_data = [
-        ["Total Jobs", total_jobs],
-        ["Fully Approved Jobs", approved_jobs],
-        ["Total Invoice Amount", format_ngn(total_amount)],
-        ["Total VAT", format_ngn(vat_total)],
-        ["Net Amount", format_ngn(total_amount - vat_total)],
-    ]
-    
-    summary_table = Table(summary_data, colWidths=[200, 200])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ]))
-    story.append(summary_table)
-    story.append(Spacer(1, 20))
-    
-    # Job list table
-    if jobs:
-        job_list_data = [["Job ID", "Title", "Vendor", "Amount", "Status"]]
-        
-        for job in jobs:
-            status = "Approved" if job.get('facilities_manager_approval') == 1 else "Pending"
-            job_list_data.append([
-                job.get('id'),
-                job.get('title'),
-                job.get('assigned_vendor', 'N/A'),
-                format_ngn(job.get('total_amount', 0)),
-                status
-            ])
-        
-        job_list_table = Table(job_list_data, colWidths=[60, 150, 100, 100, 80])
-        job_list_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b82f6')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),
-        ]))
-        story.append(job_list_table)
-    
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-# =============================================
-# AUTHENTICATION & USER MANAGEMENT FUNCTIONS
-# =============================================
-def authenticate_user(username, password):
-    """Authenticate user with username and password"""
-    user = execute_query('SELECT * FROM users WHERE username = ? AND status = ?', (username, 'approved'))
-    if user:
-        user_data = user[0]
-        if verify_password(user_data['password_hash'], password):
-            return user_data
-    return None
-
-def check_username_availability(username):
-    """Check if username is available"""
-    user = execute_query('SELECT * FROM users WHERE username = ?', (username,))
-    vendor = execute_query('SELECT * FROM vendors WHERE username = ?', (username,))
-    return len(user) == 0 and len(vendor) == 0
-
-def get_pending_users():
-    """Get users pending approval"""
-    return execute_query('''
-        SELECT * FROM users 
-        WHERE status = 'pending' 
-        AND role IN ('facility_user', 'vendor')
-        ORDER BY created_date DESC
-    ''')
-
-def get_pending_vendors():
-    """Get vendors pending approval"""
-    return execute_query('''
-        SELECT * FROM vendors 
-        WHERE status = 'pending'
-        ORDER BY registration_date DESC
-    ''')
-
-# =============================================
-# ENHANCED LOGIN PAGE WITH REGISTRATION OPTIONS
-# =============================================
-def show_enhanced_login():
-    st.markdown("<h1 class='app-title'>🏢 A-Z Facilities Management Pro APP™</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #6b7280;'>Professional Facilities Management Solution</p>", unsafe_allow_html=True)
-    
-    # Create tabs for login and registration
-    tab1, tab2, tab3 = st.tabs(["🔐 Login", "👥 User Registration", "🏢 Vendor Registration"])
-    
-    with tab1:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        
-        with col2:
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>🔐 Login to Your Account</h3>", unsafe_allow_html=True)
-            
-            with st.form("login_form"):
-                username = st.text_input("👤 Username", placeholder="Enter your username")
-                password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
-                
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    login_button = st.form_submit_button("🚀 Login", use_container_width=True)
-                
-                if login_button:
-                    if not username or not password:
-                        st.error("❌ Please enter both username and password")
-                    else:
-                        user = authenticate_user(username, password)
-                        if user:
-                            st.session_state.user = user
-                            st.success("✅ Login successful! Redirecting...")
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid username or password")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-    
-    with tab2:
-        show_user_registration_form()
-    
-    with tab3:
-        show_vendor_registration_form()
-    
-    st.markdown("---")
-    st.markdown("<p style='text-align: center; color: #6b7280;'>© 2025 A-Z Facilities Management Pro APP™. Developed by Abdulahi Ibrahim.</p>", unsafe_allow_html=True)
-
-def show_user_registration_form():
-    """Show user registration form"""
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>👥 Facility User Registration</h3>", unsafe_allow_html=True)
-    st.info("📋 Your account will be reviewed by the Facility Manager before activation.")
-    
-    with st.form("user_reg_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            full_name = st.text_input("Full Name *", placeholder="Enter your full name")
-            username = st.text_input("Username *", placeholder="Choose a username")
-            password = st.text_input("Password *", type="password", placeholder="Choose a password")
-        
-        with col2:
-            email = st.text_input("Email Address *", placeholder="Enter your email")
-            phone = st.text_input("Phone Number *", placeholder="Enter your phone number")
-            department = st.selectbox("Department *", 
-                ["Water Treatment Plant", "Finance", "HR", "Admin", "Production", 
-                 "Warehouse", "Office Management", "Laboratory", "Parking Lot"])
-        
-        role = 'facility_user'
-        
-        submitted = st.form_submit_button("📝 Register as Facility User", use_container_width=True)
-        
-        if submitted:
-            if not all([full_name, username, password, email, phone, department]):
-                st.error("❌ Please fill in all required fields (*)")
-            elif len(password) < 6:
-                st.error("❌ Password must be at least 6 characters long")
-            elif not check_username_availability(username):
-                st.error("❌ Username already exists. Please choose another.")
-            else:
-                # Hash password
-                password_hash = hash_password(password)
-                
-                # Create user with pending status
-                success = execute_update(
-                    '''INSERT INTO users (username, password_hash, role, status, full_name, email, phone, department, created_by) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (username, password_hash, role, 'pending', full_name, email, phone, department, 'self_registration')
-                )
-                
-                if success:
-                    st.success("✅ Registration submitted successfully! Your account is pending approval by the Facility Manager.")
-                    st.info("📧 You will be notified when your account is approved.")
-                else:
-                    st.error("❌ Registration failed. Please try again.")
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-
-def show_vendor_registration_form():
-    """Show vendor registration form"""
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("<h3 style='color: #1e3a8a; text-align: center;'>🏢 Vendor Registration</h3>", unsafe_allow_html=True)
-    st.info("📋 Your vendor account will be reviewed by the Facility Manager before activation.")
-    
-    with st.form("vendor_reg_form"):
-        # Company Information
-        st.markdown("### 🏢 Company Information")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            company_name = st.text_input("Company Name *", placeholder="Enter company name")
-            contact_person = st.text_input("Contact Person *", placeholder="Enter contact person name")
-            email = st.text_input("Email Address *", placeholder="Enter company email")
-        
-        with col2:
-            phone = st.text_input("Phone Number *", placeholder="Enter company phone")
-            vendor_type = st.selectbox("Vendor Type *", 
-                ["HVAC", "Generator", "Building Maintenance", "Electrical", "Plumbing", 
-                 "Fixture and Fittings", "HSE", "Space Management", "Other"])
-            services_offered = st.text_area("Services Offered *", 
-                placeholder="Describe services offered", height=80)
-        
-        # Account Information
-        st.markdown("### 👤 Account Information")
-        col3, col4 = st.columns(2)
-        
-        with col3:
-            username = st.text_input("Username *", placeholder="Choose a username")
-            password = st.text_input("Password *", type="password", placeholder="Choose a password")
-        
-        with col4:
-            address = st.text_area("Company Address *", placeholder="Full company address", height=80)
-        
-        # Additional Information (optional)
-        st.markdown("### 📋 Additional Information (Optional)")
-        col5, col6 = st.columns(2)
-        
-        with col5:
-            tax_identification_number = st.text_input("Tax Identification Number", placeholder="TIN")
-            rc_number = st.text_input("RC Number", placeholder="Company registration number")
-        
-        with col6:
-            annual_turnover = st.number_input("Annual Turnover (₦)", min_value=0.0, value=0.0, step=10000.0)
-            certification = st.text_area("Certifications", placeholder="List certifications", height=60)
-        
-        submitted = st.form_submit_button("📝 Register as Vendor", use_container_width=True)
-        
-        if submitted:
-            required_fields = [company_name, contact_person, email, phone, vendor_type, 
-                             services_offered, username, password, address]
-            
-            if not all(required_fields):
-                st.error("❌ Please fill in all required fields (*)")
-            elif len(password) < 6:
-                st.error("❌ Password must be at least 6 characters long")
-            elif not check_username_availability(username):
-                st.error("❌ Username already exists. Please choose another.")
-            else:
-                # Hash password
-                password_hash = hash_password(password)
-                
-                # First create user account
-                user_success = execute_update(
-                    '''INSERT INTO users (username, password_hash, role, vendor_type, status, full_name, email, phone, created_by) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (username, password_hash, 'vendor', vendor_type, 'pending', contact_person, email, phone, 'self_registration')
-                )
-                
-                if user_success:
-                    # Then create vendor record
-                    vendor_success = execute_update(
-                        '''INSERT INTO vendors 
-                        (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
-                         annual_turnover, tax_identification_number, rc_number, certification, address, status, created_by) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (username, company_name, contact_person, email, phone, vendor_type, services_offered,
-                         annual_turnover, tax_identification_number, rc_number, certification, address, 'pending', 'self_registration')
-                    )
-                    
-                    if vendor_success:
-                        st.success("✅ Vendor registration submitted successfully! Your account is pending approval.")
-                        st.info("📧 You will be notified when your vendor account is approved.")
-                    else:
-                        st.error("❌ Vendor registration failed. Please try again.")
-                else:
-                    st.error("❌ Account creation failed. Please try again.")
-    
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # =============================================
 # USER MANAGEMENT FOR FACILITY MANAGER
@@ -1513,214 +1383,6 @@ def show_user_directory():
                             st.warning("⚠️ Please share this password securely with the user.")
 
 # =============================================
-# DEPARTMENT APPROVAL PAGE FOR FACILITY USER
-# =============================================
-def show_department_approval():
-    """Page for facility user to approve completed jobs from vendors"""
-    st.markdown("<h1 class='app-title'>✅ Department Approval</h1>", unsafe_allow_html=True)
-    
-    # Get requests that need department approval (created by this user)
-    pending_approvals = get_requests_for_user_approval(st.session_state.user['username'])
-    
-    if not pending_approvals:
-        st.info("🎉 No jobs pending your department approval")
-        return
-    
-    st.markdown(f"<div class='card'><h4>📋 {len(pending_approvals)} Job(s) Awaiting Your Approval</h4></div>", unsafe_allow_html=True)
-    
-    for req in pending_approvals:
-        with st.expander(f"🔄 Job #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))}"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### 📝 Job Details")
-                st.write(f"**Title:** {safe_str(safe_get(req, 'title'))}")
-                st.write(f"**Description:** {safe_str(safe_get(req, 'description'))}")
-                st.write(f"**Location:** {safe_str(safe_get(req, 'location'), 'Common Area')}")
-                st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
-                st.write(f"**Priority:** {safe_str(safe_get(req, 'priority'))}")
-                st.write(f"**Status:** {safe_str(safe_get(req, 'status'))}")
-                st.write(f"**Completed Date:** {safe_str(safe_get(req, 'completed_date'))}")
-                
-                # Show assigned vendor details
-                if safe_get(req, 'assigned_vendor'):
-                    vendor_info = execute_query(
-                        'SELECT company_name FROM vendors WHERE username = ?',
-                        (safe_get(req, 'assigned_vendor'),)
-                    )
-                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(req, 'assigned_vendor')
-                    st.write(f"**Vendor:** {vendor_name}")
-            
-            with col2:
-                st.markdown("### 🛠️ Work Completed")
-                if safe_get(req, 'job_breakdown'):
-                    st.write(f"**Job Breakdown:**")
-                    st.info(safe_str(safe_get(req, 'job_breakdown')))
-                
-                if safe_get(req, 'completion_notes'):
-                    st.write(f"**Completion Notes:**")
-                    st.info(safe_str(safe_get(req, 'completion_notes')))
-                
-                # Show invoice details if available
-                if safe_get(req, 'invoice_number'):
-                    st.markdown("### 🧾 Invoice Details")
-                    st.write(f"**Invoice Number:** {safe_str(safe_get(req, 'invoice_number'))}")
-                    st.write(f"**Invoice Amount:** {format_ngn(safe_get(req, 'invoice_amount'))}")
-                    
-                    # Get detailed invoice
-                    invoice_details = execute_query(
-                        'SELECT * FROM invoices WHERE invoice_number = ?', 
-                        (safe_get(req, 'invoice_number'),)
-                    )
-                    
-                    if invoice_details:
-                        invoice = invoice_details[0]
-                        with st.expander("View Invoice Details"):
-                            st.write(f"**Details:** {safe_str(safe_get(invoice, 'details_of_work'))}")
-                            st.write(f"**Quantity:** {safe_str(safe_get(invoice, 'quantity'))}")
-                            st.write(f"**Unit Cost:** {format_ngn(safe_get(invoice, 'unit_cost'))}")
-                            st.write(f"**Total:** {format_ngn(safe_get(invoice, 'total_amount'))}")
-            
-            # Show workflow status
-            show_workflow_status(req)
-            
-            # Approval buttons
-            st.markdown("---")
-            st.markdown("### ✅ Department Approval Action")
-            
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                if st.button(f"Approve Job Completion", key=f"dept_approve_{safe_get(req, 'id')}", 
-                           use_container_width=True, type="primary"):
-                    # Update department approval
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if execute_update(
-                        '''UPDATE maintenance_requests 
-                        SET requesting_dept_approval = 1, 
-                            department_approval_date = ?
-                        WHERE id = ?''',
-                        (current_time, safe_get(req, 'id'))
-                    ):
-                        st.success("✅ Department approval granted! Sent to facility manager for final approval.")
-                        st.rerun()
-            
-            with col3:
-                if st.button("Request Changes", key=f"dept_reject_{safe_get(req, 'id')}", 
-                           use_container_width=True, type="secondary"):
-                    st.warning("Changes requested from vendor")
-                    # In a real app, you would add a notes field and send back to vendor
-
-# =============================================
-# FINAL APPROVAL PAGE FOR FACILITY MANAGER
-# =============================================
-def show_final_approval():
-    """Page for facility manager to give final approval"""
-    st.markdown("<h1 class='app-title'>✅ Final Manager Approval</h1>", unsafe_allow_html=True)
-    
-    # Get requests that need final manager approval
-    pending_final_approvals = get_requests_for_manager_approval()
-    
-    if not pending_final_approvals:
-        st.info("🎉 No jobs pending final approval")
-        return
-    
-    st.markdown(f"<div class='card'><h4>📋 {len(pending_final_approvals)} Job(s) Awaiting Final Approval</h4></div>", unsafe_allow_html=True)
-    
-    for req in pending_final_approvals:
-        with st.expander(f"📄 Job #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))} - Department Approved: {safe_str(safe_get(req, 'department_approval_date'))}"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### 📝 Job Details")
-                st.write(f"**Title:** {safe_str(safe_get(req, 'title'))}")
-                st.write(f"**Created By:** {safe_str(safe_get(req, 'created_by'))}")
-                st.write(f"**Location:** {safe_str(safe_get(req, 'location'), 'Common Area')}")
-                st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
-                st.write(f"**Completed Date:** {safe_str(safe_get(req, 'completed_date'))}")
-                st.write(f"**Department Approved:** {safe_str(safe_get(req, 'department_approval_date'))}")
-                
-                # Show vendor details
-                if safe_get(req, 'assigned_vendor'):
-                    vendor_info = execute_query(
-                        'SELECT company_name FROM vendors WHERE username = ?',
-                        (safe_get(req, 'assigned_vendor'),)
-                    )
-                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(req, 'assigned_vendor')
-                    st.write(f"**Vendor:** {vendor_name}")
-            
-            with col2:
-                st.markdown("### 🛠️ Work Summary")
-                if safe_get(req, 'job_breakdown'):
-                    st.write(f"**Job Breakdown:**")
-                    st.info(safe_str(safe_get(req, 'job_breakdown')))
-                
-                # Show invoice details
-                if safe_get(req, 'invoice_number'):
-                    st.markdown("### 🧾 Invoice Summary")
-                    st.write(f"**Invoice Number:** {safe_str(safe_get(req, 'invoice_number'))}")
-                    st.write(f"**Invoice Amount:** {format_ngn(safe_get(req, 'invoice_amount'))}")
-                    
-                    # Get detailed invoice
-                    invoice_details = execute_query(
-                        'SELECT * FROM invoices WHERE invoice_number = ?', 
-                        (safe_get(req, 'invoice_number'),)
-                    )
-                    
-                    if invoice_details:
-                        invoice = invoice_details[0]
-                        st.write(f"**Total Amount:** {format_ngn(safe_get(invoice, 'total_amount'))}")
-                        st.write(f"**VAT Applied:** {'Yes' if safe_get(invoice, 'vat_applicable') else 'No'}")
-            
-            # Show complete workflow
-            show_workflow_status(req)
-            
-            # Final approval section with PDF generation
-            st.markdown("---")
-            st.markdown("### ✅ Final Approval & Report Generation")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button(f"✓ Grant Final Approval", key=f"final_approve_{safe_get(req, 'id')}", 
-                           use_container_width=True, type="primary"):
-                    # Update final approval
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    if execute_update(
-                        '''UPDATE maintenance_requests 
-                        SET facilities_manager_approval = 1, 
-                            manager_approval_date = ?,
-                            status = 'Approved'
-                        WHERE id = ?''',
-                        (current_time, safe_get(req, 'id'))
-                    ):
-                        st.success("✅ Final approval granted! Job is now fully approved.")
-                        st.rerun()
-            
-            with col2:
-                # Get invoice details for PDF
-                invoice_details = execute_query(
-                    'SELECT * FROM invoices WHERE request_id = ?', 
-                    (safe_get(req, 'id'),)
-                )
-                
-                if invoice_details:
-                    invoice = invoice_details[0]
-                    
-                    # Generate and offer PDF download
-                    pdf_buffer = generate_final_report_pdf(req, invoice)
-                    
-                    st.download_button(
-                        label="📄 Download Final Report",
-                        data=pdf_buffer.getvalue(),
-                        file_name=f"Final_Approved_Report_Job_{safe_get(req, 'id')}.pdf",
-                        mime="application/pdf",
-                        key=f"download_{safe_get(req, 'id')}",
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("No invoice found for this job")
-
-# =============================================
 # MAIN APPLICATION FUNCTIONS
 # =============================================
 def show_create_request():
@@ -1933,6 +1595,214 @@ def show_my_requests():
                             key=f"user_final_download_{safe_get(req, 'id')}",
                             use_container_width=True
                         )
+
+# =============================================
+# DEPARTMENT APPROVAL PAGE FOR FACILITY USER
+# =============================================
+def show_department_approval():
+    """Page for facility user to approve completed jobs from vendors"""
+    st.markdown("<h1 class='app-title'>✅ Department Approval</h1>", unsafe_allow_html=True)
+    
+    # Get requests that need department approval (created by this user)
+    pending_approvals = get_requests_for_user_approval(st.session_state.user['username'])
+    
+    if not pending_approvals:
+        st.info("🎉 No jobs pending your department approval")
+        return
+    
+    st.markdown(f"<div class='card'><h4>📋 {len(pending_approvals)} Job(s) Awaiting Your Approval</h4></div>", unsafe_allow_html=True)
+    
+    for req in pending_approvals:
+        with st.expander(f"🔄 Job #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Title:** {safe_str(safe_get(req, 'title'))}")
+                st.write(f"**Description:** {safe_str(safe_get(req, 'description'))}")
+                st.write(f"**Location:** {safe_str(safe_get(req, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
+                st.write(f"**Priority:** {safe_str(safe_get(req, 'priority'))}")
+                st.write(f"**Status:** {safe_str(safe_get(req, 'status'))}")
+                st.write(f"**Completed Date:** {safe_str(safe_get(req, 'completed_date'))}")
+                
+                # Show assigned vendor details
+                if safe_get(req, 'assigned_vendor'):
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(req, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(req, 'assigned_vendor')
+                    st.write(f"**Vendor:** {vendor_name}")
+            
+            with col2:
+                st.markdown("### 🛠️ Work Completed")
+                if safe_get(req, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:**")
+                    st.info(safe_str(safe_get(req, 'job_breakdown')))
+                
+                if safe_get(req, 'completion_notes'):
+                    st.write(f"**Completion Notes:**")
+                    st.info(safe_str(safe_get(req, 'completion_notes')))
+                
+                # Show invoice details if available
+                if safe_get(req, 'invoice_number'):
+                    st.markdown("### 🧾 Invoice Details")
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(req, 'invoice_number'))}")
+                    st.write(f"**Invoice Amount:** {format_ngn(safe_get(req, 'invoice_amount'))}")
+                    
+                    # Get detailed invoice
+                    invoice_details = execute_query(
+                        'SELECT * FROM invoices WHERE invoice_number = ?', 
+                        (safe_get(req, 'invoice_number'),)
+                    )
+                    
+                    if invoice_details:
+                        invoice = invoice_details[0]
+                        with st.expander("View Invoice Details"):
+                            st.write(f"**Details:** {safe_str(safe_get(invoice, 'details_of_work'))}")
+                            st.write(f"**Quantity:** {safe_str(safe_get(invoice, 'quantity'))}")
+                            st.write(f"**Unit Cost:** {format_ngn(safe_get(invoice, 'unit_cost'))}")
+                            st.write(f"**Total:** {format_ngn(safe_get(invoice, 'total_amount'))}")
+            
+            # Show workflow status
+            show_workflow_status(req)
+            
+            # Approval buttons
+            st.markdown("---")
+            st.markdown("### ✅ Department Approval Action")
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                if st.button(f"Approve Job Completion", key=f"dept_approve_{safe_get(req, 'id')}", 
+                           use_container_width=True, type="primary"):
+                    # Update department approval
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    if execute_update(
+                        '''UPDATE maintenance_requests 
+                        SET requesting_dept_approval = 1, 
+                            department_approval_date = ?
+                        WHERE id = ?''',
+                        (current_time, safe_get(req, 'id'))
+                    ):
+                        st.success("✅ Department approval granted! Sent to facility manager for final approval.")
+                        st.rerun()
+            
+            with col3:
+                if st.button("Request Changes", key=f"dept_reject_{safe_get(req, 'id')}", 
+                           use_container_width=True, type="secondary"):
+                    st.warning("Changes requested from vendor")
+                    # In a real app, you would add a notes field and send back to vendor
+
+# =============================================
+# FINAL APPROVAL PAGE FOR FACILITY MANAGER
+# =============================================
+def show_final_approval():
+    """Page for facility manager to give final approval"""
+    st.markdown("<h1 class='app-title'>✅ Final Manager Approval</h1>", unsafe_allow_html=True)
+    
+    # Get requests that need final manager approval
+    pending_final_approvals = get_requests_for_manager_approval()
+    
+    if not pending_final_approvals:
+        st.info("🎉 No jobs pending final approval")
+        return
+    
+    st.markdown(f"<div class='card'><h4>📋 {len(pending_final_approvals)} Job(s) Awaiting Final Approval</h4></div>", unsafe_allow_html=True)
+    
+    for req in pending_final_approvals:
+        with st.expander(f"📄 Job #{safe_get(req, 'id')}: {safe_str(safe_get(req, 'title'))} - Department Approved: {safe_str(safe_get(req, 'department_approval_date'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Title:** {safe_str(safe_get(req, 'title'))}")
+                st.write(f"**Created By:** {safe_str(safe_get(req, 'created_by'))}")
+                st.write(f"**Location:** {safe_str(safe_get(req, 'location'), 'Common Area')}")
+                st.write(f"**Facility Type:** {safe_str(safe_get(req, 'facility_type'))}")
+                st.write(f"**Completed Date:** {safe_str(safe_get(req, 'completed_date'))}")
+                st.write(f"**Department Approved:** {safe_str(safe_get(req, 'department_approval_date'))}")
+                
+                # Show vendor details
+                if safe_get(req, 'assigned_vendor'):
+                    vendor_info = execute_query(
+                        'SELECT company_name FROM vendors WHERE username = ?',
+                        (safe_get(req, 'assigned_vendor'),)
+                    )
+                    vendor_name = vendor_info[0]['company_name'] if vendor_info else safe_get(req, 'assigned_vendor')
+                    st.write(f"**Vendor:** {vendor_name}")
+            
+            with col2:
+                st.markdown("### 🛠️ Work Summary")
+                if safe_get(req, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:**")
+                    st.info(safe_str(safe_get(req, 'job_breakdown')))
+                
+                # Show invoice details
+                if safe_get(req, 'invoice_number'):
+                    st.markdown("### 🧾 Invoice Summary")
+                    st.write(f"**Invoice Number:** {safe_str(safe_get(req, 'invoice_number'))}")
+                    st.write(f"**Invoice Amount:** {format_ngn(safe_get(req, 'invoice_amount'))}")
+                    
+                    # Get detailed invoice
+                    invoice_details = execute_query(
+                        'SELECT * FROM invoices WHERE invoice_number = ?', 
+                        (safe_get(req, 'invoice_number'),)
+                    )
+                    
+                    if invoice_details:
+                        invoice = invoice_details[0]
+                        st.write(f"**Total Amount:** {format_ngn(safe_get(invoice, 'total_amount'))}")
+                        st.write(f"**VAT Applied:** {'Yes' if safe_get(invoice, 'vat_applicable') else 'No'}")
+            
+            # Show complete workflow
+            show_workflow_status(req)
+            
+            # Final approval section with PDF generation
+            st.markdown("---")
+            st.markdown("### ✅ Final Approval & Report Generation")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button(f"✓ Grant Final Approval", key=f"final_approve_{safe_get(req, 'id')}", 
+                           use_container_width=True, type="primary"):
+                    # Update final approval
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    if execute_update(
+                        '''UPDATE maintenance_requests 
+                        SET facilities_manager_approval = 1, 
+                            manager_approval_date = ?,
+                            status = 'Approved'
+                        WHERE id = ?''',
+                        (current_time, safe_get(req, 'id'))
+                    ):
+                        st.success("✅ Final approval granted! Job is now fully approved.")
+                        st.rerun()
+            
+            with col2:
+                # Get invoice details for PDF
+                invoice_details = execute_query(
+                    'SELECT * FROM invoices WHERE request_id = ?', 
+                    (safe_get(req, 'id'),)
+                )
+                
+                if invoice_details:
+                    invoice = invoice_details[0]
+                    
+                    # Generate and offer PDF download
+                    pdf_buffer = generate_final_report_pdf(req, invoice)
+                    
+                    st.download_button(
+                        label="📄 Download Final Report",
+                        data=pdf_buffer.getvalue(),
+                        file_name=f"Final_Approved_Report_Job_{safe_get(req, 'id')}.pdf",
+                        mime="application/pdf",
+                        key=f"download_{safe_get(req, 'id')}",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("No invoice found for this job")
 
 # =============================================
 # MANAGE REQUESTS FOR FACILITY MANAGER
@@ -2508,322 +2378,6 @@ def show_vendor_dashboard():
                 st.rerun()
 
 # =============================================
-# REPORT GENERATION FUNCTIONALITY
-# =============================================
-def show_reports():
-    """Enhanced report generation page"""
-    st.markdown("<h1 class='app-title'>📊 Reports & Analytics</h1>", unsafe_allow_html=True)
-    
-    # Get all requests for reporting
-    all_requests = get_all_requests()
-    
-    if not all_requests:
-        st.info("📭 No data available for reports")
-        return
-    
-    # Convert to DataFrame for analysis
-    df = pd.DataFrame(all_requests)
-    
-    # Stats summary
-    st.markdown("### 📈 Statistical Overview")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_amount = df['invoice_amount'].sum() if 'invoice_amount' in df.columns else 0
-        create_metric_card("Total Value", format_ngn(total_amount), "💰")
-    
-    with col2:
-        avg_completion_time = "N/A"
-        if 'created_date' in df.columns and 'completed_date' in df.columns:
-            try:
-                # Calculate average days to complete
-                completed_df = df[df['status'] == 'Approved'].copy()
-                if len(completed_df) > 0:
-                    completed_df['created'] = pd.to_datetime(completed_df['created_date'])
-                    completed_df['completed'] = pd.to_datetime(completed_df['completed_date'])
-                    completed_df['days_to_complete'] = (completed_df['completed'] - completed_df['created']).dt.days
-                    avg_days = completed_df['days_to_complete'].mean()
-                    avg_completion_time = f"{avg_days:.1f} days"
-            except:
-                pass
-        create_metric_card("Avg Completion", avg_completion_time, "⏱️")
-    
-    with col3:
-        total_completed = len(df[df['status'] == 'Approved'])
-        create_metric_card("Completed Jobs", total_completed, "✅")
-    
-    with col4:
-        pending_approvals = len(df[(df['status'] == 'Completed') & (df['requesting_dept_approval'] == 0)])
-        create_metric_card("Pending Approvals", pending_approvals, "⏳")
-    
-    st.markdown("---")
-    
-    # Report types
-    st.markdown("### 📄 Report Types")
-    report_type = st.selectbox(
-        "Select Report Type",
-        ["📊 Dashboard Summary", "📈 Monthly Performance", "🧾 Invoice Summary", 
-         "👷 Vendor Performance", "🏢 Department Analysis"]
-    )
-    
-    # Date range filter
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", datetime.now().replace(day=1))
-    with col2:
-        end_date = st.date_input("End Date", datetime.now())
-    
-    # Filter data by date range
-    if 'created_date' in df.columns:
-        try:
-            df['created_date'] = pd.to_datetime(df['created_date'])
-            mask = (df['created_date'].dt.date >= start_date) & (df['created_date'].dt.date <= end_date)
-            filtered_df = df.loc[mask]
-        except:
-            filtered_df = df
-    else:
-        filtered_df = df
-    
-    # Generate selected report
-    if report_type == "📊 Dashboard Summary":
-        show_dashboard_summary_report(filtered_df)
-    elif report_type == "📈 Monthly Performance":
-        show_monthly_performance_report(filtered_df)
-    elif report_type == "🧾 Invoice Summary":
-        show_invoice_summary_report(filtered_df)
-    elif report_type == "👷 Vendor Performance":
-        show_vendor_performance_report(filtered_df)
-    elif report_type == "🏢 Department Analysis":
-        show_department_analysis_report(filtered_df)
-    
-    # Export options
-    st.markdown("---")
-    st.markdown("### 📤 Export Options")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # Export to CSV
-        csv = filtered_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download CSV",
-            data=csv,
-            file_name=f"facilities_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    
-    with col2:
-        # Export to Excel
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-            filtered_df.to_excel(writer, index=False, sheet_name='Report')
-            writer.close()
-        
-        st.download_button(
-            label="📥 Download Excel",
-            data=excel_buffer.getvalue(),
-            file_name=f"facilities_report_{datetime.now().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.ms-excel",
-            use_container_width=True
-        )
-    
-    with col3:
-        # Generate PDF report
-        if st.button("📄 Generate PDF Report", use_container_width=True):
-            pdf_buffer = generate_monthly_summary_report(filtered_df.to_dict('records'))
-            st.download_button(
-                label="📥 Download PDF",
-                data=pdf_buffer.getvalue(),
-                file_name=f"monthly_summary_{datetime.now().strftime('%Y%m')}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="download_pdf_report"
-            )
-
-def show_dashboard_summary_report(df):
-    """Show dashboard summary report"""
-    st.markdown("### 📊 Dashboard Summary Report")
-    
-    if len(df) == 0:
-        st.info("No data available for the selected period")
-        return
-    
-    # Create metrics columns
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_requests = len(df)
-        st.metric("Total Requests", total_requests)
-    
-    with col2:
-        approved_count = len(df[df['status'] == 'Approved'])
-        st.metric("Approved", approved_count)
-    
-    with col3:
-        total_value = df['invoice_amount'].sum() if 'invoice_amount' in df.columns else 0
-        st.metric("Total Value", format_ngn(total_value))
-    
-    with col4:
-        avg_value = df['invoice_amount'].mean() if 'invoice_amount' in df.columns else 0
-        st.metric("Average Value", format_ngn(avg_value))
-    
-    # Status distribution chart
-    st.markdown("### 📈 Status Distribution")
-    if 'status' in df.columns:
-        status_counts = df['status'].value_counts()
-        fig = px.pie(
-            values=status_counts.values,
-            names=status_counts.index,
-            title="Request Status Distribution"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Priority distribution
-    st.markdown("### 🎯 Priority Distribution")
-    if 'priority' in df.columns:
-        priority_counts = df['priority'].value_counts()
-        fig = px.bar(
-            x=priority_counts.index,
-            y=priority_counts.values,
-            title="Requests by Priority",
-            labels={'x': 'Priority', 'y': 'Count'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-def show_monthly_performance_report(df):
-    """Show monthly performance report"""
-    st.markdown("### 📈 Monthly Performance Report")
-    
-    if len(df) == 0:
-        st.info("No data available for the selected period")
-        return
-    
-    # Group by month
-    if 'created_date' in df.columns:
-        try:
-            df['month'] = pd.to_datetime(df['created_date']).dt.to_period('M')
-            monthly_stats = df.groupby('month').agg({
-                'id': 'count',
-                'invoice_amount': 'sum'
-            }).reset_index()
-            
-            monthly_stats['month'] = monthly_stats['month'].astype(str)
-            
-            # Create chart
-            fig = px.line(
-                monthly_stats,
-                x='month',
-                y='id',
-                title='Monthly Request Volume',
-                labels={'month': 'Month', 'id': 'Number of Requests'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Show table
-            st.markdown("### 📋 Monthly Statistics")
-            monthly_stats['invoice_amount'] = monthly_stats['invoice_amount'].apply(lambda x: format_ngn(x))
-            st.dataframe(monthly_stats.rename(columns={'id': 'Request Count', 'invoice_amount': 'Total Value'}))
-        except:
-            st.warning("Could not generate monthly report")
-
-def show_invoice_summary_report(df):
-    """Show invoice summary report"""
-    st.markdown("### 🧾 Invoice Summary Report")
-    
-    # Filter only approved requests with invoices
-    invoice_df = df[(df['status'] == 'Approved') & (df['invoice_amount'] > 0)]
-    
-    if len(invoice_df) == 0:
-        st.info("No invoice data available")
-        return
-    
-    # Invoice statistics
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        total_invoices = len(invoice_df)
-        st.metric("Total Invoices", total_invoices)
-    
-    with col2:
-        total_amount = invoice_df['invoice_amount'].sum()
-        st.metric("Total Amount", format_ngn(total_amount))
-    
-    with col3:
-        avg_amount = invoice_df['invoice_amount'].mean()
-        st.metric("Average Amount", format_ngn(avg_amount))
-    
-    # Top 10 invoices
-    st.markdown("### 🏆 Top 10 Invoices by Amount")
-    top_invoices = invoice_df.nlargest(10, 'invoice_amount')[['id', 'title', 'assigned_vendor', 'invoice_amount']]
-    top_invoices['invoice_amount'] = top_invoices['invoice_amount'].apply(lambda x: format_ngn(x))
-    st.dataframe(top_invoices)
-
-def show_vendor_performance_report(df):
-    """Show vendor performance report"""
-    st.markdown("### 👷 Vendor Performance Report")
-    
-    # Filter requests with vendors
-    vendor_df = df[df['assigned_vendor'].notna()]
-    
-    if len(vendor_df) == 0:
-        st.info("No vendor data available")
-        return
-    
-    # Group by vendor
-    vendor_stats = vendor_df.groupby('assigned_vendor').agg({
-        'id': 'count',
-        'invoice_amount': 'sum'
-    }).reset_index()
-    
-    vendor_stats = vendor_stats.sort_values('invoice_amount', ascending=False)
-    
-    # Create chart
-    fig = px.bar(
-        vendor_stats.head(10),
-        x='assigned_vendor',
-        y='invoice_amount',
-        title='Top 10 Vendors by Total Value',
-        labels={'assigned_vendor': 'Vendor', 'invoice_amount': 'Total Amount'}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Show table
-    st.markdown("### 📋 Vendor Statistics")
-    vendor_stats['invoice_amount'] = vendor_stats['invoice_amount'].apply(lambda x: format_ngn(x))
-    st.dataframe(vendor_stats.rename(columns={'id': 'Jobs Completed', 'invoice_amount': 'Total Value'}))
-
-def show_department_analysis_report(df):
-    """Show department analysis report"""
-    st.markdown("### 🏢 Department Analysis Report")
-    
-    if 'location' not in df.columns:
-        st.info("No department/location data available")
-        return
-    
-    # Group by department/location
-    dept_stats = df.groupby('location').agg({
-        'id': 'count',
-        'invoice_amount': 'sum'
-    }).reset_index()
-    
-    dept_stats = dept_stats.sort_values('id', ascending=False)
-    
-    # Create chart
-    fig = px.pie(
-        dept_stats,
-        values='id',
-        names='location',
-        title='Requests by Department/Location'
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Show table
-    st.markdown("### 📋 Department Statistics")
-    dept_stats['invoice_amount'] = dept_stats['invoice_amount'].apply(lambda x: format_ngn(x))
-    st.dataframe(dept_stats.rename(columns={'id': 'Request Count', 'invoice_amount': 'Total Value'}))
-
-# =============================================
 # ENHANCED SIDEBAR NAVIGATION
 # =============================================
 def show_sidebar_navigation():
@@ -2867,11 +2421,6 @@ def show_sidebar_navigation():
                 st.markdown("### 👥 User Management")
                 if st.sidebar.button("👥 Manage Users", key="manage_users", use_container_width=True):
                     st.session_state.page = "manage_users"
-                    st.rerun()
-                
-                st.markdown("### 📊 Reports")
-                if st.sidebar.button("📊 Reports & Analytics", key="reports", use_container_width=True):
-                    st.session_state.page = "reports"
                     st.rerun()
             
             elif user_role == 'facility_user':
@@ -2980,9 +2529,6 @@ def main():
     
     elif st.session_state.page == "final_approval":
         show_final_approval()
-    
-    elif st.session_state.page == "reports":
-        show_reports()
     
     else:
         # Default to dashboard
