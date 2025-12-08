@@ -679,8 +679,8 @@ def generate_final_report_pdf(request_data, invoice_data=None):
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
-        story.append(invoice_table)
-        story.append(Spacer(1, 15))
+    story.append(invoice_table)
+    story.append(Spacer(1, 15))
     
     # Approval Status with Dates
     story.append(Paragraph("APPROVAL HISTORY", subtitle_style))
@@ -732,11 +732,24 @@ def generate_final_report_pdf(request_data, invoice_data=None):
     return buffer
 
 # =============================================
-# AUTHENTICATION
+# FIXED AUTHENTICATION FUNCTION
 # =============================================
 def authenticate_user(username, password):
-    user = execute_query('SELECT * FROM users WHERE username = ? AND password_hash = ?', (username, password))
-    return user[0] if user else None
+    """Check if username and password match"""
+    try:
+        # Get user by username
+        users = execute_query('SELECT * FROM users WHERE username = ?', (username,))
+        
+        if users and len(users) > 0:
+            user = users[0]
+            # Check if password matches (plain text for now)
+            if str(user.get('password_hash')) == str(password):
+                return user
+        
+        return None
+    except Exception as e:
+        print(f"Authentication error: {e}")
+        return None
 
 # =============================================
 # ENHANCED LOGIN PAGE
@@ -2419,4 +2432,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
