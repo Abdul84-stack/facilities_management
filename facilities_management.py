@@ -2418,6 +2418,7 @@ def show_vendor_assigned_jobs(vendor_username):
             status_color = {
                 'Pending': '🟡',
                 'Assigned': '🔵',
+                'In Progress': '🟠',
                 'Completed': '🟢',
                 'Approved': '✅'
             }.get(job['status'], '⚪')
@@ -2442,183 +2443,307 @@ def show_vendor_assigned_jobs(vendor_username):
                     st.write(f"**Job Breakdown:** {job['job_breakdown']}")
                 
                 # Actions based on status
-                if job['status'] in ['Assigned', 'In Progress']:
+                if job['status'] in ['Pending', 'Assigned', 'In Progress']:
                     st.markdown("---")
                     st.markdown("#### 🛠️ Job Actions")
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        new_status = st.selectbox(
-                            "Update Status",
-                            ["In Progress", "Completed", "On Hold"],
-                            key=f"status_{job['id']}"
+                    # If job is Pending, first need to accept it
+                    if job['status'] == 'Pending':
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("✅ Accept Job", key=f"accept_{job['id']}", use_container_width=True):
+                                success = execute_update(
+                                    '''UPDATE maintenance_requests 
+                                    SET status = 'Assigned' 
+                                    WHERE id = ?''',
+                                    (job['id'],)
+                                )
+                                if success:
+                                    st.success("✅ Job accepted! You can now start working on it.")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to accept job")
+                        
+                        with col2:
+                            if st.button("❌ Decline Job", key=f"decline_{job['id']}", use_container_width=True, type="secondary"):
+                                decline_reason = st.text_input(
+                                    "Decline Reason",
+                                    key=f"decline_reason_{job['id']}",
+                                    placeholder="Reason for declining..."
+                                )
+                                if decline_reason:
+                                    success = execute_update(
+                                        '''UPDATE maintenance_requests 
+                                        SET status = 'Declined',
+                                            completion_notes = ?
+                                        WHERE id = ?''',
+                                        (f"Declined by vendor: {decline_reason}", job['id'])
+                                    )
+                                    if success:
+                                        st.success("✅ Job declined")
+                                        st.rerun()
+                    else:
+                        # Job is already Assigned or In Progress, show update options
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            new_status = st.selectbox(
+                                "Update Status",
+                                ["In Progress", "Completed", "On Hold"],
+                                key=f"status_{job['id']}"
+                            )
+                        
+                        completion_notes = st.text_area(
+                            "Completion Notes",
+                            placeholder="Describe work done, parts used, materials, time spent, etc.",
+                            key=f"notes_{job['id']}",
+                            height=100
                         )
-                    
-                    completion_notes = st.text_area(
-                        "Completion Notes",
-                        placeholder="Describe work done, parts used, materials, time spent, etc.",
-                        key=f"notes_{job['id']}",
-                        height=100
-                    )
-                    
-                    if st.button("💾 Update Job", key=f"update_{job['id']}", use_container_width=True):
-                        if new_status == 'Completed' and not completion_notes:
-                            st.error("❌ Please provide completion notes")
-                        else:
-                            update_query = '''
-                                UPDATE maintenance_requests 
-                                SET status = ?, completion_notes = ?
-                            '''
-                            params = [new_status, completion_notes]
+                        
+                        # For Completed status, show invoice option
+                        if new_status == 'Completed':
+                            st.markdown("#### 📋 Job Completion Details")
                             
-                            if new_status == 'Completed':
-                                update_query += ", completed_date = ?"
-                                params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                parts_used = st.text_area(
+                                    "Parts Used",
+                                    placeholder="List all parts used...",
+                                    key=f"parts_{job['id']}",
+                                    height=60
+                                )
                             
-                            update_query += " WHERE id = ?"
-                            params.append(job['id'])
-                            
-                            success = execute_update(update_query, tuple(params))
-                            if success:
-                                st.success("✅ Job updated successfully!")
-                                st.rerun()
+                            with col2:
+                                hours_worked = st.number_input(
+                                    "Hours Worked",
+                                    min_value=0.5,
+                                    value=2.0,
+                                    step=0.5,
+                                    key=f"hours_{job['id']}"
+                                )
+                        
+                        if st.button("💾 Update Job", key=f"update_{job['id']}", use_container_width=True):
+                            if new_status == 'Completed' and not completion_notes:
+                                st.error("❌ Please provide completion notes")
                             else:
-                                st.error("❌ Failed to update job")
+                                update_query = '''
+                                    UPDATE maintenance_requests 
+                                    SET status = ?, completion_notes = ?
+                                '''
+                                params = [new_status, completion_notes]
+                                
+                                if new_status == 'Completed':
+                                    update_query += ", completed_date = ?"
+                                    params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                                    
+                                    # Add parts and hours to completion notes if provided
+                                    if parts_used:
+                                        params[-1] = f"{completion_notes}\n\nParts Used: {parts_used}\nHours Worked: {hours_worked}"
+                                
+                                update_query += " WHERE id = ?"
+                                params.append(job['id'])
+                                
+                                success = execute_update(update_query, tuple(params))
+                                if success:
+                                    st.success("✅ Job updated successfully!")
+                                    
+                                    # If job is completed, show option to create invoice immediately
+                                    if new_status == 'Completed':
+                                        st.info("🎉 Job marked as completed! You can now submit an invoice in the '📤 Submit Invoice' tab.")
+                                    
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to update job")
                 
                 # Show PDF download for completed jobs
                 if job['status'] == 'Completed':
-                    pdf_buffer = create_maintenance_pdf_report(job['id'])
-                    if pdf_buffer:
-                        st.download_button(
-                            label="📥 Download Job Report",
-                            data=pdf_buffer,
-                            file_name=f"job_report_{job['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            key=f"job_pdf_{job['id']}"
+                    st.markdown("---")
+                    st.markdown("#### 📄 Job Reports")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        pdf_buffer = create_maintenance_pdf_report(job['id'])
+                        if pdf_buffer:
+                            st.download_button(
+                                label="📥 Download Job Report",
+                                data=pdf_buffer,
+                                file_name=f"job_report_{job['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"job_pdf_{job['id']}"
+                            )
+                    
+                    with col2:
+                        # Check if invoice already exists
+                        existing_invoice = execute_query(
+                            'SELECT * FROM invoices WHERE request_id = ?',
+                            (job['id'],)
                         )
+                        
+                        if existing_invoice:
+                            st.info("✅ Invoice already submitted")
+                        else:
+                            if st.button("📤 Create Invoice", key=f"create_invoice_{job['id']}", use_container_width=True):
+                                st.session_state.selected_job_for_invoice = job['id']
+                                st.switch_page("?tab=Submit Invoice")
     else:
         st.info("📭 No jobs assigned to you yet")
-
 def show_vendor_invoice_submission(vendor_username):
     st.markdown("### 📤 Submit Invoice")
     
-    # Get completed jobs without invoices
-    completed_jobs = execute_query('''
-        SELECT * FROM maintenance_requests 
-        WHERE assigned_vendor = ? 
-        AND status = 'Completed'
-        AND id NOT IN (SELECT request_id FROM invoices WHERE request_id IS NOT NULL)
-        ORDER BY completed_date DESC
-    ''', (vendor_username,))
-    
-    if not completed_jobs:
-        st.info("📭 No completed jobs available for invoicing")
-        return
-    
-    # Select job to invoice
-    job_options = {f"{job['title']} (ID: {job['id']})": job['id'] for job in completed_jobs}
-    selected_job_desc = st.selectbox("Select Job to Invoice", list(job_options.keys()))
-    selected_job_id = job_options[selected_job_desc]
-    
-    # Get job details
-    job = next((j for j in completed_jobs if j['id'] == selected_job_id), None)
-    
-    if job:
-        st.info(f"**Selected Job:** {job['title']} | **Location:** {job['location']}")
+    # Check if a specific job was selected for invoicing
+    if 'selected_job_for_invoice' in st.session_state:
+        selected_job_id = st.session_state.selected_job_for_invoice
+        st.info(f"📋 Creating invoice for Job ID: {selected_job_id}")
         
-        with st.form("invoice_form"):
-            # Generate invoice number
-            invoice_number = f"INV-{vendor_username[:3].upper()}-{datetime.now().strftime('%Y%m%d')}-{selected_job_id}"
+        # Get job details
+        job = execute_query('SELECT * FROM maintenance_requests WHERE id = ?', (selected_job_id,))
+        if job:
+            job = job[0]
             
-            col1, col2 = st.columns(2)
-            with col1:
-                invoice_date = st.date_input("Invoice Date", value=datetime.now())
-                st.text_input("Invoice Number", value=invoice_number, disabled=True)
-                st.text_input("Vendor Username", value=vendor_username, disabled=True)
-                quantity = st.number_input("Quantity", min_value=1, value=1)
+            # Check if invoice already exists
+            existing_invoice = execute_query(
+                'SELECT * FROM invoices WHERE request_id = ?',
+                (selected_job_id,)
+            )
             
-            with col2:
-                unit_cost = st.number_input("Unit Cost (₦)", min_value=0.0, value=0.0, step=1000.0)
-                labour_charge = st.number_input("Labour Charges (₦)", min_value=0.0, value=0.0, step=1000.0)
-                vat_applicable = st.checkbox("VAT Applicable (7.5%)")
-                details_of_work = st.text_area("Details of Work", value=job['description'])
-            
-            # Calculate amounts
-            amount = quantity * unit_cost
-            vat_amount = (amount + labour_charge) * 0.075 if vat_applicable else 0
-            total_amount = amount + labour_charge + vat_amount
-            
-            # Display calculated amounts
-            st.markdown("### 💰 Amount Summary")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Material Cost", format_ngn(amount))
-            with col2:
-                st.metric("Labour Charges", format_ngn(labour_charge))
-            with col3:
-                st.metric("VAT Amount", format_ngn(vat_amount))
-            with col4:
-                st.metric("Total Amount", format_ngn(total_amount))
-            
-            submitted = st.form_submit_button("📤 Submit Invoice", use_container_width=True)
-            
-            if submitted:
-                if not details_of_work:
-                    st.error("❌ Please provide details of work")
+            if existing_invoice:
+                st.warning("⚠️ An invoice already exists for this job.")
+                st.session_state.selected_job_for_invoice = None
+                st.rerun()
+            else:
+                show_invoice_form(vendor_username, selected_job_id, job)
+                
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.selected_job_for_invoice = None
+                    st.rerun()
+        else:
+            st.error("❌ Job not found")
+            st.session_state.selected_job_for_invoice = None
+            st.rerun()
+    else:
+        # Get completed jobs without invoices
+        completed_jobs = execute_query('''
+            SELECT * FROM maintenance_requests 
+            WHERE assigned_vendor = ? 
+            AND status = 'Completed'
+            AND id NOT IN (SELECT request_id FROM invoices WHERE request_id IS NOT NULL)
+            ORDER BY completed_date DESC
+        ''', (vendor_username,))
+        
+        if not completed_jobs:
+            st.info("📭 No completed jobs available for invoicing")
+            return
+        
+        # Select job to invoice
+        job_options = {f"{job['title']} (ID: {job['id']})": job['id'] for job in completed_jobs}
+        selected_job_desc = st.selectbox("Select Job to Invoice", list(job_options.keys()))
+        selected_job_id = job_options[selected_job_desc]
+        
+        # Get job details
+        job = next((j for j in completed_jobs if j['id'] == selected_job_id), None)
+        
+        if job:
+            show_invoice_form(vendor_username, selected_job_id, job)
+
+def show_invoice_form(vendor_username, selected_job_id, job):
+    """Show the invoice form for a specific job"""
+    st.info(f"**Selected Job:** {job['title']} | **Location:** {job['location']}")
+    
+    with st.form("invoice_form"):
+        # Generate invoice number
+        invoice_number = f"INV-{vendor_username[:3].upper()}-{datetime.now().strftime('%Y%m%d')}-{selected_job_id}"
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            invoice_date = st.date_input("Invoice Date", value=datetime.now())
+            st.text_input("Invoice Number", value=invoice_number, disabled=True)
+            st.text_input("Vendor Username", value=vendor_username, disabled=True)
+            quantity = st.number_input("Quantity", min_value=1, value=1)
+        
+        with col2:
+            unit_cost = st.number_input("Unit Cost (₦)", min_value=0.0, value=0.0, step=1000.0)
+            labour_charge = st.number_input("Labour Charges (₦)", min_value=0.0, value=0.0, step=1000.0)
+            vat_applicable = st.checkbox("VAT Applicable (7.5%)")
+            details_of_work = st.text_area("Details of Work", value=job['description'])
+        
+        # Calculate amounts
+        amount = quantity * unit_cost
+        vat_amount = (amount + labour_charge) * 0.075 if vat_applicable else 0
+        total_amount = amount + labour_charge + vat_amount
+        
+        # Display calculated amounts
+        st.markdown("### 💰 Amount Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Material Cost", format_ngn(amount))
+        with col2:
+            st.metric("Labour Charges", format_ngn(labour_charge))
+        with col3:
+            st.metric("VAT Amount", format_ngn(vat_amount))
+        with col4:
+            st.metric("Total Amount", format_ngn(total_amount))
+        
+        submitted = st.form_submit_button("📤 Submit Invoice", use_container_width=True)
+        
+        if submitted:
+            if not details_of_work:
+                st.error("❌ Please provide details of work")
+            else:
+                # Check if invoice number already exists
+                existing_invoice = execute_query(
+                    'SELECT * FROM invoices WHERE invoice_number = ?',
+                    (invoice_number,)
+                )
+                
+                if existing_invoice:
+                    st.error("❌ Invoice number already exists. Please try again.")
                 else:
-                    # Check if invoice number already exists
-                    existing_invoice = execute_query(
-                        'SELECT * FROM invoices WHERE invoice_number = ?',
-                        (invoice_number,)
+                    success = execute_update(
+                        '''INSERT INTO invoices 
+                        (invoice_number, request_id, vendor_username, invoice_date,
+                         details_of_work, quantity, unit_cost, amount, labour_charge,
+                         vat_applicable, vat_amount, total_amount) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (invoice_number, selected_job_id, vendor_username,
+                         invoice_date.strftime('%Y-%m-%d'), details_of_work,
+                         quantity, unit_cost, amount, labour_charge,
+                         1 if vat_applicable else 0, vat_amount, total_amount)
                     )
                     
-                    if existing_invoice:
-                        st.error("❌ Invoice number already exists. Please try again.")
-                    else:
-                        success = execute_update(
-                            '''INSERT INTO invoices 
-                            (invoice_number, request_id, vendor_username, invoice_date,
-                             details_of_work, quantity, unit_cost, amount, labour_charge,
-                             vat_applicable, vat_amount, total_amount) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (invoice_number, selected_job_id, vendor_username,
-                             invoice_date.strftime('%Y-%m-%d'), details_of_work,
-                             quantity, unit_cost, amount, labour_charge,
-                             1 if vat_applicable else 0, vat_amount, total_amount)
+                    if success:
+                        st.success("✅ Invoice submitted successfully!")
+                        
+                        # Update request with invoice info
+                        execute_update(
+                            '''UPDATE maintenance_requests 
+                            SET invoice_amount = ?, invoice_number = ? 
+                            WHERE id = ?''',
+                            (total_amount, invoice_number, selected_job_id)
                         )
                         
-                        if success:
-                            st.success("✅ Invoice submitted successfully!")
-                            
-                            # Update request with invoice info
-                            execute_update(
-                                '''UPDATE maintenance_requests 
-                                SET invoice_amount = ?, invoice_number = ? 
-                                WHERE id = ?''',
-                                (total_amount, invoice_number, selected_job_id)
-                            )
-                            
-                            # Get the invoice ID for PDF download
-                            new_invoice = execute_query(
-                                'SELECT id FROM invoices WHERE invoice_number = ?',
-                                (invoice_number,)
-                            )
-                            
-                            if new_invoice:
-                                invoice_id = new_invoice[0]['id']
-                                pdf_buffer = create_invoice_pdf(invoice_id)
-                                if pdf_buffer:
-                                    st.download_button(
-                                        label="📥 Download Invoice PDF",
-                                        data=pdf_buffer,
-                                        file_name=f"invoice_{invoice_number}.pdf",
-                                        mime="application/pdf"
-                                    )
-                            
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to submit invoice")
-
+                        # Clear the selected job if it was set
+                        if 'selected_job_for_invoice' in st.session_state:
+                            st.session_state.selected_job_for_invoice = None
+                        
+                        # Get the invoice ID for PDF download
+                        new_invoice = execute_query(
+                            'SELECT id FROM invoices WHERE invoice_number = ?',
+                            (invoice_number,)
+                        )
+                        
+                        if new_invoice:
+                            invoice_id = new_invoice[0]['id']
+                            pdf_buffer = create_invoice_pdf(invoice_id)
+                            if pdf_buffer:
+                                st.download_button(
+                                    label="📥 Download Invoice PDF",
+                                    data=pdf_buffer,
+                                    file_name=f"invoice_{invoice_number}.pdf",
+                                    mime="application/pdf"
+                                )
+                        
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to submit invoice")
 def show_vendor_ppm_assignments(vendor_username):
     st.markdown("### 💼 PPM Assignments")
     
@@ -4358,3 +4483,4 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
