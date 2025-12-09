@@ -291,6 +291,34 @@ def inject_custom_css():
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(220, 38, 38, 0.5);
     }
+    
+    /* Invoice table styling */
+    .invoice-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+    }
+    
+    .invoice-table th {
+        background-color: #1e3a8a;
+        color: white;
+        padding: 10px;
+        text-align: left;
+    }
+    
+    .invoice-table td {
+        padding: 10px;
+        border-bottom: 1px solid #ddd;
+    }
+    
+    .invoice-table tr:hover {
+        background-color: #f5f5f5;
+    }
+    
+    /* Fix for tab overflow */
+    .stTabs {
+        overflow-x: auto;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -674,6 +702,364 @@ def safe_bool(value, default=False):
     return default
 
 # =============================================
+# PDF REPORT GENERATION FUNCTIONS
+# =============================================
+def create_maintenance_pdf_report(request_id):
+    """Create PDF report for maintenance job completion"""
+    buffer = io.BytesIO()
+    
+    # Get request details
+    request = execute_query('SELECT * FROM maintenance_requests WHERE id = ?', (request_id,))
+    if not request:
+        return None
+    request = request[0]
+    
+    # Get invoice details if exists
+    invoice = execute_query('SELECT * FROM invoices WHERE request_id = ?', (request_id,))
+    
+    # Create PDF
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, 
+                           topMargin=72, bottomMargin=18)
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        textColor=colors.HexColor('#1e3a8a')
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        textColor=colors.HexColor('#3b82f6')
+    )
+    
+    normal_style = ParagraphStyle(
+        'Normal',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6
+    )
+    
+    # Story container for PDF elements
+    story = []
+    
+    # Title
+    story.append(Paragraph("MAINTENANCE JOB COMPLETION REPORT", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Job Details
+    story.append(Paragraph("Job Details", heading_style))
+    
+    job_data = [
+        ["Job ID:", str(request['id'])],
+        ["Title:", request['title']],
+        ["Location:", request['location'] or "N/A"],
+        ["Facility Type:", request['facility_type']],
+        ["Priority:", request['priority']],
+        ["Created By:", request['created_by']],
+        ["Created Date:", request['created_date']],
+        ["Assigned Vendor:", request['assigned_vendor'] or "N/A"],
+        ["Status:", request['status']],
+        ["Completed Date:", request['completed_date'] or "N/A"]
+    ]
+    
+    job_table = Table(job_data, colWidths=[2*inch, 4*inch])
+    job_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+    ]))
+    
+    story.append(job_table)
+    story.append(Spacer(1, 20))
+    
+    # Description
+    story.append(Paragraph("Job Description", heading_style))
+    story.append(Paragraph(request['description'], normal_style))
+    story.append(Spacer(1, 20))
+    
+    # Completion Notes
+    if request['completion_notes']:
+        story.append(Paragraph("Completion Notes", heading_style))
+        story.append(Paragraph(request['completion_notes'], normal_style))
+        story.append(Spacer(1, 20))
+    
+    # Job Breakdown
+    if request['job_breakdown']:
+        story.append(Paragraph("Job Breakdown", heading_style))
+        story.append(Paragraph(request['job_breakdown'], normal_style))
+        story.append(Spacer(1, 20))
+    
+    # Invoice Details
+    if invoice:
+        invoice = invoice[0]
+        story.append(Paragraph("Invoice Details", heading_style))
+        
+        invoice_data = [
+            ["Invoice Number:", invoice['invoice_number']],
+            ["Invoice Date:", invoice['invoice_date']],
+            ["Details of Work:", invoice['details_of_work']],
+            ["Quantity:", str(invoice['quantity'])],
+            ["Unit Cost:", format_ngn(invoice['unit_cost'])],
+            ["Material Cost:", format_ngn(invoice['amount'])],
+            ["Labour Charges:", format_ngn(invoice['labour_charge'])],
+            ["VAT Amount:", format_ngn(invoice['vat_amount'])],
+            ["Total Amount:", format_ngn(invoice['total_amount'])],
+            ["Invoice Status:", invoice['status']]
+        ]
+        
+        invoice_table = Table(invoice_data, colWidths=[2*inch, 4*inch])
+        invoice_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+        ]))
+        
+        story.append(invoice_table)
+        story.append(Spacer(1, 20))
+    
+    # Approval Status
+    story.append(Paragraph("Approval Status", heading_style))
+    
+    approval_data = [
+        ["Department Approval:", "Approved" if safe_bool(request['requesting_dept_approval']) else "Pending"],
+        ["Department Approval Date:", request['department_approval_date'] or "N/A"],
+        ["Manager Approval:", "Approved" if safe_bool(request['facilities_manager_approval']) else "Pending"],
+        ["Manager Approval Date:", request['manager_approval_date'] or "N/A"]
+    ]
+    
+    approval_table = Table(approval_data, colWidths=[2*inch, 4*inch])
+    approval_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+    ]))
+    
+    story.append(approval_table)
+    
+    # Footer
+    story.append(Spacer(1, 40))
+    story.append(Paragraph(f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", normal_style))
+    story.append(Paragraph("A-Z Facilities Management Pro APP™", normal_style))
+    
+    # Build PDF
+    doc.build(story)
+    
+    buffer.seek(0)
+    return buffer
+
+def create_ppm_pdf_report(schedule_id):
+    """Create PDF report for PPM completion"""
+    buffer = io.BytesIO()
+    
+    # Get schedule details
+    schedule = execute_query('SELECT * FROM ppm_schedules WHERE id = ?', (schedule_id,))
+    if not schedule:
+        return None
+    schedule = schedule[0]
+    
+    # Get assignment details
+    assignment = execute_query('SELECT * FROM ppm_assignments WHERE schedule_id = ?', (schedule_id,))
+    
+    # Create PDF
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        textColor=colors.HexColor('#1e3a8a')
+    )
+    
+    story = []
+    
+    # Title
+    story.append(Paragraph("PPM COMPLETION REPORT", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Schedule Details
+    story.append(Paragraph("PPM Schedule Details", styles['Heading2']))
+    
+    schedule_data = [
+        ["Schedule ID:", str(schedule['id'])],
+        ["Schedule Name:", schedule['schedule_name']],
+        ["Facility Category:", schedule['facility_category']],
+        ["Sub-Category:", schedule['sub_category']],
+        ["Frequency:", schedule['frequency']],
+        ["Next Maintenance Date:", schedule['next_maintenance_date']],
+        ["Status:", schedule['status']],
+        ["Assigned Vendor:", schedule['assigned_vendor'] or "N/A"],
+        ["Created By:", schedule['created_by']],
+        ["Estimated Cost:", format_ngn(schedule['estimated_cost'])],
+        ["Actual Completion Date:", schedule['actual_completion_date'] or "N/A"],
+        ["Actual Cost:", format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else "N/A"]
+    ]
+    
+    schedule_table = Table(schedule_data, colWidths=[2*inch, 4*inch])
+    schedule_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+    ]))
+    
+    story.append(schedule_table)
+    story.append(Spacer(1, 20))
+    
+    # Description
+    story.append(Paragraph("Description", styles['Heading2']))
+    story.append(Paragraph(schedule['description'], styles['Normal']))
+    
+    # Notes
+    if schedule['notes']:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Notes", styles['Heading2']))
+        story.append(Paragraph(schedule['notes'], styles['Normal']))
+    
+    # Assignment Details
+    if assignment:
+        assignment = assignment[0]
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("Assignment Details", styles['Heading2']))
+        
+        assign_data = [
+            ["Assigned To:", assignment['vendor_username']],
+            ["Assigned Date:", assignment['assigned_date']],
+            ["Due Date:", assignment['due_date']],
+            ["Completed Date:", assignment['completed_date'] or "N/A"],
+            ["Status:", assignment['status']]
+        ]
+        
+        assign_table = Table(assign_data, colWidths=[2*inch, 4*inch])
+        story.append(assign_table)
+        
+        if assignment['completion_notes']:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph("Completion Notes", styles['Heading2']))
+            story.append(Paragraph(assignment['completion_notes'], styles['Normal']))
+    
+    # Footer
+    story.append(Spacer(1, 40))
+    story.append(Paragraph(f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    story.append(Paragraph("A-Z Facilities Management Pro APP™", styles['Normal']))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def create_invoice_pdf(invoice_id):
+    """Create PDF invoice"""
+    buffer = io.BytesIO()
+    
+    # Get invoice details
+    invoice = execute_query('SELECT * FROM invoices WHERE id = ?', (invoice_id,))
+    if not invoice:
+        return None
+    invoice = invoice[0]
+    
+    # Get request details
+    request = execute_query('SELECT * FROM maintenance_requests WHERE id = ?', (invoice['request_id'],))
+    
+    # Create PDF
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    
+    story = []
+    styles = getSampleStyleSheet()
+    
+    # Header
+    story.append(Paragraph("INVOICE", styles['Title']))
+    story.append(Spacer(1, 20))
+    
+    # Invoice Details
+    story.append(Paragraph("Invoice Details", styles['Heading2']))
+    
+    invoice_details = [
+        ["Invoice Number:", invoice['invoice_number']],
+        ["Invoice Date:", invoice['invoice_date']],
+        ["Vendor:", invoice['vendor_username']],
+        ["Status:", invoice['status']]
+    ]
+    
+    if request:
+        request = request[0]
+        invoice_details.append(["Job Title:", request['title']])
+        invoice_details.append(["Location:", request['location'] or "N/A"])
+    
+    inv_table = Table(invoice_details, colWidths=[2*inch, 4*inch])
+    story.append(inv_table)
+    story.append(Spacer(1, 20))
+    
+    # Work Details
+    story.append(Paragraph("Work Details", styles['Heading2']))
+    story.append(Paragraph(invoice['details_of_work'], styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Cost Breakdown
+    story.append(Paragraph("Cost Breakdown", styles['Heading2']))
+    
+    cost_data = [
+        ["Description", "Quantity", "Unit Cost", "Amount"],
+        ["Materials", str(invoice['quantity']), format_ngn(invoice['unit_cost']), format_ngn(invoice['amount'])],
+        ["Labour Charges", "1", format_ngn(invoice['labour_charge']), format_ngn(invoice['labour_charge'])],
+        ["Subtotal", "", "", format_ngn(invoice['amount'] + invoice['labour_charge'])],
+        ["VAT (7.5%)" if invoice['vat_applicable'] else "VAT", "", "", format_ngn(invoice['vat_amount'])],
+        ["TOTAL", "", "", format_ngn(invoice['total_amount'])]
+    ]
+    
+    cost_table = Table(cost_data, colWidths=[3*inch, 1*inch, 1.5*inch, 1.5*inch])
+    cost_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f1f5f9')),
+    ]))
+    
+    story.append(cost_table)
+    
+    # Footer
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("Thank you for your business!", styles['Normal']))
+    story.append(Paragraph("A-Z Facilities Management Pro APP™", styles['Normal']))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def get_pdf_download_link(pdf_buffer, filename):
+    """Generate download link for PDF"""
+    b64 = base64.b64encode(pdf_buffer.getvalue()).decode()
+    return f'<a href="data:application/pdf;base64,{b64}" download="{filename}" class="pdf-download-btn">📥 Download {filename}</a>'
+
+# =============================================
 # HELPER FUNCTIONS
 # =============================================
 def get_user_requests(username):
@@ -700,6 +1086,16 @@ def get_requests_for_user_approval(username):
         ORDER BY completed_date DESC
     ''', (username,))
 
+def get_ppm_for_user_approval(username):
+    """Get PPM schedules created by user that need approval"""
+    return execute_query('''
+        SELECT * FROM ppm_schedules 
+        WHERE created_by = ? 
+        AND status = 'Completed' 
+        AND ppm_approved = 0
+        ORDER BY actual_completion_date DESC
+    ''', (username,))
+
 def get_requests_for_manager_approval():
     return execute_query('''
         SELECT * FROM maintenance_requests 
@@ -707,6 +1103,16 @@ def get_requests_for_manager_approval():
         AND requesting_dept_approval = 1
         AND facilities_manager_approval = 0
         ORDER BY department_approval_date DESC
+    ''')
+
+def get_ppm_for_manager_approval():
+    """Get PPM schedules that need manager approval"""
+    return execute_query('''
+        SELECT * FROM ppm_schedules 
+        WHERE status = 'Completed' 
+        AND ppm_approved = 1
+        AND assigned_vendor IS NOT NULL
+        ORDER BY actual_completion_date DESC
     ''')
 
 def create_metric_card(title, value, icon="📊"):
@@ -1283,7 +1689,7 @@ def show_space_analytics():
 def show_ppm_management_facility_user():
     st.markdown("<h1 class='app-title'>📅 Planned Preventive Maintenance</h1>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📋 PPM Schedules", "➕ New Schedule", "📊 PPM Analytics"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 PPM Schedules", "➕ New Schedule", "📊 PPM Analytics", "✅ PPM Approvals"])
     
     with tab1:
         show_ppm_schedules()
@@ -1293,6 +1699,9 @@ def show_ppm_management_facility_user():
     
     with tab3:
         show_ppm_analytics()
+    
+    with tab4:
+        show_ppm_approvals_facility_user()
 
 def show_ppm_schedules():
     st.markdown("### 📋 PPM Schedules Overview")
@@ -1383,13 +1792,26 @@ def show_ppm_schedules():
                         st.rerun()
                 
                 with col3:
-                    if schedule['status'] == 'WIP' and st.button("✅ Mark as Completed", key=f"complete_{schedule['id']}"):
-                        execute_update(
-                            "UPDATE ppm_schedules SET status = 'Completed', actual_completion_date = ? WHERE id = ?",
-                            (datetime.now().strftime('%Y-%m-%d'), schedule['id'])
-                        )
-                        st.success("✅ PPM marked as completed!")
-                        st.rerun()
+                    if schedule['status'] == 'Completed' and schedule['ppm_approved'] == 0:
+                        if st.button("✅ Approve PPM", key=f"approve_ppm_{schedule['id']}"):
+                            execute_update(
+                                "UPDATE ppm_schedules SET ppm_approved = 1 WHERE id = ?",
+                                (schedule['id'],)
+                            )
+                            st.success("✅ PPM approved!")
+                            st.rerun()
+                    
+                    # PDF Download for completed PPM
+                    if schedule['status'] == 'Completed':
+                        pdf_buffer = create_ppm_pdf_report(schedule['id'])
+                        if pdf_buffer:
+                            st.download_button(
+                                label="📥 Download PPM Report",
+                                data=pdf_buffer,
+                                file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"ppm_pdf_{schedule['id']}"
+                            )
     else:
         st.info("📭 No PPM schedules found")
 
@@ -1529,6 +1951,81 @@ def show_ppm_analytics():
                   labels={'estimated_cost': 'Estimated Cost (₦)', 'facility_category': 'Facility Category'})
     st.plotly_chart(fig3, use_container_width=True)
 
+def show_ppm_approvals_facility_user():
+    """Facility user approval for PPM completion"""
+    st.markdown("### ✅ PPM Completion Approvals")
+    
+    # Get PPM schedules that need user approval
+    ppm_schedules = get_ppm_for_user_approval(st.session_state.user['username'])
+    
+    if not ppm_schedules:
+        st.info("📭 No PPM schedules awaiting your approval")
+        return
+    
+    for schedule in ppm_schedules:
+        with st.expander(f"📋 {schedule['schedule_name']} - Completed: {schedule['actual_completion_date']}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**Facility:** {schedule['facility_category']}")
+                st.write(f"**Sub-Category:** {schedule['sub_category']}")
+                st.write(f"**Frequency:** {schedule['frequency']}")
+                st.write(f"**Assigned Vendor:** {schedule['assigned_vendor']}")
+            
+            with col2:
+                st.write(f"**Estimated Cost:** {format_ngn(schedule['estimated_cost'])}")
+                st.write(f"**Actual Cost:** {format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else 'N/A'}")
+                st.write(f"**Completed Date:** {schedule['actual_completion_date']}")
+                st.write(f"**Status:** {schedule['status']}")
+            
+            st.write(f"**Description:** {schedule['description']}")
+            
+            if schedule['notes']:
+                st.write(f"**Notes:** {schedule['notes']}")
+            
+            # Get assignment details
+            assignment = execute_query(
+                'SELECT * FROM ppm_assignments WHERE schedule_id = ?',
+                (schedule['id'],)
+            )
+            
+            if assignment:
+                assignment = assignment[0]
+                st.write(f"**Completion Notes:** {assignment['completion_notes']}")
+            
+            # Approval buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Approve PPM", key=f"user_approve_ppm_{schedule['id']}", 
+                           use_container_width=True):
+                    execute_update(
+                        "UPDATE ppm_schedules SET ppm_approved = 1 WHERE id = ?",
+                        (schedule['id'],)
+                    )
+                    st.success("✅ PPM approved successfully!")
+                    st.rerun()
+            
+            with col2:
+                if st.button("❌ Request Revision", key=f"user_reject_ppm_{schedule['id']}", 
+                           use_container_width=True, type="secondary"):
+                    revision_reason = st.text_input(
+                        "Revision Reason",
+                        key=f"ppm_revision_{schedule['id']}",
+                        placeholder="What needs to be revised?"
+                    )
+                    if revision_reason:
+                        execute_update(
+                            '''UPDATE ppm_schedules SET status = 'WIP' WHERE id = ?''',
+                            (schedule['id'],)
+                        )
+                        execute_update(
+                            '''UPDATE ppm_assignments SET status = 'In Progress', 
+                            completion_notes = ? WHERE schedule_id = ?''',
+                            (f"Revision requested: {revision_reason}", schedule['id'])
+                        )
+                        st.success("✅ Revision requested from vendor")
+                        st.rerun()
+
 # =============================================
 # GENERATOR RECORDS - FACILITY USER
 # =============================================
@@ -1561,7 +2058,7 @@ def show_new_generator_record():
             opening_hours = st.number_input("Opening Hours Reading *", 
                                            min_value=0.0, step=0.1, format="%.1f")
             closing_hours = st.number_input("Closing Hours Reading *", 
-                                           min_value=opening_hours, step=0.1, format="%.1f")
+                                           min_value=0.0, step=0.1, format="%.1f")
         
         with col2:
             opening_inventory = st.number_input("Opening Inventory (Liters) *", 
@@ -1579,14 +2076,14 @@ def show_new_generator_record():
         if submitted:
             # Calculate derived values
             net_hours = closing_hours - opening_hours
-            net_diesel_consumed = opening_inventory + purchase_liters - closing_inventory
+            net_diesel_consumed = (opening_inventory + purchase_liters) - closing_inventory
             
             if not all([generator_type, recorded_by]):
                 st.error("❌ Please fill in all required fields (*)")
             elif closing_hours < opening_hours:
                 st.error("❌ Closing hours must be greater than opening hours")
-            elif closing_inventory > (opening_inventory + purchase_liters):
-                st.error("❌ Closing inventory cannot exceed opening inventory plus purchases")
+            elif net_diesel_consumed < 0:
+                st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
             else:
                 success = execute_update(
                     '''INSERT INTO generator_records 
@@ -1917,11 +2414,10 @@ def show_vendor_assigned_jobs(vendor_username):
                     st.write(f"**Job Breakdown:** {job['job_breakdown']}")
                 
                 # Actions based on status
-                if job['status'] == 'Assigned':
+                if job['status'] in ['Assigned', 'In Progress']:
                     st.markdown("---")
                     st.markdown("#### 🛠️ Job Actions")
                     
-                    # Update status
                     col1, col2 = st.columns(2)
                     with col1:
                         new_status = st.selectbox(
@@ -1929,14 +2425,15 @@ def show_vendor_assigned_jobs(vendor_username):
                             ["In Progress", "Completed", "On Hold"],
                             key=f"status_{job['id']}"
                         )
-                    with col2:
-                        completion_notes = st.text_area(
-                            "Completion Notes",
-                            placeholder="Describe work done, parts used, etc.",
-                            key=f"notes_{job['id']}"
-                        )
                     
-                    if st.button("💾 Update Job", key=f"update_{job['id']}"):
+                    completion_notes = st.text_area(
+                        "Completion Notes",
+                        placeholder="Describe work done, parts used, materials, time spent, etc.",
+                        key=f"notes_{job['id']}",
+                        height=100
+                    )
+                    
+                    if st.button("💾 Update Job", key=f"update_{job['id']}", use_container_width=True):
                         if new_status == 'Completed' and not completion_notes:
                             st.error("❌ Please provide completion notes")
                         else:
@@ -1959,6 +2456,18 @@ def show_vendor_assigned_jobs(vendor_username):
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to update job")
+                
+                # Show PDF download for completed jobs
+                if job['status'] == 'Completed':
+                    pdf_buffer = create_maintenance_pdf_report(job['id'])
+                    if pdf_buffer:
+                        st.download_button(
+                            label="📥 Download Job Report",
+                            data=pdf_buffer,
+                            file_name=f"job_report_{job['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            key=f"job_pdf_{job['id']}"
+                        )
     else:
         st.info("📭 No jobs assigned to you yet")
 
@@ -2052,6 +2561,32 @@ def show_vendor_invoice_submission(vendor_username):
                         
                         if success:
                             st.success("✅ Invoice submitted successfully!")
+                            
+                            # Update request with invoice info
+                            execute_update(
+                                '''UPDATE maintenance_requests 
+                                SET invoice_amount = ?, invoice_number = ? 
+                                WHERE id = ?''',
+                                (total_amount, invoice_number, selected_job_id)
+                            )
+                            
+                            # Get the invoice ID for PDF download
+                            new_invoice = execute_query(
+                                'SELECT id FROM invoices WHERE invoice_number = ?',
+                                (invoice_number,)
+                            )
+                            
+                            if new_invoice:
+                                invoice_id = new_invoice[0]['id']
+                                pdf_buffer = create_invoice_pdf(invoice_id)
+                                if pdf_buffer:
+                                    st.download_button(
+                                        label="📥 Download Invoice PDF",
+                                        data=pdf_buffer,
+                                        file_name=f"invoice_{invoice_number}.pdf",
+                                        mime="application/pdf"
+                                    )
+                            
                             st.rerun()
                         else:
                             st.error("❌ Failed to submit invoice")
@@ -2061,7 +2596,8 @@ def show_vendor_ppm_assignments(vendor_username):
     
     # Get PPM assignments for this vendor
     assignments = execute_query('''
-        SELECT pa.*, ps.schedule_name, ps.facility_category, ps.sub_category
+        SELECT pa.*, ps.schedule_name, ps.facility_category, ps.sub_category,
+               ps.description, ps.estimated_cost, ps.estimated_duration_hours
         FROM ppm_assignments pa
         JOIN ppm_schedules ps ON pa.schedule_id = ps.id
         WHERE pa.vendor_username = ?
@@ -2097,6 +2633,10 @@ def show_vendor_ppm_assignments(vendor_username):
                     st.write(f"**Due Date:** {assignment['due_date']}")
                     if assignment['completed_date']:
                         st.write(f"**Completed:** {assignment['completed_date']}")
+                    if assignment['estimated_cost']:
+                        st.write(f"**Est. Cost:** {format_ngn(assignment['estimated_cost'])}")
+                
+                st.write(f"**Description:** {assignment['description']}")
                 
                 # Update status
                 if assignment['status'] in ['Assigned', 'In Progress']:
@@ -2110,10 +2650,19 @@ def show_vendor_ppm_assignments(vendor_username):
                     completion_notes = st.text_area(
                         "Completion Notes",
                         placeholder="Describe work done, observations, recommendations...",
-                        key=f"ppm_notes_{assignment['id']}"
+                        key=f"ppm_notes_{assignment['id']}",
+                        height=100
                     )
                     
-                    if st.button("💾 Update Assignment", key=f"update_ppm_{assignment['id']}"):
+                    actual_cost = st.number_input(
+                        "Actual Cost (₦)",
+                        min_value=0.0,
+                        value=float(assignment['estimated_cost'] or 0),
+                        step=1000.0,
+                        key=f"actual_cost_{assignment['id']}"
+                    )
+                    
+                    if st.button("💾 Update Assignment", key=f"update_ppm_{assignment['id']}", use_container_width=True):
                         if new_status == 'Completed' and not completion_notes:
                             st.error("❌ Please provide completion notes")
                         else:
@@ -2130,10 +2679,12 @@ def show_vendor_ppm_assignments(vendor_username):
                                 # Also update the main PPM schedule
                                 execute_update(
                                     '''UPDATE ppm_schedules 
-                                    SET status = ?, actual_completion_date = ?, notes = ?
+                                    SET status = ?, actual_completion_date = ?, 
+                                        actual_cost = ?, notes = ?
                                     WHERE id = ?''',
                                     (new_status, 
                                      datetime.now().strftime('%Y-%m-%d') if new_status == 'Completed' else None,
+                                     actual_cost,
                                      completion_notes,
                                      assignment['schedule_id'])
                                 )
@@ -2142,6 +2693,18 @@ def show_vendor_ppm_assignments(vendor_username):
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to update assignment")
+                
+                # Show PDF download for completed PPM
+                if assignment['status'] == 'Completed':
+                    pdf_buffer = create_ppm_pdf_report(assignment['schedule_id'])
+                    if pdf_buffer:
+                        st.download_button(
+                            label="📥 Download PPM Report",
+                            data=pdf_buffer,
+                            file_name=f"ppm_report_{assignment['schedule_id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            key=f"ppm_pdf_{assignment['id']}"
+                        )
     else:
         st.info("📭 No PPM assignments found")
 
@@ -2188,8 +2751,19 @@ def show_vendor_performance(vendor_username):
             create_metric_card("Total Revenue", "₦0", "💰")
     
     with col4:
-        avg_completion_time = 0  # This would require actual completion time calculation
-        create_metric_card("Avg Rating", "4.5/5", "⭐")
+        # Calculate average completion time
+        completed_df = df_jobs[df_jobs['status'] == 'Completed']
+        if not completed_df.empty and 'created_date' in completed_df.columns and 'completed_date' in completed_df.columns:
+            try:
+                completed_df['created_date'] = pd.to_datetime(completed_df['created_date'])
+                completed_df['completed_date'] = pd.to_datetime(completed_df['completed_date'])
+                completed_df['completion_time'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
+                avg_time = completed_df['completion_time'].mean()
+                create_metric_card("Avg Time", f"{avg_time:.1f} days", "⏱️")
+            except:
+                create_metric_card("Avg Time", "N/A", "⏱️")
+        else:
+            create_metric_card("Avg Time", "N/A", "⏱️")
     
     st.divider()
     
@@ -2441,6 +3015,16 @@ def show_manager_dashboard():
 def show_manager_approvals():
     st.markdown("### ✅ Approval Queue")
     
+    tab1, tab2 = st.tabs(["📋 Maintenance Requests", "📅 PPM Schedules"])
+    
+    with tab1:
+        show_maintenance_request_approvals()
+    
+    with tab2:
+        show_ppm_manager_approvals()
+
+def show_maintenance_request_approvals():
+    """Manager approval for maintenance requests"""
     # Get requests awaiting manager approval
     approval_requests = get_requests_for_manager_approval()
     
@@ -2487,12 +3071,23 @@ def show_manager_approvals():
                     with col4:
                         st.metric("Total", format_ngn(inv['total_amount']))
                 
+                # PDF Download
+                pdf_buffer = create_maintenance_pdf_report(request['id'])
+                if pdf_buffer:
+                    st.download_button(
+                        label="📥 Download Job Report",
+                        data=pdf_buffer,
+                        file_name=f"job_report_{request['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        key=f"manager_pdf_{request['id']}"
+                    )
+                
                 # Approval buttons
                 st.markdown("---")
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if st.button("✅ Approve", key=f"approve_{request['id']}", 
+                    if st.button("✅ Approve", key=f"manager_approve_{request['id']}", 
                                use_container_width=True):
                         success = execute_update(
                             '''UPDATE maintenance_requests 
@@ -2514,11 +3109,11 @@ def show_manager_approvals():
                         st.rerun()
                 
                 with col2:
-                    if st.button("❌ Reject", key=f"reject_{request['id']}", 
+                    if st.button("❌ Reject", key=f"manager_reject_{request['id']}", 
                                use_container_width=True, type="secondary"):
                         reject_reason = st.text_input(
                             "Rejection Reason", 
-                            key=f"reject_reason_{request['id']}",
+                            key=f"manager_reject_reason_{request['id']}",
                             placeholder="Please provide reason for rejection..."
                         )
                         
@@ -2535,6 +3130,82 @@ def show_manager_approvals():
                             st.rerun()
     else:
         st.info("📭 No requests awaiting manager approval")
+
+def show_ppm_manager_approvals():
+    """Manager approval for PPM schedules"""
+    # Get PPM schedules that need manager approval
+    ppm_schedules = get_ppm_for_manager_approval()
+    
+    if not ppm_schedules:
+        st.info("📭 No PPM schedules awaiting manager approval")
+        return
+    
+    for schedule in ppm_schedules:
+        with st.expander(f"📋 {schedule['schedule_name']} - Completed: {schedule['actual_completion_date']}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write(f"**Facility:** {schedule['facility_category']}")
+                st.write(f"**Sub-Category:** {schedule['sub_category']}")
+                st.write(f"**Frequency:** {schedule['frequency']}")
+                st.write(f"**Assigned Vendor:** {schedule['assigned_vendor']}")
+            
+            with col2:
+                st.write(f"**Estimated Cost:** {format_ngn(schedule['estimated_cost'])}")
+                st.write(f"**Actual Cost:** {format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else 'N/A'}")
+                st.write(f"**Completed Date:** {schedule['actual_completion_date']}")
+                st.write(f"**User Approved:** {'Yes' if schedule['ppm_approved'] else 'No'}")
+            
+            st.write(f"**Description:** {schedule['description']}")
+            
+            if schedule['notes']:
+                st.write(f"**Notes:** {schedule['notes']}")
+            
+            # Get assignment details
+            assignment = execute_query(
+                'SELECT * FROM ppm_assignments WHERE schedule_id = ?',
+                (schedule['id'],)
+            )
+            
+            if assignment:
+                assignment = assignment[0]
+                st.write(f"**Completion Notes:** {assignment['completion_notes']}")
+            
+            # PDF Download
+            pdf_buffer = create_ppm_pdf_report(schedule['id'])
+            if pdf_buffer:
+                st.download_button(
+                    label="📥 Download PPM Report",
+                    data=pdf_buffer,
+                    file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    key=f"manager_ppm_pdf_{schedule['id']}"
+                )
+            
+            # Approval buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Final Approve PPM", key=f"manager_approve_ppm_{schedule['id']}", 
+                           use_container_width=True):
+                    st.success("✅ PPM finally approved!")
+                    # Here you could add additional logic like marking as fully approved
+                    st.rerun()
+            
+            with col2:
+                if st.button("❌ Request Changes", key=f"manager_reject_ppm_{schedule['id']}", 
+                           use_container_width=True, type="secondary"):
+                    changes_reason = st.text_input(
+                        "Required Changes",
+                        key=f"ppm_changes_{schedule['id']}",
+                        placeholder="What changes are required?"
+                    )
+                    if changes_reason:
+                        execute_update(
+                            '''UPDATE ppm_schedules SET status = 'WIP' WHERE id = ?''',
+                            (schedule['id'],)
+                        )
+                        st.success("✅ Changes requested")
+                        st.rerun()
 
 def show_vendor_management():
     st.markdown("### 👥 Vendor Management")
@@ -2841,6 +3512,18 @@ def show_manager_ppm_overview():
                             
                             st.success("✅ PPM assigned to vendor successfully!")
                             st.rerun()
+                
+                # PDF Download for completed PPM
+                if schedule['status'] == 'Completed':
+                    pdf_buffer = create_ppm_pdf_report(schedule['id'])
+                    if pdf_buffer:
+                        st.download_button(
+                            label="📥 Download PPM Report",
+                            data=pdf_buffer,
+                            file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            key=f"manager_ppm_pdf_dl_{schedule['id']}"
+                        )
     else:
         st.info("📭 No PPM schedules found")
 
@@ -3111,7 +3794,7 @@ def show_facility_user_dashboard():
         create_metric_card("Approved", len(approved_requests), "🏆")
     
     # Enhanced tabs for facility user
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🏠 Dashboard", "➕ New Request", "📋 My Requests", "📅 PPM", "🔌 Generator", 
         "🛡️ HSE", "🏢 Space Management"
     ])
@@ -3134,8 +3817,8 @@ def show_facility_user_dashboard():
     with tab6:
         show_hse_management_facility_user()
     
-    # Note: Space Management tab would be tab7, but we have 7 tabs shown above
-    # We need to adjust the tab structure or create separate navigation
+    with tab7:
+        show_space_management_facility_user()
 
 def show_user_dashboard(username, user_requests):
     st.markdown("### 📊 My Dashboard")
@@ -3376,12 +4059,24 @@ def show_user_requests_view(username):
                 # Show workflow status
                 show_workflow_status(request)
                 
+                # PDF Download for completed/approved jobs
+                if request['status'] in ['Completed', 'Approved']:
+                    pdf_buffer = create_maintenance_pdf_report(request['id'])
+                    if pdf_buffer:
+                        st.download_button(
+                            label="📥 Download Job Report",
+                            data=pdf_buffer,
+                            file_name=f"job_report_{request['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            key=f"user_pdf_{request['id']}"
+                        )
+                
                 # Actions based on status
                 if request['status'] == 'Completed' and not request['requesting_dept_approval']:
                     st.markdown("---")
                     st.markdown("#### ✅ Department Approval Required")
                     
-                    if st.button("✅ Approve Completion", key=f"dept_approve_{request['id']}"):
+                    if st.button("✅ Approve Completion", key=f"dept_approve_{request['id']}", use_container_width=True):
                         success = execute_update(
                             '''UPDATE maintenance_requests 
                             SET requesting_dept_approval = 1,
@@ -3394,7 +4089,7 @@ def show_user_requests_view(username):
                             st.success("✅ Department approval submitted!")
                             st.rerun()
                     
-                    if st.button("❌ Request Revision", key=f"dept_reject_{request['id']}"):
+                    if st.button("❌ Request Revision", key=f"dept_reject_{request['id']}", use_container_width=True, type="secondary"):
                         revision_reason = st.text_input(
                             "Revision Reason", 
                             key=f"revision_reason_{request['id']}",
@@ -3618,4 +4313,3 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
-
