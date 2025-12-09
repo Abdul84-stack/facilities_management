@@ -14,11 +14,6 @@ import base64
 import os
 
 # =============================================
-# DATABASE VERSION - CHANGE THIS TO FORCE RESET
-# =============================================
-DB_VERSION = "2.0"
-
-# =============================================
 # CUSTOM CSS FOR ENHANCED UI/UX
 # =============================================
 def inject_custom_css():
@@ -214,127 +209,97 @@ st.set_page_config(
 inject_custom_css()
 
 # =============================================
-# DATABASE SETUP WITH VERSIONING
+# DATABASE SETUP - SIMPLIFIED VERSION
 # =============================================
 def init_database():
     try:
         conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
         cursor = conn.cursor()
         
-        # Create version table
+        # Users table
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS db_info (
-                key TEXT PRIMARY KEY,
-                value TEXT
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                vendor_type TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Check current version
-        cursor.execute('SELECT value FROM db_info WHERE key = "version"')
-        version_result = cursor.fetchone()
+        # Maintenance requests table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS maintenance_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                location TEXT,
+                facility_type TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                status TEXT DEFAULT 'Pending',
+                created_by TEXT NOT NULL,
+                assigned_vendor TEXT,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_date TIMESTAMP,
+                completion_notes TEXT,
+                job_breakdown TEXT,
+                invoice_amount REAL,
+                invoice_number TEXT,
+                requesting_dept_approval INTEGER DEFAULT 0,
+                facilities_manager_approval INTEGER DEFAULT 0,
+                department_approval_date TIMESTAMP,
+                manager_approval_date TIMESTAMP
+            )
+        ''')
         
-        should_reset = False
+        # Vendors table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vendors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name TEXT NOT NULL,
+                contact_person TEXT NOT NULL,
+                email TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                vendor_type TEXT NOT NULL,
+                services_offered TEXT NOT NULL,
+                annual_turnover REAL,
+                tax_identification_number TEXT,
+                rc_number TEXT,
+                key_management_staff TEXT,
+                account_details TEXT,
+                certification TEXT,
+                address TEXT NOT NULL,
+                username TEXT NOT NULL,
+                registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
-        if not version_result:
-            # First time setup
-            should_reset = True
-            print("🆕 First time database setup")
-        elif version_result[0] != DB_VERSION:
-            # Version mismatch - reset required
-            should_reset = True
-            print(f"🔄 Database version mismatch: {version_result[0]} != {DB_VERSION}. Resetting...")
-        else:
-            print(f"✅ Database version {DB_VERSION} is up to date")
+        # Invoices table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_number TEXT UNIQUE NOT NULL,
+                request_id INTEGER,
+                vendor_username TEXT NOT NULL,
+                invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                details_of_work TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_cost REAL NOT NULL,
+                amount REAL NOT NULL,
+                labour_charge REAL DEFAULT 0,
+                vat_applicable INTEGER DEFAULT 0,
+                vat_amount REAL DEFAULT 0,
+                total_amount REAL NOT NULL,
+                status TEXT DEFAULT 'Pending'
+            )
+        ''')
         
-        if should_reset:
-            # Drop all existing tables
-            print("🗑️ Resetting database tables...")
-            cursor.execute('DROP TABLE IF EXISTS users')
-            cursor.execute('DROP TABLE IF EXISTS maintenance_requests')
-            cursor.execute('DROP TABLE IF EXISTS vendors')
-            cursor.execute('DROP TABLE IF EXISTS invoices')
-            
-            # Users table
-            cursor.execute('''
-                CREATE TABLE users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    vendor_type TEXT,
-                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Maintenance requests table
-            cursor.execute('''
-                CREATE TABLE maintenance_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    location TEXT,
-                    facility_type TEXT NOT NULL,
-                    priority TEXT NOT NULL,
-                    status TEXT DEFAULT 'Pending',
-                    created_by TEXT NOT NULL,
-                    assigned_vendor TEXT,
-                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    completed_date TIMESTAMP,
-                    completion_notes TEXT,
-                    job_breakdown TEXT,
-                    invoice_amount REAL,
-                    invoice_number TEXT,
-                    requesting_dept_approval INTEGER DEFAULT 0,
-                    facilities_manager_approval INTEGER DEFAULT 0,
-                    department_approval_date TIMESTAMP,
-                    manager_approval_date TIMESTAMP
-                )
-            ''')
-            
-            # Vendors table
-            cursor.execute('''
-                CREATE TABLE vendors (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    company_name TEXT NOT NULL,
-                    contact_person TEXT NOT NULL,
-                    email TEXT NOT NULL,
-                    phone TEXT NOT NULL,
-                    vendor_type TEXT NOT NULL,
-                    services_offered TEXT NOT NULL,
-                    annual_turnover REAL,
-                    tax_identification_number TEXT,
-                    rc_number TEXT,
-                    key_management_staff TEXT,
-                    account_details TEXT,
-                    certification TEXT,
-                    address TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Invoices table
-            cursor.execute('''
-                CREATE TABLE invoices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    invoice_number TEXT UNIQUE NOT NULL,
-                    request_id INTEGER,
-                    vendor_username TEXT NOT NULL,
-                    invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    details_of_work TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    unit_cost REAL NOT NULL,
-                    amount REAL NOT NULL,
-                    labour_charge REAL DEFAULT 0,
-                    vat_applicable INTEGER DEFAULT 0,
-                    vat_amount REAL DEFAULT 0,
-                    total_amount REAL NOT NULL,
-                    status TEXT DEFAULT 'Pending'
-                )
-            ''')
-            
-            # Insert sample users
-            print("👤 Inserting sample users...")
+        # Insert sample users if table is empty
+        cursor.execute('SELECT COUNT(*) FROM users')
+        user_count = cursor.fetchone()[0]
+        
+        if user_count == 0:
             sample_users = [
                 ('facility_user', '0123456', 'facility_user', None),
                 ('facility_manager', '0123456', 'facility_manager', None),
@@ -352,11 +317,14 @@ def init_database():
                         'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
                         (username, password, role, vendor_type)
                     )
-                except Exception as e:
-                    print(f"Error inserting user {username}: {e}")
-            
-            # Insert sample vendors
-            print("🏢 Inserting sample vendors...")
+                except:
+                    pass
+        
+        # Insert sample vendors if table is empty
+        cursor.execute('SELECT COUNT(*) FROM vendors')
+        vendor_count = cursor.fetchone()[0]
+        
+        if vendor_count == 0:
             sample_vendors = [
                 ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
                  'HVAC installation, maintenance and repair services', 500000.00, 'TIN123456', 'RC789012',
@@ -385,13 +353,8 @@ def init_database():
                          account_details, certification, address) 
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', vendor_data)
-                except Exception as e:
-                    print(f"Error inserting vendor: {e}")
-            
-            # Update version
-            cursor.execute('INSERT OR REPLACE INTO db_info (key, value) VALUES ("version", ?)', (DB_VERSION,))
-            
-            print("✅ Database reset complete with sample data")
+                except:
+                    pass
         
         conn.commit()
         conn.close()
@@ -399,14 +362,12 @@ def init_database():
         
     except Exception as e:
         print(f"Database initialization error: {e}")
-        # If there's an error, try to remove and recreate
         try:
             if os.path.exists('facilities_management.db'):
                 os.remove('facilities_management.db')
-            print("Old database removed, restarting initialization...")
-            init_database()  # Try again
+            print("Old database removed, please restart the app")
         except:
-            print("Could not reset database")
+            pass
 
 # Initialize database
 init_database()
@@ -423,11 +384,7 @@ def execute_query(query, params=()):
         cursor = conn.cursor()
         cursor.execute(query, params)
         
-        if cursor.description:
-            columns = [column[0] for column in cursor.description]
-        else:
-            columns = []
-            
+        columns = [column[0] for column in cursor.description] if cursor.description else []
         rows = cursor.fetchall()
         
         results = []
@@ -441,8 +398,6 @@ def execute_query(query, params=()):
         return results
     except Exception as e:
         print(f"Query error: {e}")
-        print(f"Query: {query}")
-        print(f"Params: {params}")
         return []
 
 def execute_update(query, params=()):
@@ -724,8 +679,8 @@ def generate_final_report_pdf(request_data, invoice_data=None):
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('PADDING', (0, 0), (-1, -1), 8),
         ]))
-    story.append(invoice_table)
-    story.append(Spacer(1, 15))
+        story.append(invoice_table)
+        story.append(Spacer(1, 15))
     
     # Approval Status with Dates
     story.append(Paragraph("APPROVAL HISTORY", subtitle_style))
@@ -777,48 +732,11 @@ def generate_final_report_pdf(request_data, invoice_data=None):
     return buffer
 
 # =============================================
-# FIXED AUTHENTICATION FUNCTION
+# AUTHENTICATION
 # =============================================
 def authenticate_user(username, password):
-    """Check if username and password match"""
-    try:
-        # Get user by username
-        users = execute_query('SELECT * FROM users WHERE username = ?', (username,))
-        
-        if users and len(users) > 0:
-            user = users[0]
-            # Check if password matches
-            stored_password = user.get('password_hash', '')
-            if str(stored_password) == str(password):
-                return user
-        
-        # Fallback: Check hardcoded sample users
-        sample_users = {
-            'facility_user': ('0123456', 'facility_user', None),
-            'facility_manager': ('0123456', 'facility_manager', None),
-            'hvac_vendor': ('0123456', 'vendor', 'HVAC'),
-            'generator_vendor': ('0123456', 'vendor', 'Generator'),
-            'fixture_vendor': ('0123456', 'vendor', 'Fixture and Fittings'),
-            'building_vendor': ('0123456', 'vendor', 'Building Maintenance'),
-            'hse_vendor': ('0123456', 'vendor', 'HSE'),
-            'space_vendor': ('0123456', 'vendor', 'Space Management')
-        }
-        
-        if username in sample_users and sample_users[username][0] == password:
-            # Return a minimal user object
-            return {
-                'id': 1,
-                'username': username,
-                'password_hash': password,
-                'role': sample_users[username][1],
-                'vendor_type': sample_users[username][2],
-                'created_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-        
-        return None
-    except Exception as e:
-        print(f"Authentication error: {e}")
-        return None
+    user = execute_query('SELECT * FROM users WHERE username = ? AND password_hash = ?', (username, password))
+    return user[0] if user else None
 
 # =============================================
 # ENHANCED LOGIN PAGE
@@ -873,7 +791,7 @@ def show_enhanced_login():
         st.markdown("<p style='text-align: center; color: #6b7280;'>© 2025 A-Z Facilities Management Pro APP™. Developed by Abdulahi Ibrahim.</p>", unsafe_allow_html=True)
 
 # =============================================
-# DEPARTMENT APPROVAL PAGE FOR FACILITY USER
+# NEW: DEPARTMENT APPROVAL PAGE FOR FACILITY USER
 # =============================================
 def show_department_approval():
     """Page for facility user to approve completed jobs from vendors"""
@@ -971,7 +889,7 @@ def show_department_approval():
                     # In a real app, you would add a notes field and send back to vendor
 
 # =============================================
-# FINAL APPROVAL PAGE FOR FACILITY MANAGER
+# NEW: FINAL APPROVAL PAGE FOR FACILITY MANAGER
 # =============================================
 def show_final_approval():
     """Page for facility manager to give final approval"""
@@ -1081,7 +999,7 @@ def show_final_approval():
                     st.warning("No invoice found for this job")
 
 # =============================================
-# MAIN APPLICATION FUNCTIONS
+# MAIN APPLICATION FUNCTIONS (UPDATED)
 # =============================================
 def show_create_request():
     st.markdown("<h1 class='app-title'>📝 Create Maintenance Request</h1>", unsafe_allow_html=True)
@@ -1239,7 +1157,7 @@ def show_my_requests():
                             st.write(f"**Unit Cost:** {format_ngn(safe_get(invoice, 'unit_cost'))}")
                             st.write(f"**Total:** {format_ngn(safe_get(invoice, 'total_amount'))}")
                 
-                # Department Approval Button for Completed Jobs
+                # ✅ IMPORTANT: Department Approval Button for Completed Jobs
                 if (status == 'Completed' and 
                     not safe_get(req, 'requesting_dept_approval') and
                     safe_get(req, 'created_by') == st.session_state.user['username']):
@@ -1272,8 +1190,9 @@ def show_my_requests():
                                    use_container_width=True,
                                    type="secondary"):
                             st.warning("Changes requested from vendor")
+                            # In a real app, you would add a notes field and send back to vendor
                 
-                # Show download button for fully approved jobs
+                # ✅ Show download button for fully approved jobs
                 elif (status == 'Approved' and 
                       safe_get(req, 'requesting_dept_approval') and 
                       safe_get(req, 'facilities_manager_approval')):
@@ -1300,6 +1219,9 @@ def show_my_requests():
                             use_container_width=True
                         )
 
+# =============================================
+# UPDATED MANAGE REQUESTS FOR FACILITY MANAGER
+# =============================================
 def show_manage_requests():
     st.markdown("<h1 class='app-title'>🛠️ Manage Maintenance Requests</h1>", unsafe_allow_html=True)
     
@@ -1421,7 +1343,7 @@ def show_manage_requests():
                         st.warning(f"No vendors found for {facility_type}")
 
 # =============================================
-# VENDOR FUNCTIONS
+# VENDOR FUNCTIONS - COMPLETELY UPDATED
 # =============================================
 def show_assigned_jobs():
     """Show assigned jobs to vendor with completion form"""
@@ -1688,6 +1610,113 @@ def show_vendor_registration():
                     st.rerun()
                 else:
                     st.error("❌ Failed to register vendor")
+
+# =============================================
+# INVOICE CREATION (FOR VENDORS)
+# =============================================
+def show_invoice_creation():
+    """Invoice creation page for vendors"""
+    st.markdown("<h1 class='app-title'>🧾 Invoice Creation</h1>", unsafe_allow_html=True)
+    
+    vendor_username = st.session_state.user['username']
+    
+    # Get completed jobs without invoices
+    completed_jobs = execute_query('''
+        SELECT * FROM maintenance_requests 
+        WHERE assigned_vendor = ? 
+        AND status = 'Completed' 
+        AND invoice_number IS NULL
+        ORDER BY completed_date DESC
+    ''', (vendor_username,))
+    
+    if not completed_jobs:
+        st.info("🎉 All your completed jobs already have invoices.")
+        return
+    
+    st.markdown(f"<div class='card'><h4>📋 {len(completed_jobs)} Job(s) Need Invoice</h4></div>", unsafe_allow_html=True)
+    
+    for job in completed_jobs:
+        with st.expander(f"🧾 Create Invoice for Job #{safe_get(job, 'id')}: {safe_str(safe_get(job, 'title'))}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📝 Job Details")
+                st.write(f"**Title:** {safe_str(safe_get(job, 'title'))}")
+                st.write(f"**Description:** {safe_str(safe_get(job, 'description'))}")
+                st.write(f"**Location:** {safe_str(safe_get(job, 'location'), 'Common Area')}")
+                st.write(f"**Completed Date:** {safe_str(safe_get(job, 'completed_date'))}")
+                
+                if safe_get(job, 'job_breakdown'):
+                    st.write(f"**Job Breakdown:**")
+                    st.info(safe_str(safe_get(job, 'job_breakdown')))
+            
+            with col2:
+                st.markdown("### 🧾 Invoice Details")
+                
+                with st.form(key=f"invoice_form_{safe_get(job, 'id')}"):
+                    details_of_work = st.text_input(
+                        "Details of Work *",
+                        value=safe_str(safe_get(job, 'job_breakdown'), ""),
+                        placeholder="Description of work performed"
+                    )
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        quantity = st.number_input("Quantity *", min_value=1, value=1, key=f"qty_{safe_get(job, 'id')}")
+                        unit_cost = st.number_input("Unit Cost (₦) *", min_value=0.0, value=0.0, step=100.0, 
+                                                  key=f"unit_{safe_get(job, 'id')}")
+                    with col_b:
+                        labour_charge = st.number_input("Labour/Service Charge (₦)", min_value=0.0, value=0.0, 
+                                                      step=100.0, key=f"labour_{safe_get(job, 'id')}")
+                        vat_applicable = st.checkbox("Apply 7.5% VAT", value=True, key=f"vat_{safe_get(job, 'id')}")
+                    
+                    # Calculate amounts
+                    amount = quantity * unit_cost
+                    vat_amount = (amount + labour_charge) * 0.075 if vat_applicable else 0.0
+                    total_amount = amount + labour_charge + vat_amount
+                    
+                    # Display summary
+                    st.markdown("### 💰 Amount Summary")
+                    st.write(f"**Amount:** {format_ngn(amount)}")
+                    st.write(f"**Labour Charge:** {format_ngn(labour_charge)}")
+                    st.write(f"**VAT ({'7.5%' if vat_applicable else '0%'}):** {format_ngn(vat_amount)}")
+                    st.write(f"**Total Amount:** {format_ngn(total_amount)}")
+                    
+                    submitted = st.form_submit_button("📤 Create Invoice", use_container_width=True)
+                    
+                    if submitted:
+                        if not details_of_work:
+                            st.error("❌ Please enter details of work")
+                        else:
+                            # Generate invoice number
+                            invoice_number = f"INV-{safe_get(job, 'id')}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            
+                            # Create invoice
+                            invoice_success = execute_update(
+                                '''INSERT INTO invoices 
+                                (invoice_number, request_id, vendor_username, details_of_work, 
+                                 quantity, unit_cost, amount, labour_charge, vat_applicable, 
+                                 vat_amount, total_amount) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (invoice_number, safe_get(job, 'id'), vendor_username, details_of_work,
+                                 quantity, unit_cost, amount, labour_charge, 1 if vat_applicable else 0,
+                                 vat_amount, total_amount)
+                            )
+                            
+                            # Update job with invoice info
+                            if invoice_success:
+                                job_update_success = execute_update(
+                                    '''UPDATE maintenance_requests 
+                                    SET invoice_amount = ?, invoice_number = ?
+                                    WHERE id = ?''',
+                                    (total_amount, invoice_number, safe_get(job, 'id'))
+                                )
+                                
+                                if job_update_success:
+                                    st.success(f"✅ Invoice {invoice_number} created successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to update job with invoice info")
 
 # =============================================
 # VENDOR REPORTS
@@ -2137,7 +2166,7 @@ def show_job_invoice_reports():
                     )
 
 # =============================================
-# DASHBOARD FUNCTIONS
+# DASHBOARD FUNCTIONS (UPDATED WITH APPROVAL STATS)
 # =============================================
 def show_user_dashboard():
     st.markdown("<h1 class='app-title'>📊 Dashboard Overview</h1>", unsafe_allow_html=True)
@@ -2319,7 +2348,7 @@ def show_dashboard():
         show_vendor_dashboard()
 
 # =============================================
-# MAIN APPLICATION ROUTING
+# MAIN APPLICATION ROUTING (UPDATED)
 # =============================================
 def show_main_app():
     user = st.session_state.user
@@ -2366,16 +2395,13 @@ def show_main_app():
         "🔧 Assigned Jobs": show_assigned_jobs,
         "✅ Completed Jobs": show_completed_jobs,
         "🏢 Vendor Registration": show_vendor_registration,
-        "🧾 Invoice Creation": None,  # Removed separate invoice creation
+        "🧾 Invoice Creation": show_invoice_creation,
         "📄 Job & Invoice Reports": show_job_invoice_reports,
         "📊 My Reports": show_vendor_reports
     }
     
     if selected_menu in menu_map:
-        if menu_map[selected_menu]:
-            menu_map[selected_menu]()
-        else:
-            st.info("This feature is integrated into the 'Assigned Jobs' section")
+        menu_map[selected_menu]()
     else:
         st.error("Page not found")
 
@@ -2393,3 +2419,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
