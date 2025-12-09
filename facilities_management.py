@@ -441,7 +441,8 @@ def init_database():
                 estimated_cost REAL,
                 actual_completion_date DATE,
                 actual_cost REAL,
-                ppm_approved INTEGER DEFAULT 0
+                user_approved INTEGER DEFAULT 0,
+                manager_approved INTEGER DEFAULT 0
             )
         ''')
         
@@ -630,9 +631,11 @@ def execute_query(query, params=()):
         cursor = conn.cursor()
         cursor.execute(query, params)
         
+        # Get column names
         columns = [column[0] for column in cursor.description] if cursor.description else []
         rows = cursor.fetchall()
         
+        # Convert to list of dictionaries
         results = []
         for row in rows:
             result = {}
@@ -644,6 +647,8 @@ def execute_query(query, params=()):
         return results
     except Exception as e:
         print(f"Query error: {e}")
+        print(f"Query: {query}")
+        print(f"Params: {params}")
         return []
 
 def execute_update(query, params=()):
@@ -656,13 +661,15 @@ def execute_update(query, params=()):
         return True
     except Exception as e:
         print(f"Update error: {e}")
+        print(f"Query: {query}")
+        print(f"Params: {params}")
         return False
 
 # =============================================
 # SAFE DATA ACCESS FUNCTIONS
 # =============================================
 def safe_get(data, key, default=None):
-    if not data:
+    if not data or key not in data:
         return default
     return data.get(key, default)
 
@@ -758,16 +765,16 @@ def create_maintenance_pdf_report(request_id):
     story.append(Paragraph("Job Details", heading_style))
     
     job_data = [
-        ["Job ID:", str(request['id'])],
-        ["Title:", request['title']],
-        ["Location:", request['location'] or "N/A"],
-        ["Facility Type:", request['facility_type']],
-        ["Priority:", request['priority']],
-        ["Created By:", request['created_by']],
-        ["Created Date:", request['created_date']],
-        ["Assigned Vendor:", request['assigned_vendor'] or "N/A"],
-        ["Status:", request['status']],
-        ["Completed Date:", request['completed_date'] or "N/A"]
+        ["Job ID:", str(safe_get(request, 'id', ''))],
+        ["Title:", safe_str(safe_get(request, 'title', ''))],
+        ["Location:", safe_str(safe_get(request, 'location', 'N/A'))],
+        ["Facility Type:", safe_str(safe_get(request, 'facility_type', ''))],
+        ["Priority:", safe_str(safe_get(request, 'priority', ''))],
+        ["Created By:", safe_str(safe_get(request, 'created_by', ''))],
+        ["Created Date:", safe_str(safe_get(request, 'created_date', ''))],
+        ["Assigned Vendor:", safe_str(safe_get(request, 'assigned_vendor', 'N/A'))],
+        ["Status:", safe_str(safe_get(request, 'status', ''))],
+        ["Completed Date:", safe_str(safe_get(request, 'completed_date', 'N/A'))]
     ]
     
     job_table = Table(job_data, colWidths=[2*inch, 4*inch])
@@ -787,19 +794,19 @@ def create_maintenance_pdf_report(request_id):
     
     # Description
     story.append(Paragraph("Job Description", heading_style))
-    story.append(Paragraph(request['description'], normal_style))
+    story.append(Paragraph(safe_str(safe_get(request, 'description', '')), normal_style))
     story.append(Spacer(1, 20))
     
     # Completion Notes
-    if request['completion_notes']:
+    if safe_get(request, 'completion_notes'):
         story.append(Paragraph("Completion Notes", heading_style))
-        story.append(Paragraph(request['completion_notes'], normal_style))
+        story.append(Paragraph(safe_str(safe_get(request, 'completion_notes', '')), normal_style))
         story.append(Spacer(1, 20))
     
     # Job Breakdown
-    if request['job_breakdown']:
+    if safe_get(request, 'job_breakdown'):
         story.append(Paragraph("Job Breakdown", heading_style))
-        story.append(Paragraph(request['job_breakdown'], normal_style))
+        story.append(Paragraph(safe_str(safe_get(request, 'job_breakdown', '')), normal_style))
         story.append(Spacer(1, 20))
     
     # Invoice Details
@@ -808,16 +815,16 @@ def create_maintenance_pdf_report(request_id):
         story.append(Paragraph("Invoice Details", heading_style))
         
         invoice_data = [
-            ["Invoice Number:", invoice['invoice_number']],
-            ["Invoice Date:", invoice['invoice_date']],
-            ["Details of Work:", invoice['details_of_work']],
-            ["Quantity:", str(invoice['quantity'])],
-            ["Unit Cost:", format_ngn(invoice['unit_cost'])],
-            ["Material Cost:", format_ngn(invoice['amount'])],
-            ["Labour Charges:", format_ngn(invoice['labour_charge'])],
-            ["VAT Amount:", format_ngn(invoice['vat_amount'])],
-            ["Total Amount:", format_ngn(invoice['total_amount'])],
-            ["Invoice Status:", invoice['status']]
+            ["Invoice Number:", safe_str(safe_get(invoice, 'invoice_number', ''))],
+            ["Invoice Date:", safe_str(safe_get(invoice, 'invoice_date', ''))],
+            ["Details of Work:", safe_str(safe_get(invoice, 'details_of_work', ''))],
+            ["Quantity:", str(safe_int(safe_get(invoice, 'quantity', 0)))],
+            ["Unit Cost:", format_ngn(safe_float(safe_get(invoice, 'unit_cost', 0)))],
+            ["Material Cost:", format_ngn(safe_float(safe_get(invoice, 'amount', 0)))],
+            ["Labour Charges:", format_ngn(safe_float(safe_get(invoice, 'labour_charge', 0)))],
+            ["VAT Amount:", format_ngn(safe_float(safe_get(invoice, 'vat_amount', 0)))],
+            ["Total Amount:", format_ngn(safe_float(safe_get(invoice, 'total_amount', 0)))],
+            ["Invoice Status:", safe_str(safe_get(invoice, 'status', ''))]
         ]
         
         invoice_table = Table(invoice_data, colWidths=[2*inch, 4*inch])
@@ -839,10 +846,10 @@ def create_maintenance_pdf_report(request_id):
     story.append(Paragraph("Approval Status", heading_style))
     
     approval_data = [
-        ["Department Approval:", "Approved" if safe_bool(request['requesting_dept_approval']) else "Pending"],
-        ["Department Approval Date:", request['department_approval_date'] or "N/A"],
-        ["Manager Approval:", "Approved" if safe_bool(request['facilities_manager_approval']) else "Pending"],
-        ["Manager Approval Date:", request['manager_approval_date'] or "N/A"]
+        ["Department Approval:", "Approved" if safe_bool(safe_get(request, 'requesting_dept_approval')) else "Pending"],
+        ["Department Approval Date:", safe_str(safe_get(request, 'department_approval_date', 'N/A'))],
+        ["Manager Approval:", "Approved" if safe_bool(safe_get(request, 'facilities_manager_approval')) else "Pending"],
+        ["Manager Approval Date:", safe_str(safe_get(request, 'manager_approval_date', 'N/A'))]
     ]
     
     approval_table = Table(approval_data, colWidths=[2*inch, 4*inch])
@@ -907,18 +914,18 @@ def create_ppm_pdf_report(schedule_id):
     story.append(Paragraph("PPM Schedule Details", styles['Heading2']))
     
     schedule_data = [
-        ["Schedule ID:", str(schedule['id'])],
-        ["Schedule Name:", schedule['schedule_name']],
-        ["Facility Category:", schedule['facility_category']],
-        ["Sub-Category:", schedule['sub_category']],
-        ["Frequency:", schedule['frequency']],
-        ["Next Maintenance Date:", schedule['next_maintenance_date']],
-        ["Status:", schedule['status']],
-        ["Assigned Vendor:", schedule['assigned_vendor'] or "N/A"],
-        ["Created By:", schedule['created_by']],
-        ["Estimated Cost:", format_ngn(schedule['estimated_cost'])],
-        ["Actual Completion Date:", schedule['actual_completion_date'] or "N/A"],
-        ["Actual Cost:", format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else "N/A"]
+        ["Schedule ID:", str(safe_get(schedule, 'id', ''))],
+        ["Schedule Name:", safe_str(safe_get(schedule, 'schedule_name', ''))],
+        ["Facility Category:", safe_str(safe_get(schedule, 'facility_category', ''))],
+        ["Sub-Category:", safe_str(safe_get(schedule, 'sub_category', ''))],
+        ["Frequency:", safe_str(safe_get(schedule, 'frequency', ''))],
+        ["Next Maintenance Date:", safe_str(safe_get(schedule, 'next_maintenance_date', ''))],
+        ["Status:", safe_str(safe_get(schedule, 'status', ''))],
+        ["Assigned Vendor:", safe_str(safe_get(schedule, 'assigned_vendor', 'N/A'))],
+        ["Created By:", safe_str(safe_get(schedule, 'created_by', ''))],
+        ["Estimated Cost:", format_ngn(safe_float(safe_get(schedule, 'estimated_cost', 0)))],
+        ["Actual Completion Date:", safe_str(safe_get(schedule, 'actual_completion_date', 'N/A'))],
+        ["Actual Cost:", format_ngn(safe_float(safe_get(schedule, 'actual_cost', 0))) if safe_get(schedule, 'actual_cost') else "N/A"]
     ]
     
     schedule_table = Table(schedule_data, colWidths=[2*inch, 4*inch])
@@ -932,13 +939,13 @@ def create_ppm_pdf_report(schedule_id):
     
     # Description
     story.append(Paragraph("Description", styles['Heading2']))
-    story.append(Paragraph(schedule['description'], styles['Normal']))
+    story.append(Paragraph(safe_str(safe_get(schedule, 'description', '')), styles['Normal']))
     
     # Notes
-    if schedule['notes']:
+    if safe_get(schedule, 'notes'):
         story.append(Spacer(1, 10))
         story.append(Paragraph("Notes", styles['Heading2']))
-        story.append(Paragraph(schedule['notes'], styles['Normal']))
+        story.append(Paragraph(safe_str(safe_get(schedule, 'notes', '')), styles['Normal']))
     
     # Assignment Details
     if assignment:
@@ -947,20 +954,32 @@ def create_ppm_pdf_report(schedule_id):
         story.append(Paragraph("Assignment Details", styles['Heading2']))
         
         assign_data = [
-            ["Assigned To:", assignment['vendor_username']],
-            ["Assigned Date:", assignment['assigned_date']],
-            ["Due Date:", assignment['due_date']],
-            ["Completed Date:", assignment['completed_date'] or "N/A"],
-            ["Status:", assignment['status']]
+            ["Assigned To:", safe_str(safe_get(assignment, 'vendor_username', ''))],
+            ["Assigned Date:", safe_str(safe_get(assignment, 'assigned_date', ''))],
+            ["Due Date:", safe_str(safe_get(assignment, 'due_date', ''))],
+            ["Completed Date:", safe_str(safe_get(assignment, 'completed_date', 'N/A'))],
+            ["Status:", safe_str(safe_get(assignment, 'status', ''))]
         ]
         
         assign_table = Table(assign_data, colWidths=[2*inch, 4*inch])
         story.append(assign_table)
         
-        if assignment['completion_notes']:
+        if safe_get(assignment, 'completion_notes'):
             story.append(Spacer(1, 10))
             story.append(Paragraph("Completion Notes", styles['Heading2']))
-            story.append(Paragraph(assignment['completion_notes'], styles['Normal']))
+            story.append(Paragraph(safe_str(safe_get(assignment, 'completion_notes', '')), styles['Normal']))
+    
+    # Approval Status
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("Approval Status", styles['Heading2']))
+    
+    approval_data = [
+        ["User Approved:", "Yes" if safe_bool(safe_get(schedule, 'user_approved')) else "No"],
+        ["Manager Approved:", "Yes" if safe_bool(safe_get(schedule, 'manager_approved')) else "No"]
+    ]
+    
+    approval_table = Table(approval_data, colWidths=[2*inch, 4*inch])
+    story.append(approval_table)
     
     # Footer
     story.append(Spacer(1, 40))
@@ -998,16 +1017,16 @@ def create_invoice_pdf(invoice_id):
     story.append(Paragraph("Invoice Details", styles['Heading2']))
     
     invoice_details = [
-        ["Invoice Number:", invoice['invoice_number']],
-        ["Invoice Date:", invoice['invoice_date']],
-        ["Vendor:", invoice['vendor_username']],
-        ["Status:", invoice['status']]
+        ["Invoice Number:", safe_str(safe_get(invoice, 'invoice_number', ''))],
+        ["Invoice Date:", safe_str(safe_get(invoice, 'invoice_date', ''))],
+        ["Vendor:", safe_str(safe_get(invoice, 'vendor_username', ''))],
+        ["Status:", safe_str(safe_get(invoice, 'status', ''))]
     ]
     
     if request:
         request = request[0]
-        invoice_details.append(["Job Title:", request['title']])
-        invoice_details.append(["Location:", request['location'] or "N/A"])
+        invoice_details.append(["Job Title:", safe_str(safe_get(request, 'title', ''))])
+        invoice_details.append(["Location:", safe_str(safe_get(request, 'location', 'N/A'))])
     
     inv_table = Table(invoice_details, colWidths=[2*inch, 4*inch])
     story.append(inv_table)
@@ -1015,19 +1034,24 @@ def create_invoice_pdf(invoice_id):
     
     # Work Details
     story.append(Paragraph("Work Details", styles['Heading2']))
-    story.append(Paragraph(invoice['details_of_work'], styles['Normal']))
+    story.append(Paragraph(safe_str(safe_get(invoice, 'details_of_work', '')), styles['Normal']))
     story.append(Spacer(1, 20))
     
     # Cost Breakdown
     story.append(Paragraph("Cost Breakdown", styles['Heading2']))
     
+    amount = safe_float(safe_get(invoice, 'amount', 0))
+    labour_charge = safe_float(safe_get(invoice, 'labour_charge', 0))
+    vat_amount = safe_float(safe_get(invoice, 'vat_amount', 0))
+    total_amount = safe_float(safe_get(invoice, 'total_amount', 0))
+    
     cost_data = [
         ["Description", "Quantity", "Unit Cost", "Amount"],
-        ["Materials", str(invoice['quantity']), format_ngn(invoice['unit_cost']), format_ngn(invoice['amount'])],
-        ["Labour Charges", "1", format_ngn(invoice['labour_charge']), format_ngn(invoice['labour_charge'])],
-        ["Subtotal", "", "", format_ngn(invoice['amount'] + invoice['labour_charge'])],
-        ["VAT (7.5%)" if invoice['vat_applicable'] else "VAT", "", "", format_ngn(invoice['vat_amount'])],
-        ["TOTAL", "", "", format_ngn(invoice['total_amount'])]
+        ["Materials", str(safe_int(safe_get(invoice, 'quantity', 0))), format_ngn(safe_float(safe_get(invoice, 'unit_cost', 0))), format_ngn(amount)],
+        ["Labour Charges", "1", format_ngn(labour_charge), format_ngn(labour_charge)],
+        ["Subtotal", "", "", format_ngn(amount + labour_charge)],
+        ["VAT (7.5%)" if safe_bool(safe_get(invoice, 'vat_applicable')) else "VAT", "", "", format_ngn(vat_amount)],
+        ["TOTAL", "", "", format_ngn(total_amount)]
     ]
     
     cost_table = Table(cost_data, colWidths=[3*inch, 1*inch, 1.5*inch, 1.5*inch])
@@ -1092,7 +1116,7 @@ def get_ppm_for_user_approval(username):
         SELECT * FROM ppm_schedules 
         WHERE created_by = ? 
         AND status = 'Completed' 
-        AND ppm_approved = 0
+        AND user_approved = 0
         ORDER BY actual_completion_date DESC
     ''', (username,))
 
@@ -1110,8 +1134,8 @@ def get_ppm_for_manager_approval():
     return execute_query('''
         SELECT * FROM ppm_schedules 
         WHERE status = 'Completed' 
-        AND ppm_approved = 1
-        AND assigned_vendor IS NOT NULL
+        AND user_approved = 1
+        AND manager_approved = 0
         ORDER BY actual_completion_date DESC
     ''')
 
@@ -1751,34 +1775,34 @@ def show_ppm_schedules():
                 "Approved": "status-approved"
             }
             
-            status_class = status_colors.get(schedule['status'], "")
+            status_class = status_colors.get(safe_get(schedule, 'status', ''), "")
             
-            with st.expander(f"{schedule['schedule_name']} - {schedule['next_maintenance_date']}"):
+            with st.expander(f"{safe_get(schedule, 'schedule_name', '')} - {safe_get(schedule, 'next_maintenance_date', '')}"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.write(f"**Facility:** {schedule['facility_category']}")
-                    st.write(f"**Sub-Category:** {schedule['sub_category']}")
-                    st.write(f"**Frequency:** {schedule['frequency']}")
-                    st.write(f"**Assigned Vendor:** {schedule['assigned_vendor'] or 'Not assigned'}")
+                    st.write(f"**Facility:** {safe_get(schedule, 'facility_category', '')}")
+                    st.write(f"**Sub-Category:** {safe_get(schedule, 'sub_category', '')}")
+                    st.write(f"**Frequency:** {safe_get(schedule, 'frequency', '')}")
+                    st.write(f"**Assigned Vendor:** {safe_get(schedule, 'assigned_vendor', 'Not assigned')}")
                 
                 with col2:
-                    st.write(f"**Status:** <span class='{status_class}'>{schedule['status']}</span>", unsafe_allow_html=True)
-                    st.write(f"**Created By:** {schedule['created_by']}")
-                    st.write(f"**Created Date:** {schedule['created_date']}")
-                    if schedule['estimated_cost']:
-                        st.write(f"**Est. Cost:** {format_ngn(schedule['estimated_cost'])}")
+                    st.write(f"**Status:** <span class='{status_class}'>{safe_get(schedule, 'status', '')}</span>", unsafe_allow_html=True)
+                    st.write(f"**Created By:** {safe_get(schedule, 'created_by', '')}")
+                    st.write(f"**Created Date:** {safe_get(schedule, 'created_date', '')}")
+                    if safe_get(schedule, 'estimated_cost'):
+                        st.write(f"**Est. Cost:** {format_ngn(safe_get(schedule, 'estimated_cost', 0))}")
                 
-                st.write(f"**Description:** {schedule['description']}")
+                st.write(f"**Description:** {safe_get(schedule, 'description', '')}")
                 
-                if schedule['notes']:
-                    st.write(f"**Notes:** {schedule['notes']}")
+                if safe_get(schedule, 'notes'):
+                    st.write(f"**Notes:** {safe_get(schedule, 'notes', '')}")
                 
                 # Action buttons based on status
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if schedule['status'] == 'Not Due' and st.button("🔄 Mark as Prepare", key=f"prep_{schedule['id']}"):
+                    if safe_get(schedule, 'status') == 'Not Due' and st.button("🔄 Mark as Prepare", key=f"prep_{schedule['id']}"):
                         execute_update(
                             "UPDATE ppm_schedules SET status = 'Prepare' WHERE id = ?",
                             (schedule['id'],)
@@ -1787,22 +1811,22 @@ def show_ppm_schedules():
                         st.rerun()
                 
                 with col2:
-                    if schedule['status'] in ['Prepare', 'Due'] and st.button("⚡ Assign to Vendor", key=f"assign_{schedule['id']}"):
+                    if safe_get(schedule, 'status') in ['Prepare', 'Due'] and st.button("⚡ Assign to Vendor", key=f"assign_{schedule['id']}"):
                         st.session_state.assigning_schedule_id = schedule['id']
                         st.rerun()
                 
                 with col3:
-                    if schedule['status'] == 'Completed' and schedule['ppm_approved'] == 0:
+                    if safe_get(schedule, 'status') == 'Completed' and safe_get(schedule, 'user_approved', 0) == 0:
                         if st.button("✅ Approve PPM", key=f"approve_ppm_{schedule['id']}"):
                             execute_update(
-                                "UPDATE ppm_schedules SET ppm_approved = 1 WHERE id = ?",
+                                "UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?",
                                 (schedule['id'],)
                             )
                             st.success("✅ PPM approved!")
                             st.rerun()
                     
                     # PDF Download for completed PPM
-                    if schedule['status'] == 'Completed':
+                    if safe_get(schedule, 'status') == 'Completed':
                         pdf_buffer = create_ppm_pdf_report(schedule['id'])
                         if pdf_buffer:
                             st.download_button(
@@ -1963,25 +1987,25 @@ def show_ppm_approvals_facility_user():
         return
     
     for schedule in ppm_schedules:
-        with st.expander(f"📋 {schedule['schedule_name']} - Completed: {schedule['actual_completion_date']}"):
+        with st.expander(f"📋 {safe_get(schedule, 'schedule_name', '')} - Completed: {safe_get(schedule, 'actual_completion_date', '')}"):
             col1, col2 = st.columns(2)
             
             with col1:
-                st.write(f"**Facility:** {schedule['facility_category']}")
-                st.write(f"**Sub-Category:** {schedule['sub_category']}")
-                st.write(f"**Frequency:** {schedule['frequency']}")
-                st.write(f"**Assigned Vendor:** {schedule['assigned_vendor']}")
+                st.write(f"**Facility:** {safe_get(schedule, 'facility_category', '')}")
+                st.write(f"**Sub-Category:** {safe_get(schedule, 'sub_category', '')}")
+                st.write(f"**Frequency:** {safe_get(schedule, 'frequency', '')}")
+                st.write(f"**Assigned Vendor:** {safe_get(schedule, 'assigned_vendor', '')}")
             
             with col2:
-                st.write(f"**Estimated Cost:** {format_ngn(schedule['estimated_cost'])}")
-                st.write(f"**Actual Cost:** {format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else 'N/A'}")
-                st.write(f"**Completed Date:** {schedule['actual_completion_date']}")
-                st.write(f"**Status:** {schedule['status']}")
+                st.write(f"**Estimated Cost:** {format_ngn(safe_get(schedule, 'estimated_cost', 0))}")
+                st.write(f"**Actual Cost:** {format_ngn(safe_get(schedule, 'actual_cost', 0)) if safe_get(schedule, 'actual_cost') else 'N/A'}")
+                st.write(f"**Completed Date:** {safe_get(schedule, 'actual_completion_date', '')}")
+                st.write(f"**Status:** {safe_get(schedule, 'status', '')}")
             
-            st.write(f"**Description:** {schedule['description']}")
+            st.write(f"**Description:** {safe_get(schedule, 'description', '')}")
             
-            if schedule['notes']:
-                st.write(f"**Notes:** {schedule['notes']}")
+            if safe_get(schedule, 'notes'):
+                st.write(f"**Notes:** {safe_get(schedule, 'notes', '')}")
             
             # Get assignment details
             assignment = execute_query(
@@ -1991,7 +2015,7 @@ def show_ppm_approvals_facility_user():
             
             if assignment:
                 assignment = assignment[0]
-                st.write(f"**Completion Notes:** {assignment['completion_notes']}")
+                st.write(f"**Completion Notes:** {safe_get(assignment, 'completion_notes', '')}")
             
             # Approval buttons
             col1, col2 = st.columns(2)
@@ -1999,7 +2023,7 @@ def show_ppm_approvals_facility_user():
                 if st.button("✅ Approve PPM", key=f"user_approve_ppm_{schedule['id']}", 
                            use_container_width=True):
                     execute_update(
-                        "UPDATE ppm_schedules SET ppm_approved = 1 WHERE id = ?",
+                        "UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?",
                         (schedule['id'],)
                     )
                     st.success("✅ PPM approved successfully!")
@@ -2153,19 +2177,19 @@ def show_generator_records():
         total_diesel = 0
         
         for record in records:
-            net_hours = record['net_hours'] or 0
-            net_diesel = record['net_diesel_consumed'] or 0
+            net_hours = safe_float(record.get('net_hours'), 0)
+            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
             
             df_data.append({
-                "Date": record['record_date'],
-                "Generator Type": record['generator_type'],
-                "Opening Hours": f"{record['opening_hours']:.1f}",
-                "Closing Hours": f"{record['closing_hours']:.1f}",
+                "Date": record.get('record_date', ''),
+                "Generator Type": record.get('generator_type', ''),
+                "Opening Hours": f"{safe_float(record.get('opening_hours'), 0):.1f}",
+                "Closing Hours": f"{safe_float(record.get('closing_hours'), 0):.1f}",
                 "Net Hours": f"{net_hours:.1f}",
-                "Opening Inventory": f"{record['opening_inventory_liters']:.1f}L",
-                "Closing Inventory": f"{record['closing_inventory_liters']:.1f}L",
+                "Opening Inventory": f"{safe_float(record.get('opening_inventory_liters'), 0):.1f}L",
+                "Closing Inventory": f"{safe_float(record.get('closing_inventory_liters'), 0):.1f}L",
                 "Net Diesel": f"{net_diesel:.1f}L",
-                "Recorded By": record['recorded_by']
+                "Recorded By": record.get('recorded_by', '')
             })
             
             total_hours += net_hours
@@ -2329,31 +2353,35 @@ def show_vendor_dashboard():
         assigned_requests = execute_query(
             'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ?',
             (vendor_username,)
-        )[0]['count']
+        )
+        assigned_count = assigned_requests[0]['count'] if assigned_requests else 0
         
         completed_requests = execute_query(
             'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = ?',
             (vendor_username, 'Completed')
-        )[0]['count']
+        )
+        completed_count = completed_requests[0]['count'] if completed_requests else 0
         
         pending_requests = execute_query(
             'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = ?',
             (vendor_username, 'Assigned')
-        )[0]['count']
+        )
+        pending_count = pending_requests[0]['count'] if pending_requests else 0
         
         total_invoice_amount = execute_query(
             'SELECT SUM(total_amount) as total FROM invoices WHERE vendor_username = ? AND status = ?',
             (vendor_username, 'Approved')
-        )[0]['total'] or 0
+        )
+        total_amount = total_invoice_amount[0]['total'] if total_invoice_amount and total_invoice_amount[0]['total'] else 0
         
         with col1:
-            create_metric_card("Assigned Jobs", assigned_requests, "📋")
+            create_metric_card("Assigned Jobs", assigned_count, "📋")
         with col2:
-            create_metric_card("Completed", completed_requests, "✅")
+            create_metric_card("Completed", completed_count, "✅")
         with col3:
-            create_metric_card("Pending", pending_requests, "⏳")
+            create_metric_card("Pending", pending_count, "⏳")
         with col4:
-            create_metric_card("Total Revenue", format_ngn(total_invoice_amount), "💰")
+            create_metric_card("Total Revenue", format_ngn(total_amount), "💰")
         
         # Tabs for different functionalities
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Assigned Jobs", "📤 Submit Invoice", "💼 PPM Assignments", "📊 Performance", "📝 Update Profile"])
@@ -2882,19 +2910,26 @@ def show_facility_manager_dashboard():
     col1, col2, col3, col4 = st.columns(4)
     
     # Get statistics
-    total_requests = len(execute_query('SELECT * FROM maintenance_requests'))
-    pending_requests = len(execute_query("SELECT * FROM maintenance_requests WHERE status = 'Pending'"))
-    completed_requests = len(execute_query("SELECT * FROM maintenance_requests WHERE status = 'Completed'"))
-    approved_requests = len(execute_query("SELECT * FROM maintenance_requests WHERE status = 'Approved'"))
+    total_requests = execute_query('SELECT COUNT(*) as count FROM maintenance_requests')
+    total_count = total_requests[0]['count'] if total_requests else 0
+    
+    pending_requests = execute_query("SELECT COUNT(*) as count FROM maintenance_requests WHERE status = 'Pending'")
+    pending_count = pending_requests[0]['count'] if pending_requests else 0
+    
+    completed_requests = execute_query("SELECT COUNT(*) as count FROM maintenance_requests WHERE status = 'Completed'")
+    completed_count = completed_requests[0]['count'] if completed_requests else 0
+    
+    approved_requests = execute_query("SELECT COUNT(*) as count FROM maintenance_requests WHERE status = 'Approved'")
+    approved_count = approved_requests[0]['count'] if approved_requests else 0
     
     with col1:
-        create_metric_card("Total Requests", total_requests, "📋")
+        create_metric_card("Total Requests", total_count, "📋")
     with col2:
-        create_metric_card("Pending", pending_requests, "⏳")
+        create_metric_card("Pending", pending_count, "⏳")
     with col3:
-        create_metric_card("Completed", completed_requests, "✅")
+        create_metric_card("Completed", completed_count, "✅")
     with col4:
-        create_metric_card("Approved", approved_requests, "🏆")
+        create_metric_card("Approved", approved_count, "🏆")
     
     st.divider()
     
@@ -3154,7 +3189,7 @@ def show_ppm_manager_approvals():
                 st.write(f"**Estimated Cost:** {format_ngn(schedule['estimated_cost'])}")
                 st.write(f"**Actual Cost:** {format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else 'N/A'}")
                 st.write(f"**Completed Date:** {schedule['actual_completion_date']}")
-                st.write(f"**User Approved:** {'Yes' if schedule['ppm_approved'] else 'No'}")
+                st.write(f"**User Approved:** {'Yes' if schedule['user_approved'] else 'No'}")
             
             st.write(f"**Description:** {schedule['description']}")
             
@@ -3187,8 +3222,11 @@ def show_ppm_manager_approvals():
             with col1:
                 if st.button("✅ Final Approve PPM", key=f"manager_approve_ppm_{schedule['id']}", 
                            use_container_width=True):
+                    execute_update(
+                        "UPDATE ppm_schedules SET manager_approved = 1 WHERE id = ?",
+                        (schedule['id'],)
+                    )
                     st.success("✅ PPM finally approved!")
-                    # Here you could add additional logic like marking as fully approved
                     st.rerun()
             
             with col2:
@@ -3218,14 +3256,15 @@ def show_vendor_management():
         col1, col2, col3, col4 = st.columns(4)
         
         total_vendors = len(vendors)
-        active_vendors = len(execute_query(
-            "SELECT DISTINCT assigned_vendor FROM maintenance_requests WHERE assigned_vendor IS NOT NULL"
-        ))
+        active_vendors = execute_query(
+            "SELECT COUNT(DISTINCT assigned_vendor) as count FROM maintenance_requests WHERE assigned_vendor IS NOT NULL"
+        )
+        active_count = active_vendors[0]['count'] if active_vendors else 0
         
         with col1:
             create_metric_card("Total Vendors", total_vendors, "🏢")
         with col2:
-            create_metric_card("Active Vendors", active_vendors, "👷")
+            create_metric_card("Active Vendors", active_count, "👷")
         with col3:
             vendor_types = len(set(v['vendor_type'] for v in vendors))
             create_metric_card("Vendor Types", vendor_types, "📊")
@@ -3261,26 +3300,29 @@ def show_vendor_management():
                 assigned_jobs = execute_query(
                     'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ?',
                     (vendor['username'],)
-                )[0]['count']
+                )
+                assigned_count = assigned_jobs[0]['count'] if assigned_jobs else 0
                 
                 completed_jobs = execute_query(
                     'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = ?',
                     (vendor['username'], 'Completed')
-                )[0]['count']
+                )
+                completed_count = completed_jobs[0]['count'] if completed_jobs else 0
                 
                 total_invoices = execute_query(
                     'SELECT SUM(total_amount) as total FROM invoices WHERE vendor_username = ? AND status = ?',
                     (vendor['username'], 'Approved')
-                )[0]['total'] or 0
+                )
+                total_amount = total_invoices[0]['total'] if total_invoices and total_invoices[0]['total'] else 0
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Assigned Jobs", assigned_jobs)
+                    st.metric("Assigned Jobs", assigned_count)
                 with col2:
-                    completion_rate = (completed_jobs / assigned_jobs * 100) if assigned_jobs > 0 else 0
+                    completion_rate = (completed_count / assigned_count * 100) if assigned_count > 0 else 0
                     st.metric("Completion Rate", f"{completion_rate:.1f}%")
                 with col3:
-                    st.metric("Total Revenue", format_ngn(total_invoices))
+                    st.metric("Total Revenue", format_ngn(total_amount))
                 
                 # Action buttons
                 col1, col2 = st.columns(2)
@@ -3547,8 +3589,8 @@ def show_manager_generator_records():
     
     if records:
         # Summary statistics
-        total_hours = sum(r['net_hours'] or 0 for r in records)
-        total_diesel = sum(r['net_diesel_consumed'] or 0 for r in records)
+        total_hours = sum(safe_float(r.get('net_hours'), 0) for r in records)
+        total_diesel = sum(safe_float(r.get('net_diesel_consumed'), 0) for r in records)
         avg_consumption = total_diesel / total_hours if total_hours > 0 else 0
         
         col1, col2, col3, col4 = st.columns(4)
@@ -3566,13 +3608,16 @@ def show_manager_generator_records():
         
         df_data = []
         for record in records[:10]:  # Show last 10 records
+            net_hours = safe_float(record.get('net_hours'), 0)
+            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
+            
             df_data.append({
-                "Date": record['record_date'],
-                "Generator Type": record['generator_type'],
-                "Hours Run": f"{record['net_hours']:.1f}",
-                "Diesel Used": f"{record['net_diesel_consumed']:.1f}L",
-                "Rate": f"{(record['net_diesel_consumed'] or 0) / (record['net_hours'] or 1):.2f}L/hr" if record['net_hours'] else "N/A",
-                "Recorded By": record['recorded_by']
+                "Date": record.get('record_date', ''),
+                "Generator Type": record.get('generator_type', ''),
+                "Hours Run": f"{net_hours:.1f}",
+                "Diesel Used": f"{net_diesel:.1f}L",
+                "Rate": f"{net_diesel / net_hours:.2f}L/hr" if net_hours > 0 else "N/A",
+                "Recorded By": record.get('recorded_by', '')
             })
         
         if df_data:
@@ -3583,17 +3628,17 @@ def show_manager_generator_records():
         all_data = []
         for record in records:
             all_data.append({
-                "Date": record['record_date'],
-                "Generator Type": record['generator_type'],
-                "Opening Hours": record['opening_hours'],
-                "Closing Hours": record['closing_hours'],
-                "Net Hours": record['net_hours'],
-                "Opening Inventory (L)": record['opening_inventory_liters'],
-                "Purchase (L)": record['purchase_liters'],
-                "Closing Inventory (L)": record['closing_inventory_liters'],
-                "Net Diesel (L)": record['net_diesel_consumed'],
-                "Recorded By": record['recorded_by'],
-                "Notes": record['notes']
+                "Date": record.get('record_date', ''),
+                "Generator Type": record.get('generator_type', ''),
+                "Opening Hours": safe_float(record.get('opening_hours'), 0),
+                "Closing Hours": safe_float(record.get('closing_hours'), 0),
+                "Net Hours": safe_float(record.get('net_hours'), 0),
+                "Opening Inventory (L)": safe_float(record.get('opening_inventory_liters'), 0),
+                "Purchase (L)": safe_float(record.get('purchase_liters'), 0),
+                "Closing Inventory (L)": safe_float(record.get('closing_inventory_liters'), 0),
+                "Net Diesel (L)": safe_float(record.get('net_diesel_consumed'), 0),
+                "Recorded By": record.get('recorded_by', ''),
+                "Notes": record.get('notes', '')
             })
         
         df_all = pd.DataFrame(all_data)
