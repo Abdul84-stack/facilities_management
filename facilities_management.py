@@ -1007,7 +1007,8 @@ def show_room_booking():
     
     with st.form("room_booking_form"):
         col1, col2 = st.columns(2)
-                with col1:
+        
+        with col1:
             room_name = st.text_input("Room Name *", placeholder="e.g., Conference Room A")
             room_type = st.selectbox(
                 "Room Type *",
@@ -3617,3 +3618,4 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
