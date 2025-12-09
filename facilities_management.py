@@ -406,7 +406,7 @@ def init_database():
                 invoice_number TEXT UNIQUE NOT NULL,
                 request_id INTEGER,
                 vendor_username TEXT NOT NULL,
-                invoice_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
                 details_of_work TEXT NOT NULL,
                 quantity INTEGER NOT NULL,
                 unit_cost REAL NOT NULL,
@@ -707,6 +707,27 @@ def safe_bool(value, default=False):
     if isinstance(value, str):
         return value.lower() in ['true', '1', 'yes', 'y']
     return default
+
+def safe_date(value, default=None):
+    """Safely convert value to datetime"""
+    try:
+        if value is None or value == '':
+            return default
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, pd.Timestamp):
+            return value.to_pydatetime()
+        if isinstance(value, str):
+            # Try multiple date formats
+            formats = ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%d/%m/%Y', '%m/%d/%Y']
+            for fmt in formats:
+                try:
+                    return datetime.strptime(value, fmt)
+                except:
+                    continue
+        return default
+    except:
+        return default
 
 # =============================================
 # PDF REPORT GENERATION FUNCTIONS
@@ -1727,37 +1748,108 @@ def show_ppm_management_facility_user():
     with tab4:
         show_ppm_approvals_facility_user()
 
-def show_ppm_schedules():
-    st.markdown("### 📋 PPM Schedules Overview")
+def show_assign_vendor_modal(schedule_id, facility_category):
+    """Show modal for assigning vendor to PPM schedule"""
+    st.markdown("---")
+    st.markdown("### 👷 Assign to Vendor")
     
-    # Status filter buttons
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Get vendors for this facility category
+    vendors = execute_query(
+        'SELECT * FROM vendors WHERE vendor_type = ? OR vendor_type LIKE ?',
+        (facility_category, f'%{facility_category}%')
+    )
+    
+    if not vendors:
+        st.warning(f"No vendors found for facility category: {facility_category}")
+        return
+    
+    vendor_options = {f"{v['company_name']} ({v['username']})": v['username'] for v in vendors}
+    selected_vendor_name = st.selectbox("Select Vendor", list(vendor_options.keys()))
+    
+    due_date = st.date_input("Due Date", value=datetime.now() + timedelta(days=7))
+    
+    col1, col2 = st.columns(2)
     with col1:
-        if st.button("All", use_container_width=True):
-            st.session_state.ppm_filter = "All"
+        if st.button("✅ Assign Vendor", use_container_width=True):
+            vendor_username = vendor_options[selected_vendor_name]
+            
+            # Update PPM schedule
+            execute_update(
+                '''UPDATE ppm_schedules 
+                SET assigned_vendor = ?, status = 'WIP' 
+                WHERE id = ?''',
+                (vendor_username, schedule_id)
+            )
+            
+            # Create assignment record
+            execute_update(
+                '''INSERT INTO ppm_assignments 
+                (schedule_id, vendor_username, assigned_date, due_date, assigned_by) 
+                VALUES (?, ?, ?, ?, ?)''',
+                (schedule_id, vendor_username, 
+                 datetime.now().strftime('%Y-%m-%d'),
+                 due_date.strftime('%Y-%m-%d'),
+                 st.session_state.user['username'])
+            )
+            
+            st.success("✅ PPM assigned to vendor successfully!")
+            # Clear modal state
+            if 'show_vendor_modal' in st.session_state:
+                st.session_state.show_vendor_modal = False
+            if 'assigning_schedule_id' in st.session_state:
+                st.session_state.assigning_schedule_id = None
+            st.rerun()
+    
     with col2:
-        if st.button("Not Due", use_container_width=True):
-            st.session_state.ppm_filter = "Not Due"
+        if st.button("❌ Cancel", use_container_width=True, type="secondary"):
+            # Clear modal state
+            if 'show_vendor_modal' in st.session_state:
+                st.session_state.show_vendor_modal = False
+            if 'assigning_schedule_id' in st.session_state:
+                st.session_state.assigning_schedule_id = None
+                def show_ppm_schedules():
+    """Display and manage PPM schedules"""
+    st.markdown("### 📋 PPM Schedules")
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_filter = st.selectbox(
+            "Filter by Status",
+            ["All", "Not Due", "Due Soon", "WIP", "Completed", "Overdue"]
+        )
+    with col2:
+        category_filter = st.selectbox(
+            "Filter by Category",
+            ["All", "Electrical", "HVAC", "Plumbing", "Generator", "Building", "Cleaning", "Security"]
+        )
     with col3:
-        if st.button("Prepare", use_container_width=True):
-            st.session_state.ppm_filter = "Prepare"
-    with col4:
-        if st.button("Due", use_container_width=True):
-            st.session_state.ppm_filter = "Due"
-    with col5:
-        if st.button("Completed", use_container_width=True):
-            st.session_state.ppm_filter = "Completed"
+        frequency_filter = st.selectbox(
+            "Filter by Frequency",
+            ["All", "Daily", "Weekly", "Monthly", "Quarterly", "Bi-annual", "Annual"]
+        )
     
-    # Get filter from session state
-    ppm_filter = st.session_state.get('ppm_filter', 'All')
+    # Build query
+    query = '''SELECT * FROM ppm_schedules WHERE created_by = ?'''
+    params = [st.session_state.user['username']]
     
-    # Build query based on filter
-    query = "SELECT * FROM ppm_schedules"
-    params = []
+    if status_filter != "All":
+        if status_filter == "Due Soon":
+            # Get schedules due in the next 7 days
+            query += " AND status IN ('Not Due', 'Prepare') AND next_maintenance_date BETWEEN date('now') AND date('now', '+7 days')"
+        elif status_filter == "Overdue":
+            query += " AND status = 'Due' AND next_maintenance_date < date('now')"
+        else:
+            query += " AND status = ?"
+            params.append(status_filter)
     
-    if ppm_filter != "All":
-        query += " WHERE status = ?"
-        params.append(ppm_filter)
+    if category_filter != "All":
+        query += " AND facility_category = ?"
+        params.append(category_filter)
+    
+    if frequency_filter != "All":
+        query += " AND frequency = ?"
+        params.append(frequency_filter)
     
     query += " ORDER BY next_maintenance_date"
     
@@ -1765,136 +1857,199 @@ def show_ppm_schedules():
     
     if schedules:
         for schedule in schedules:
-            # Determine status color
-            status_colors = {
-                "Not Due": "status-not-due",
-                "Prepare": "status-prepare",
-                "Due": "status-due",
-                "Completed": "status-completed",
-                "WIP": "status-wip",
-                "Approved": "status-approved"
-            }
-            
-            status_class = status_colors.get(safe_get(schedule, 'status', ''), "")
-            
-            with st.expander(f"{safe_get(schedule, 'schedule_name', '')} - {safe_get(schedule, 'next_maintenance_date', '')}"):
+            with st.expander(f"{schedule['schedule_name']} - {schedule['status']} - Due: {schedule['next_maintenance_date']}"):
                 col1, col2 = st.columns(2)
-                
                 with col1:
-                    st.write(f"**Facility:** {safe_get(schedule, 'facility_category', '')}")
-                    st.write(f"**Sub-Category:** {safe_get(schedule, 'sub_category', '')}")
-                    st.write(f"**Frequency:** {safe_get(schedule, 'frequency', '')}")
-                    st.write(f"**Assigned Vendor:** {safe_get(schedule, 'assigned_vendor', 'Not assigned')}")
+                    st.write(f"**Category:** {schedule['facility_category']}")
+                    st.write(f"**Sub-Category:** {schedule['sub_category']}")
+                    st.write(f"**Frequency:** {schedule['frequency']}")
+                    
+                    # Status badge with color
+                    status = schedule['status']
+                    status_colors = {
+                        'Not Due': '🟢',
+                        'Prepare': '🟡',
+                        'Due': '🟠',
+                        'WIP': '🔵',
+                        'Completed': '🟣',
+                        'Overdue': '🔴'
+                    }
+                    st.write(f"**Status:** {status_colors.get(status, '⚪')} {status}")
+                    
+                    if schedule['assigned_vendor']:
+                        st.write(f"**Assigned Vendor:** {schedule['assigned_vendor']}")
                 
                 with col2:
-                    st.write(f"**Status:** <span class='{status_class}'>{safe_get(schedule, 'status', '')}</span>", unsafe_allow_html=True)
-                    st.write(f"**Created By:** {safe_get(schedule, 'created_by', '')}")
-                    st.write(f"**Created Date:** {safe_get(schedule, 'created_date', '')}")
-                    if safe_get(schedule, 'estimated_cost'):
-                        st.write(f"**Est. Cost:** {format_ngn(safe_get(schedule, 'estimated_cost', 0))}")
+                    if schedule['estimated_duration_hours']:
+                        st.write(f"**Est. Duration:** {schedule['estimated_duration_hours']} hours")
+                    if schedule['estimated_cost']:
+                        st.write(f"**Est. Cost:** {format_ngn(schedule['estimated_cost'])}")
+                    
+                    if schedule['actual_completion_date']:
+                        st.write(f"**Completed On:** {schedule['actual_completion_date']}")
+                    if schedule['actual_cost']:
+                        st.write(f"**Actual Cost:** {format_ngn(schedule['actual_cost'])}")
                 
-                st.write(f"**Description:** {safe_get(schedule, 'description', '')}")
+                st.write(f"**Description:**")
+                st.info(schedule['description'])
                 
-                if safe_get(schedule, 'notes'):
-                    st.write(f"**Notes:** {safe_get(schedule, 'notes', '')}")
+                if schedule['notes']:
+                    st.write(f"**Notes:**")
+                    st.warning(schedule['notes'])
                 
-                # Action buttons based on status
-                col1, col2, col3 = st.columns(3)
+                # Action buttons
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    if safe_get(schedule, 'status') == 'Not Due' and st.button("🔄 Mark as Prepare", key=f"prep_{schedule['id']}"):
-                        execute_update(
-                            "UPDATE ppm_schedules SET status = 'Prepare' WHERE id = ?",
-                            (schedule['id'],)
-                        )
-                        st.success("✅ Status updated to Prepare")
-                        st.rerun()
+                    if schedule['status'] in ['Not Due', 'Prepare'] and not schedule['assigned_vendor']:
+                        if st.button("👷 Assign Vendor", key=f"assign_{schedule['id']}", use_container_width=True):
+                            st.session_state.show_vendor_modal = True
+                            st.session_state.assigning_schedule_id = schedule['id']
+                            st.rerun()
                 
                 with col2:
-                    if safe_get(schedule, 'status') in ['Prepare', 'Due'] and st.button("⚡ Assign to Vendor", key=f"assign_{schedule['id']}"):
-                        st.session_state.assigning_schedule_id = schedule['id']
-                        st.rerun()
+                    if schedule['status'] == 'WIP' and schedule['assigned_vendor']:
+                        if st.button("✅ Mark Complete", key=f"complete_{schedule['id']}", use_container_width=True):
+                            st.session_state.completing_schedule_id = schedule['id']
+                            st.rerun()
                 
                 with col3:
-                    if safe_get(schedule, 'status') == 'Completed' and safe_get(schedule, 'user_approved', 0) == 0:
-                        if st.button("✅ Approve PPM", key=f"approve_ppm_{schedule['id']}"):
-                            execute_update(
-                                "UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?",
-                                (schedule['id'],)
-                            )
-                            st.success("✅ PPM approved!")
-                            st.rerun()
-                    
-                    # PDF Download for completed PPM
-                    if safe_get(schedule, 'status') == 'Completed':
-                        pdf_buffer = create_ppm_pdf_report(schedule['id'])
-                        if pdf_buffer:
-                            st.download_button(
-                                label="📥 Download PPM Report",
-                                data=pdf_buffer,
-                                file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                                mime="application/pdf",
-                                key=f"ppm_pdf_{schedule['id']}"
-                            )
+                    if st.button("📝 Edit", key=f"edit_{schedule['id']}", use_container_width=True, type="secondary"):
+                        st.session_state.editing_schedule_id = schedule['id']
+                        st.rerun()
+                
+                with col4:
+                    if st.button("🗑️ Delete", key=f"delete_{schedule['id']}", use_container_width=True, type="secondary"):
+                        execute_update("DELETE FROM ppm_schedules WHERE id = ?", (schedule['id'],))
+                        st.success("✅ Schedule deleted!")
+                        st.rerun()
     else:
         st.info("📭 No PPM schedules found")
+    
+    # Handle vendor assignment modal
+    if st.session_state.get('show_vendor_modal') and st.session_state.get('assigning_schedule_id'):
+        schedule_id = st.session_state.assigning_schedule_id
+        schedule = execute_query('SELECT * FROM ppm_schedules WHERE id = ?', (schedule_id,))
+        if schedule:
+            schedule = schedule[0]
+            show_assign_vendor_modal(schedule_id, schedule['facility_category'])
+    
+    # Handle schedule completion
+    if st.session_state.get('completing_schedule_id'):
+        schedule_id = st.session_state.completing_schedule_id
+        show_complete_ppm_modal(schedule_id)
+
+def show_complete_ppm_modal(schedule_id):
+    """Modal for completing PPM schedule"""
+    st.markdown("---")
+    st.markdown("### ✅ Complete PPM Schedule")
+    
+    with st.form(f"complete_ppm_{schedule_id}"):
+        actual_completion_date = st.date_input("Completion Date", value=datetime.now())
+        actual_cost = st.number_input("Actual Cost (₦)", min_value=0.0, step=1000.0)
+        completion_notes = st.text_area("Completion Notes", placeholder="Details of work completed...")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("✅ Complete PPM", use_container_width=True)
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
+        
+        if submit:
+            if not completion_notes:
+                st.error("❌ Please provide completion notes")
+            else:
+                # Update schedule
+                execute_update('''
+                    UPDATE ppm_schedules 
+                    SET status = 'Completed',
+                        actual_completion_date = ?,
+                        actual_cost = ?,
+                        notes = COALESCE(notes || '\n\nCompletion: ' || ?, ?)
+                    WHERE id = ?
+                ''', (
+                    actual_completion_date.strftime('%Y-%m-%d'),
+                    actual_cost,
+                    completion_notes,
+                    completion_notes,
+                    schedule_id
+                ))
+                
+                # Update assignment
+                execute_update('''
+                    UPDATE ppm_assignments 
+                    SET status = 'Completed',
+                        completed_date = ?,
+                        completion_notes = ?
+                    WHERE schedule_id = ? AND status = 'Assigned'
+                ''', (
+                    actual_completion_date.strftime('%Y-%m-%d'),
+                    completion_notes,
+                    schedule_id
+                ))
+                
+                st.success("✅ PPM marked as completed!")
+                st.session_state.completing_schedule_id = None
+                st.rerun()
+        
+        if cancel:
+            st.session_state.completing_schedule_id = None
+            st.rerun()
 
 def show_new_ppm_schedule():
+    """Form to create new PPM schedule"""
     st.markdown("### ➕ Create New PPM Schedule")
     
-    with st.form("new_ppm_schedule_form"):
+    with st.form("new_ppm_schedule"):
         col1, col2 = st.columns(2)
         
         with col1:
-            schedule_name = st.text_input("Schedule Name *", placeholder="e.g., Monthly AC Maintenance")
+            schedule_name = st.text_input("Schedule Name *", placeholder="e.g., Monthly HVAC Maintenance")
             facility_category = st.selectbox(
                 "Facility Category *",
-                ["HVAC", "Electrical", "Plumbing", "Generator", "Fire Safety", 
-                 "Elevator", "Building Structure", "Cleaning", "Security", "Other"]
+                ["Electrical", "HVAC", "Plumbing", "Generator", "Building", "Cleaning", "Security", "Fire Safety", "Other"]
             )
-            sub_category = st.text_input("Sub-Category", placeholder="e.g., Split Units, Chillers")
-            frequency = st.selectbox(
-                "Frequency *",
-                ["Daily", "Weekly", "Monthly", "Quarterly", "Bi-annual", "Annual", "Custom"]
-            )
+            sub_category = st.text_input("Sub-Category *", placeholder="e.g., AC Units, Chillers, etc.")
         
         with col2:
+            frequency = st.selectbox(
+                "Frequency *",
+                ["Daily", "Weekly", "Monthly", "Quarterly", "Bi-annual", "Annual"]
+            )
             next_maintenance_date = st.date_input("Next Maintenance Date *", 
                                                   value=datetime.now() + timedelta(days=30))
-            estimated_duration = st.number_input("Estimated Duration (hours)", 
-                                                 min_value=1, value=2)
-            estimated_cost = st.number_input("Estimated Cost (₦)", 
-                                            min_value=0.0, value=0.0, step=1000.0)
-            assigned_vendor = st.selectbox(
-                "Assign to Vendor (Optional)",
-                ["", "hvac_vendor", "generator_vendor", "electrical_vendor", 
-                 "plumbing_vendor", "building_vendor"]
-            )
+        
+        # Additional fields
+        col1, col2 = st.columns(2)
+        with col1:
+            estimated_duration_hours = st.number_input("Estimated Duration (hours)", min_value=0, value=2)
+        with col2:
+            estimated_cost = st.number_input("Estimated Cost (₦)", min_value=0.0, value=0.0)
         
         description = st.text_area("Description *", 
-                                  placeholder="Detailed description of maintenance activities...",
-                                  height=100)
-        notes = st.text_area("Additional Notes", 
-                            placeholder="Special instructions, requirements...",
-                            height=80)
+                                   placeholder="Detailed description of maintenance activities...")
+        notes = st.text_area("Notes", 
+                             placeholder="Any special instructions or requirements...")
         
-        submitted = st.form_submit_button("💾 Save PPM Schedule", use_container_width=True)
+        submitted = st.form_submit_button("✅ Create PPM Schedule", use_container_width=True)
         
         if submitted:
-            if not all([schedule_name, facility_category, frequency, description]):
+            if not all([schedule_name, facility_category, sub_category, frequency, description]):
                 st.error("❌ Please fill in all required fields (*)")
             else:
-                success = execute_update(
-                    '''INSERT INTO ppm_schedules 
-                    (schedule_name, facility_category, sub_category, frequency,
-                     next_maintenance_date, estimated_duration_hours, estimated_cost,
-                     assigned_vendor, description, notes, created_by) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (schedule_name, facility_category, sub_category, frequency,
-                     next_maintenance_date.strftime('%Y-%m-%d'), estimated_duration,
-                     estimated_cost, assigned_vendor if assigned_vendor else None,
-                     description, notes, st.session_state.user['username'])
-                )
+                success = execute_update('''
+                    INSERT INTO ppm_schedules 
+                    (schedule_name, facility_category, sub_category, frequency, 
+                     next_maintenance_date, description, notes, estimated_duration_hours,
+                     estimated_cost, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    schedule_name, facility_category, sub_category, frequency,
+                    next_maintenance_date.strftime('%Y-%m-%d'), description, notes,
+                    estimated_duration_hours, estimated_cost,
+                    st.session_state.user['username']
+                ))
+                
                 if success:
                     st.success("✅ PPM schedule created successfully!")
                     st.rerun()
@@ -1902,10 +2057,14 @@ def show_new_ppm_schedule():
                     st.error("❌ Failed to create schedule")
 
 def show_ppm_analytics():
-    st.markdown("### 📊 PPM Analytics Dashboard")
+    """Display PPM analytics and reports"""
+    st.markdown("### 📊 PPM Analytics")
     
-    # Get all PPM schedules
-    schedules = execute_query("SELECT * FROM ppm_schedules")
+    # Get all PPM schedules for this user
+    schedules = execute_query(
+        'SELECT * FROM ppm_schedules WHERE created_by = ?',
+        (st.session_state.user['username'],)
+    )
     
     if not schedules:
         st.info("📭 No PPM data available for analytics")
@@ -1913,25 +2072,25 @@ def show_ppm_analytics():
     
     df = pd.DataFrame(schedules)
     
-    # Key metrics
+    # Metrics
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         total_ppm = len(df)
-        create_metric_card("Total PPMs", total_ppm, "📅")
+        create_metric_card("Total PPM", total_ppm, "📋")
     
     with col2:
-        due_ppm = len(df[df['status'] == 'Due'])
-        create_metric_card("Due Now", due_ppm, "⚠️")
+        completed = df[df['status'] == 'Completed'].shape[0]
+        completion_rate = (completed / total_ppm * 100) if total_ppm > 0 else 0
+        create_metric_card("Completion Rate", f"{completion_rate:.1f}%", "✅")
     
     with col3:
-        completed_ppm = len(df[df['status'] == 'Completed'])
-        completion_rate = (completed_ppm / total_ppm * 100) if total_ppm > 0 else 0
-        create_metric_card("Completion Rate", f"{completion_rate:.1f}%", "✅")
+        overdue = df[df['status'] == 'Overdue'].shape[0]
+        create_metric_card("Overdue", overdue, "⚠️")
     
     with col4:
         total_estimated_cost = df['estimated_cost'].sum()
-        create_metric_card("Total Est. Cost", format_ngn(total_estimated_cost), "💰")
+        create_metric_card("Est. Budget", format_ngn(total_estimated_cost), "💰")
     
     st.divider()
     
@@ -1941,134 +2100,165 @@ def show_ppm_analytics():
     status_counts.columns = ['Status', 'Count']
     
     fig1 = px.pie(status_counts, values='Count', names='Status',
-                  title="PPM by Status",
-                  color='Status',
-                  color_discrete_sequence=px.colors.qualitative.Set2)
+                  title="PPM Schedules by Status",
+                  hole=0.3)
     st.plotly_chart(fig1, use_container_width=True)
     
-    # Monthly due schedule
-    st.markdown("#### 📅 Monthly Due Schedule")
-    df['next_maintenance_date'] = pd.to_datetime(df['next_maintenance_date'])
+    # Category distribution
+    st.markdown("#### 🏢 PPM by Facility Category")
+    category_counts = df['facility_category'].value_counts().reset_index()
+    category_counts.columns = ['Category', 'Count']
+    
+    fig2 = px.bar(category_counts, x='Category', y='Count',
+                  title="PPM Schedules by Category",
+                  color='Count', color_continuous_scale='blues')
+    st.plotly_chart(fig2, use_container_width=True)
+    
+    # Monthly schedule
+    st.markdown("#### 📅 Monthly PPM Schedule")
+    
+    # Get current month's schedules
     current_month = datetime.now().month
     current_year = datetime.now().year
     
-    monthly_ppm = df[(df['next_maintenance_date'].dt.month == current_month) & 
-                     (df['next_maintenance_date'].dt.year == current_year)]
+    month_schedules = []
+    for schedule in schedules:
+        try:
+            due_date = datetime.strptime(schedule['next_maintenance_date'], '%Y-%m-%d')
+            if due_date.month == current_month and due_date.year == current_year:
+                month_schedules.append({
+                    'Date': schedule['next_maintenance_date'],
+                    'Schedule': schedule['schedule_name'],
+                    'Category': schedule['facility_category'],
+                    'Status': schedule['status'],
+                    'Vendor': schedule['assigned_vendor'] or 'Not assigned'
+                })
+        except:
+            continue
     
-    if not monthly_ppm.empty:
-        monthly_summary = monthly_ppm.groupby(['facility_category', 'status']).size().unstack(fill_value=0)
+    if month_schedules:
+        month_df = pd.DataFrame(month_schedules)
+        month_df = month_df.sort_values('Date')
         
-        fig2 = px.bar(monthly_summary, 
-                      title=f"PPM Due for {calendar.month_name[current_month]} {current_year}",
-                      labels={'value': 'Count', 'facility_category': 'Facility Category'},
-                      barmode='group')
-        st.plotly_chart(fig2, use_container_width=True)
+        fig3 = px.timeline(month_df, x_start='Date', x_end='Date', y='Schedule',
+                           color='Status', title=f"PPM Schedule for {calendar.month_name[current_month]} {current_year}",
+                           hover_data=['Category', 'Vendor'])
+        fig3.update_yaxes(autorange="reversed")
+        st.plotly_chart(fig3, use_container_width=True)
+        
+        # Display as table
+        st.dataframe(month_df, use_container_width=True, hide_index=True)
     else:
-        st.info(f"📭 No PPM scheduled for {calendar.month_name[current_month]} {current_year}")
+        st.info(f"📭 No PPM schedules for {calendar.month_name[current_month]}")
     
-    # Cost analysis by facility category
-    st.markdown("#### 💰 Estimated Cost by Facility Category")
-    cost_by_category = df.groupby('facility_category')['estimated_cost'].sum().reset_index()
+    # Download report
+    st.divider()
+    st.markdown("#### 📥 Download Reports")
     
-    fig3 = px.bar(cost_by_category, x='facility_category', y='estimated_cost',
-                  title="Estimated Cost Distribution",
-                  labels={'estimated_cost': 'Estimated Cost (₦)', 'facility_category': 'Facility Category'})
-    st.plotly_chart(fig3, use_container_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📊 Export PPM Data as CSV", use_container_width=True):
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"ppm_data_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+    
+    with col2:
+        if st.button("📋 Generate PPM Summary Report", use_container_width=True):
+            # Create a summary report
+            summary = {
+                'Total PPM Schedules': [total_ppm],
+                'Completed': [completed],
+                'Pending': [total_ppm - completed],
+                'Overdue': [overdue],
+                'Total Estimated Budget': [format_ngn(total_estimated_cost)],
+                'Report Date': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+            }
+            summary_df = pd.DataFrame(summary)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
 def show_ppm_approvals_facility_user():
-    """Facility user approval for PPM completion"""
-    st.markdown("### ✅ PPM Completion Approvals")
+    """Show PPM schedules that need user approval"""
+    st.markdown("### ✅ PPM Approvals")
+    st.markdown("Review and approve completed PPM schedules")
     
-    # Get PPM schedules that need user approval
-    ppm_schedules = get_ppm_for_user_approval(st.session_state.user['username'])
+    ppm_for_approval = get_ppm_for_user_approval(st.session_state.user['username'])
     
-    if not ppm_schedules:
-        st.info("📭 No PPM schedules awaiting your approval")
+    if not ppm_for_approval:
+        st.success("🎉 No PPM schedules pending your approval!")
         return
     
-    for schedule in ppm_schedules:
-        with st.expander(f"📋 {safe_get(schedule, 'schedule_name', '')} - Completed: {safe_get(schedule, 'actual_completion_date', '')}"):
+    for ppm in ppm_for_approval:
+        with st.expander(f"{ppm['schedule_name']} - Completed: {ppm['actual_completion_date']}"):
             col1, col2 = st.columns(2)
-            
             with col1:
-                st.write(f"**Facility:** {safe_get(schedule, 'facility_category', '')}")
-                st.write(f"**Sub-Category:** {safe_get(schedule, 'sub_category', '')}")
-                st.write(f"**Frequency:** {safe_get(schedule, 'frequency', '')}")
-                st.write(f"**Assigned Vendor:** {safe_get(schedule, 'assigned_vendor', '')}")
+                st.write(f"**Category:** {ppm['facility_category']}")
+                st.write(f"**Sub-Category:** {ppm['sub_category']}")
+                st.write(f"**Completed By:** {ppm['assigned_vendor'] or 'N/A'}")
+                st.write(f"**Actual Cost:** {format_ngn(ppm['actual_cost']) if ppm['actual_cost'] else 'N/A'}")
             
             with col2:
-                st.write(f"**Estimated Cost:** {format_ngn(safe_get(schedule, 'estimated_cost', 0))}")
-                st.write(f"**Actual Cost:** {format_ngn(safe_get(schedule, 'actual_cost', 0)) if safe_get(schedule, 'actual_cost') else 'N/A'}")
-                st.write(f"**Completed Date:** {safe_get(schedule, 'actual_completion_date', '')}")
-                st.write(f"**Status:** {safe_get(schedule, 'status', '')}")
+                st.write(f"**Frequency:** {ppm['frequency']}")
+                st.write(f"**Completion Date:** {ppm['actual_completion_date']}")
+                st.write(f"**Next Due:** {ppm['next_maintenance_date']}")
             
-            st.write(f"**Description:** {safe_get(schedule, 'description', '')}")
-            
-            if safe_get(schedule, 'notes'):
-                st.write(f"**Notes:** {safe_get(schedule, 'notes', '')}")
-            
-            # Get assignment details
+            # Get completion notes from assignment
             assignment = execute_query(
                 'SELECT * FROM ppm_assignments WHERE schedule_id = ?',
-                (schedule['id'],)
+                (ppm['id'],)
             )
-            
             if assignment:
-                assignment = assignment[0]
-                st.write(f"**Completion Notes:** {safe_get(assignment, 'completion_notes', '')}")
+                st.write(f"**Completion Notes:**")
+                st.info(assignment[0].get('completion_notes', 'No notes provided'))
             
             # Approval buttons
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("✅ Approve PPM", key=f"user_approve_ppm_{schedule['id']}", 
-                           use_container_width=True):
+                if st.button(f"✅ Approve", key=f"approve_ppm_{ppm['id']}", 
+                           use_container_width=True, type="primary"):
                     execute_update(
-                        "UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?",
-                        (schedule['id'],)
+                        'UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?',
+                        (ppm['id'],)
                     )
-                    st.success("✅ PPM approved successfully!")
+                    st.success("✅ PPM approved! Sent to manager for final approval.")
                     st.rerun()
             
             with col2:
-                if st.button("❌ Request Revision", key=f"user_reject_ppm_{schedule['id']}", 
+                if st.button(f"❌ Reject", key=f"reject_ppm_{ppm['id']}", 
                            use_container_width=True, type="secondary"):
-                    revision_reason = st.text_input(
-                        "Revision Reason",
-                        key=f"ppm_revision_{schedule['id']}",
-                        placeholder="What needs to be revised?"
+                    execute_update(
+                        '''UPDATE ppm_schedules 
+                        SET status = 'WIP', 
+                            notes = COALESCE(notes || '\n\nRejected by user: ' || datetime('now'), 'Rejected by user')
+                        WHERE id = ?''',
+                        (ppm['id'],)
                     )
-                    if revision_reason:
-                        execute_update(
-                            '''UPDATE ppm_schedules SET status = 'WIP' WHERE id = ?''',
-                            (schedule['id'],)
-                        )
-                        execute_update(
-                            '''UPDATE ppm_assignments SET status = 'In Progress', 
-                            completion_notes = ? WHERE schedule_id = ?''',
-                            (f"Revision requested: {revision_reason}", schedule['id'])
-                        )
-                        st.success("✅ Revision requested from vendor")
-                        st.rerun()
+                    st.success("✅ PPM rejected and sent back to vendor.")
+                    st.rerun()
 
 # =============================================
-# GENERATOR RECORDS - FACILITY USER
+# GENERATOR MANAGEMENT - FACILITY USER
 # =============================================
-def show_generator_records_facility_user():
-    st.markdown("<h1 class='app-title'>🔌 Generator Daily Records</h1>", unsafe_allow_html=True)
+def show_generator_management_facility_user():
+    st.markdown("<h1 class='app-title'>⚡ Generator Management</h1>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📝 New Record", "📋 View Records", "📊 Analytics"])
+    tab1, tab2, tab3 = st.tabs(["📝 Daily Records", "📊 Consumption Analysis", "⚠️ Maintenance Alerts"])
     
     with tab1:
-        show_new_generator_record()
+        show_daily_generator_records()
     
     with tab2:
-        show_generator_records()
+        show_generator_consumption_analysis()
     
     with tab3:
-        show_generator_analytics()
+        show_generator_maintenance_alerts()
 
-def show_new_generator_record():
-    st.markdown("### 📝 New Generator Record")
+def show_daily_generator_records():
+    """Record daily generator readings"""
+    st.markdown("### 📝 Daily Generator Readings")
     
     with st.form("generator_record_form"):
         col1, col2 = st.columns(2)
@@ -2077,163 +2267,90 @@ def show_new_generator_record():
             record_date = st.date_input("Record Date *", value=datetime.now())
             generator_type = st.selectbox(
                 "Generator Type *",
-                ["Standby Generator", "Prime Generator", "Portable Generator", "Other"]
+                ["Standby", "Prime", "Portable", "Other"]
             )
-            opening_hours = st.number_input("Opening Hours Reading *", 
-                                           min_value=0.0, step=0.1, format="%.1f")
-            closing_hours = st.number_input("Closing Hours Reading *", 
-                                           min_value=0.0, step=0.1, format="%.1f")
+            opening_hours = st.number_input("Opening Hours Reading *", min_value=0.0, step=0.1)
+            closing_hours = st.number_input("Closing Hours Reading *", min_value=0.0, step=0.1)
         
         with col2:
-            opening_inventory = st.number_input("Opening Inventory (Liters) *", 
-                                               min_value=0.0, step=0.1, format="%.1f")
-            purchase_liters = st.number_input("Purchase/Delivery (Liters)", 
-                                             min_value=0.0, step=0.1, format="%.1f", value=0.0)
-            closing_inventory = st.number_input("Closing Inventory (Liters) *", 
-                                               min_value=0.0, step=0.1, format="%.1f")
+            opening_inventory = st.number_input("Opening Inventory (Liters) *", min_value=0.0, step=10.0)
+            purchase_liters = st.number_input("Purchase/Delivery (Liters)", min_value=0.0, step=10.0)
+            closing_inventory = st.number_input("Closing Inventory (Liters) *", min_value=0.0, step=10.0)
         
-        recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'])
-        notes = st.text_area("Notes", placeholder="Any observations, issues, or maintenance notes...")
+        notes = st.text_area("Notes", placeholder="Any observations or issues...")
         
-        submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save Daily Record", use_container_width=True)
         
         if submitted:
-            # Calculate derived values
+            # Validate inputs
+            if closing_hours < opening_hours:
+                st.error("❌ Closing hours cannot be less than opening hours")
+                return
+            
+            if closing_inventory > (opening_inventory + purchase_liters):
+                st.error("❌ Closing inventory cannot be more than opening + purchase")
+                return
+            
+            # Calculate net values
             net_hours = closing_hours - opening_hours
             net_diesel_consumed = (opening_inventory + purchase_liters) - closing_inventory
             
-            if not all([generator_type, recorded_by]):
-                st.error("❌ Please fill in all required fields (*)")
-            elif closing_hours < opening_hours:
-                st.error("❌ Closing hours must be greater than opening hours")
-            elif net_diesel_consumed < 0:
-                st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
+            success = execute_update('''
+                INSERT INTO generator_records 
+                (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                 opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                 net_diesel_consumed, recorded_by, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                record_date.strftime('%Y-%m-%d'), generator_type,
+                opening_hours, closing_hours, net_hours,
+                opening_inventory, purchase_liters, closing_inventory,
+                net_diesel_consumed, st.session_state.user['username'], notes
+            ))
+            
+            if success:
+                st.success("✅ Daily generator record saved successfully!")
+                st.rerun()
             else:
-                success = execute_update(
-                    '''INSERT INTO generator_records 
-                    (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                     opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                     net_diesel_consumed, recorded_by, notes) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
-                     net_hours, opening_inventory, purchase_liters, closing_inventory,
-                     net_diesel_consumed, recorded_by, notes)
-                )
-                if success:
-                    st.success("✅ Generator record saved successfully!")
-                    
-                    # Show summary
-                    st.markdown("#### 📊 Record Summary")
-                    summary_col1, summary_col2 = st.columns(2)
-                    with summary_col1:
-                        st.write(f"**Net Hours Run:** {net_hours:.1f} hours")
-                        st.write(f"**Net Diesel Consumed:** {net_diesel_consumed:.1f} liters")
-                    with summary_col2:
-                        if net_hours > 0:
-                            consumption_rate = net_diesel_consumed / net_hours
-                            st.write(f"**Consumption Rate:** {consumption_rate:.2f} liters/hour")
-                        st.write(f"**Recorded By:** {recorded_by}")
-                    
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to save record")
-
-def show_generator_records():
-    st.markdown("### 📋 Generator Records History")
+                st.error("❌ Failed to save record")
     
-    # Date range filter
+    # Display recent records
+    st.markdown("### 📋 Recent Records")
+    records = execute_query('''
+        SELECT * FROM generator_records 
+        ORDER BY record_date DESC 
+        LIMIT 10
+    ''')
+    
+    if records:
+        for record in records:
+            with st.expander(f"{record['record_date']} - {record['generator_type']} - Hours: {record['net_hours']:.1f}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Opening Hours:** {record['opening_hours']}")
+                    st.write(f"**Closing Hours:** {record['closing_hours']}")
+                    st.write(f"**Net Hours:** {record['net_hours']}")
+                
+                with col2:
+                    st.write(f"**Diesel Consumed:** {record['net_diesel_consumed']} liters")
+                    st.write(f"**Recorded By:** {record['recorded_by']}")
+                    if record['notes']:
+                        st.write(f"**Notes:** {record['notes']}")
+    else:
+        st.info("📭 No generator records found")
+
+def show_generator_consumption_analysis():
+    """Analyze generator consumption patterns"""
+    st.markdown("### 📊 Generator Consumption Analysis")
+    
+    # Date range selector
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Start Date", 
-                                   value=datetime.now() - timedelta(days=30))
+        start_date = st.date_input("Start Date", value=datetime.now() - timedelta(days=30))
     with col2:
         end_date = st.date_input("End Date", value=datetime.now())
     
-    # Generator type filter
-    generator_types = execute_query("SELECT DISTINCT generator_type FROM generator_records")
-    generator_type_list = ["All"] + [g['generator_type'] for g in generator_types if g['generator_type']]
-    
-    selected_type = st.selectbox("Filter by Generator Type", generator_type_list)
-    
-    # Build query
-    query = '''
-        SELECT * FROM generator_records 
-        WHERE record_date BETWEEN ? AND ?
-    '''
-    params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
-    
-    if selected_type != "All":
-        query += " AND generator_type = ?"
-        params.append(selected_type)
-    
-    query += " ORDER BY record_date DESC"
-    
-    records = execute_query(query, tuple(params))
-    
-    if records:
-        # Convert to DataFrame for display
-        df_data = []
-        total_hours = 0
-        total_diesel = 0
-        
-        for record in records:
-            net_hours = safe_float(record.get('net_hours'), 0)
-            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
-            
-            df_data.append({
-                "Date": record.get('record_date', ''),
-                "Generator Type": record.get('generator_type', ''),
-                "Opening Hours": f"{safe_float(record.get('opening_hours'), 0):.1f}",
-                "Closing Hours": f"{safe_float(record.get('closing_hours'), 0):.1f}",
-                "Net Hours": f"{net_hours:.1f}",
-                "Opening Inventory": f"{safe_float(record.get('opening_inventory_liters'), 0):.1f}L",
-                "Closing Inventory": f"{safe_float(record.get('closing_inventory_liters'), 0):.1f}L",
-                "Net Diesel": f"{net_diesel:.1f}L",
-                "Recorded By": record.get('recorded_by', '')
-            })
-            
-            total_hours += net_hours
-            total_diesel += net_diesel
-        
-        df = pd.DataFrame(df_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Summary statistics
-        st.markdown("#### 📊 Summary Statistics")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Records", len(records))
-        with col2:
-            st.metric("Total Hours Run", f"{total_hours:.1f}")
-        with col3:
-            st.metric("Total Diesel Used", f"{total_diesel:.1f}L")
-        with col4:
-            if total_hours > 0:
-                avg_consumption = total_diesel / total_hours
-                st.metric("Avg Consumption", f"{avg_consumption:.2f}L/hr")
-            else:
-                st.metric("Avg Consumption", "N/A")
-        
-        # Export option
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Export as CSV",
-            data=csv,
-            file_name=f"generator_records_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    else:
-        st.info("📭 No generator records found for the selected period")
-
-def show_generator_analytics():
-    st.markdown("### 📊 Generator Analytics")
-    
-    # Get data for the last 90 days
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=90)
-    
+    # Get data for the period
     records = execute_query('''
         SELECT * FROM generator_records 
         WHERE record_date BETWEEN ? AND ?
@@ -2241,1868 +2358,318 @@ def show_generator_analytics():
     ''', (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
     
     if not records:
-        st.info("📭 No generator data available for analytics")
+        st.info("📭 No generator data available for the selected period")
         return
     
     df = pd.DataFrame(records)
-    df['record_date'] = pd.to_datetime(df['record_date'])
     
-    # Key metrics
+    # Metrics
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         total_hours = df['net_hours'].sum()
-        create_metric_card("Total Hours", f"{total_hours:.0f}", "⏱️")
+        create_metric_card("Total Hours", f"{total_hours:.1f}", "⏱️")
     
     with col2:
         total_diesel = df['net_diesel_consumed'].sum()
-        create_metric_card("Total Diesel", f"{total_diesel:.0f}L", "⛽")
+        create_metric_card("Diesel Used", f"{total_diesel:.0f}L", "⛽")
     
     with col3:
-        avg_daily_hours = total_hours / len(df['record_date'].unique()) if len(df['record_date'].unique()) > 0 else 0
-        create_metric_card("Avg Daily Hours", f"{avg_daily_hours:.1f}", "📈")
+        avg_hours_per_day = df['net_hours'].mean()
+        create_metric_card("Avg Hours/Day", f"{avg_hours_per_day:.1f}", "📅")
     
     with col4:
-        if total_hours > 0:
-            avg_consumption = total_diesel / total_hours
-            create_metric_card("Avg Consumption", f"{avg_consumption:.2f}L/hr", "⚡")
-        else:
-            create_metric_card("Avg Consumption", "N/A", "⚡")
+        efficiency = total_diesel / total_hours if total_hours > 0 else 0
+        create_metric_card("Efficiency", f"{efficiency:.2f}L/hour", "📈")
     
     st.divider()
     
-    # Daily hours trend
-    st.markdown("#### 📈 Daily Running Hours Trend")
-    daily_data = df.groupby('record_date').agg({
+    # Consumption trend
+    st.markdown("#### 📈 Daily Consumption Trend")
+    
+    # Ensure record_date is datetime
+    df['record_date'] = pd.to_datetime(df['record_date'])
+    
+    # Create daily summary
+    daily_summary = df.groupby('record_date').agg({
         'net_hours': 'sum',
         'net_diesel_consumed': 'sum'
     }).reset_index()
     
-    fig1 = px.line(daily_data, x='record_date', y='net_hours',
-                   title="Daily Generator Running Hours",
-                   labels={'net_hours': 'Hours', 'record_date': 'Date'})
+    # Plot
+    fig1 = px.line(daily_summary, x='record_date', y=['net_hours', 'net_diesel_consumed'],
+                   title="Daily Generator Hours and Diesel Consumption",
+                   labels={'value': 'Amount', 'variable': 'Metric'},
+                   height=400)
     st.plotly_chart(fig1, use_container_width=True)
     
-    # Consumption analysis
-    st.markdown("#### ⛽ Diesel Consumption Analysis")
+    # Efficiency analysis
+    st.markdown("#### 📊 Efficiency Analysis")
+    daily_summary['efficiency'] = daily_summary['net_diesel_consumed'] / daily_summary['net_hours']
     
-    if total_hours > 0:
-        # Calculate consumption rate
-        daily_data['consumption_rate'] = daily_data['net_diesel_consumed'] / daily_data['net_hours']
-        
-        fig2 = px.scatter(daily_data, x='net_hours', y='net_diesel_consumed',
-                         title="Hours vs Diesel Consumption",
-                         labels={'net_hours': 'Running Hours', 'net_diesel_consumed': 'Diesel (L)'},
-                         trendline="ols")
-        st.plotly_chart(fig2, use_container_width=True)
-        
-        # Show correlation
-        correlation = daily_data['net_hours'].corr(daily_data['net_diesel_consumed'])
-        st.write(f"**Correlation between hours and diesel consumption:** {correlation:.3f}")
+    fig2 = px.scatter(daily_summary, x='record_date', y='efficiency',
+                      title="Daily Efficiency (Liters per Hour)",
+                      trendline="ols",
+                      labels={'efficiency': 'Liters per Hour'})
+    st.plotly_chart(fig2, use_container_width=True)
     
-    # Monthly summary
-    st.markdown("#### 📅 Monthly Summary")
-    df['month'] = df['record_date'].dt.strftime('%Y-%m')
-    monthly_data = df.groupby('month').agg({
+    # Generator type breakdown
+    st.markdown("#### ⚡ Generator Type Breakdown")
+    type_summary = df.groupby('generator_type').agg({
         'net_hours': 'sum',
         'net_diesel_consumed': 'sum'
     }).reset_index()
-    
-    fig3 = px.bar(monthly_data, x='month', y=['net_hours', 'net_diesel_consumed'],
-                  title="Monthly Hours and Diesel Usage",
-                  barmode='group',
-                  labels={'value': 'Amount', 'variable': 'Metric'})
-    st.plotly_chart(fig3, use_container_width=True)
-
-# =============================================
-# VENDOR DASHBOARD - ENHANCED
-# =============================================
-def show_vendor_dashboard():
-    st.markdown("<h1 class='app-title'>👷‍♂️ Vendor Dashboard</h1>", unsafe_allow_html=True)
-    
-    user_info = st.session_state.user
-    vendor_username = user_info['username']
-    
-    # Get vendor details
-    vendor_details = execute_query(
-        'SELECT * FROM vendors WHERE username = ?',
-        (vendor_username,)
-    )
-    
-    if vendor_details:
-        vendor = vendor_details[0]
-        
-        # Display vendor info
-        with st.expander("ℹ️ Vendor Information", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"**Company:** {vendor['company_name']}")
-                st.write(f"**Contact:** {vendor['contact_person']}")
-                st.write(f"**Email:** {vendor['email']}")
-                st.write(f"**Phone:** {vendor['phone']}")
-            with col2:
-                st.write(f"**Vendor Type:** {vendor['vendor_type']}")
-                st.write(f"**TIN:** {vendor['tax_identification_number']}")
-                st.write(f"**RC Number:** {vendor['rc_number']}")
-                st.write(f"**Registered:** {vendor['registration_date']}")
-        
-        # Metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        # Get statistics
-        assigned_requests = execute_query(
-            'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ?',
-            (vendor_username,)
-        )
-        assigned_count = assigned_requests[0]['count'] if assigned_requests else 0
-        
-        completed_requests = execute_query(
-            'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = ?',
-            (vendor_username, 'Completed')
-        )
-        completed_count = completed_requests[0]['count'] if completed_requests else 0
-        
-        pending_requests = execute_query(
-            'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = ?',
-            (vendor_username, 'Assigned')
-        )
-        pending_count = pending_requests[0]['count'] if pending_requests else 0
-        
-        total_invoice_amount = execute_query(
-            'SELECT SUM(total_amount) as total FROM invoices WHERE vendor_username = ? AND status = ?',
-            (vendor_username, 'Approved')
-        )
-        total_amount = total_invoice_amount[0]['total'] if total_invoice_amount and total_invoice_amount[0]['total'] else 0
-        
-        with col1:
-            create_metric_card("Assigned Jobs", assigned_count, "📋")
-        with col2:
-            create_metric_card("Completed", completed_count, "✅")
-        with col3:
-            create_metric_card("Pending", pending_count, "⏳")
-        with col4:
-            create_metric_card("Total Revenue", format_ngn(total_amount), "💰")
-        
-        # Tabs for different functionalities
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Assigned Jobs", "📤 Submit Invoice", "💼 PPM Assignments", "📊 Performance", "📝 Update Profile"])
-        
-        with tab1:
-            show_vendor_assigned_jobs(vendor_username)
-        
-        with tab2:
-            show_vendor_invoice_submission(vendor_username)
-        
-        with tab3:
-            show_vendor_ppm_assignments(vendor_username)
-        
-        with tab4:
-            show_vendor_performance(vendor_username)
-        
-        with tab5:
-            show_vendor_profile_update(vendor, vendor_username)
-    
-    else:
-        st.error("❌ Vendor details not found. Please contact administrator.")
-
-def show_vendor_assigned_jobs(vendor_username):
-    st.markdown("### 📋 Assigned Maintenance Jobs")
-    
-    # Get assigned jobs
-    jobs = execute_query(
-        'SELECT * FROM maintenance_requests WHERE assigned_vendor = ? ORDER BY created_date DESC',
-        (vendor_username,)
-    )
-    
-    if jobs:
-        for job in jobs:
-            status_color = {
-                'Pending': '🟡',
-                'Assigned': '🔵',
-                'In Progress': '🟠',
-                'Completed': '🟢',
-                'Approved': '✅'
-            }.get(job['status'], '⚪')
-            
-            with st.expander(f"{status_color} {job['title']} - Priority: {job['priority']}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Location:** {job['location']}")
-                    st.write(f"**Facility Type:** {job['facility_type']}")
-                    st.write(f"**Created By:** {job['created_by']}")
-                    st.write(f"**Created Date:** {job['created_date']}")
-                with col2:
-                    st.write(f"**Status:** {job['status']}")
-                    st.write(f"**Priority:** {job['priority']}")
-                    if job['completed_date']:
-                        st.write(f"**Completed Date:** {job['completed_date']}")
-                
-                st.write(f"**Description:** {job['description']}")
-                
-                # Job breakdown if available
-                if job['job_breakdown']:
-                    st.write(f"**Job Breakdown:** {job['job_breakdown']}")
-                
-                # Actions based on status
-                if job['status'] in ['Pending', 'Assigned', 'In Progress']:
-                    st.markdown("---")
-                    st.markdown("#### 🛠️ Job Actions")
-                    
-                    # If job is Pending, first need to accept it
-                    if job['status'] == 'Pending':
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("✅ Accept Job", key=f"accept_{job['id']}", use_container_width=True):
-                                success = execute_update(
-                                    '''UPDATE maintenance_requests 
-                                    SET status = 'Assigned' 
-                                    WHERE id = ?''',
-                                    (job['id'],)
-                                )
-                                if success:
-                                    st.success("✅ Job accepted! You can now start working on it.")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Failed to accept job")
-                        
-                        with col2:
-                            if st.button("❌ Decline Job", key=f"decline_{job['id']}", use_container_width=True, type="secondary"):
-                                decline_reason = st.text_input(
-                                    "Decline Reason",
-                                    key=f"decline_reason_{job['id']}",
-                                    placeholder="Reason for declining..."
-                                )
-                                if decline_reason:
-                                    success = execute_update(
-                                        '''UPDATE maintenance_requests 
-                                        SET status = 'Declined',
-                                            completion_notes = ?
-                                        WHERE id = ?''',
-                                        (f"Declined by vendor: {decline_reason}", job['id'])
-                                    )
-                                    if success:
-                                        st.success("✅ Job declined")
-                                        st.rerun()
-                    else:
-                        # Job is already Assigned or In Progress, show update options
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            new_status = st.selectbox(
-                                "Update Status",
-                                ["In Progress", "Completed", "On Hold"],
-                                key=f"status_{job['id']}"
-                            )
-                        
-                        completion_notes = st.text_area(
-                            "Completion Notes",
-                            placeholder="Describe work done, parts used, materials, time spent, etc.",
-                            key=f"notes_{job['id']}",
-                            height=100
-                        )
-                        
-                        # For Completed status, show invoice option
-                        if new_status == 'Completed':
-                            st.markdown("#### 📋 Job Completion Details")
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                parts_used = st.text_area(
-                                    "Parts Used",
-                                    placeholder="List all parts used...",
-                                    key=f"parts_{job['id']}",
-                                    height=60
-                                )
-                            
-                            with col2:
-                                hours_worked = st.number_input(
-                                    "Hours Worked",
-                                    min_value=0.5,
-                                    value=2.0,
-                                    step=0.5,
-                                    key=f"hours_{job['id']}"
-                                )
-                        
-                        if st.button("💾 Update Job", key=f"update_{job['id']}", use_container_width=True):
-                            if new_status == 'Completed' and not completion_notes:
-                                st.error("❌ Please provide completion notes")
-                            else:
-                                update_query = '''
-                                    UPDATE maintenance_requests 
-                                    SET status = ?, completion_notes = ?
-                                '''
-                                params = [new_status, completion_notes]
-                                
-                                if new_status == 'Completed':
-                                    update_query += ", completed_date = ?"
-                                    params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                                    
-                                    # Add parts and hours to completion notes if provided
-                                    if parts_used:
-                                        params[-1] = f"{completion_notes}\n\nParts Used: {parts_used}\nHours Worked: {hours_worked}"
-                                
-                                update_query += " WHERE id = ?"
-                                params.append(job['id'])
-                                
-                                success = execute_update(update_query, tuple(params))
-                                if success:
-                                    st.success("✅ Job updated successfully!")
-                                    
-                                    # If job is completed, show option to create invoice immediately
-                                    if new_status == 'Completed':
-                                        st.info("🎉 Job marked as completed! You can now submit an invoice in the '📤 Submit Invoice' tab.")
-                                    
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Failed to update job")
-                
-                # Show PDF download for completed jobs
-                if job['status'] == 'Completed':
-                    st.markdown("---")
-                    st.markdown("#### 📄 Job Reports")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        pdf_buffer = create_maintenance_pdf_report(job['id'])
-                        if pdf_buffer:
-                            st.download_button(
-                                label="📥 Download Job Report",
-                                data=pdf_buffer,
-                                file_name=f"job_report_{job['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                                mime="application/pdf",
-                                key=f"job_pdf_{job['id']}"
-                            )
-                    
-                    with col2:
-                        # Check if invoice already exists
-                        existing_invoice = execute_query(
-                            'SELECT * FROM invoices WHERE request_id = ?',
-                            (job['id'],)
-                        )
-                        
-                        if existing_invoice:
-                            st.info("✅ Invoice already submitted")
-                        else:
-                            if st.button("📤 Create Invoice", key=f"create_invoice_{job['id']}", use_container_width=True):
-                                st.session_state.selected_job_for_invoice = job['id']
-                                st.switch_page("?tab=Submit Invoice")
-    else:
-        st.info("📭 No jobs assigned to you yet")
-def show_vendor_invoice_submission(vendor_username):
-    st.markdown("### 📤 Submit Invoice")
-    
-    # Check if a specific job was selected for invoicing
-    if 'selected_job_for_invoice' in st.session_state:
-        selected_job_id = st.session_state.selected_job_for_invoice
-        st.info(f"📋 Creating invoice for Job ID: {selected_job_id}")
-        
-        # Get job details
-        job = execute_query('SELECT * FROM maintenance_requests WHERE id = ?', (selected_job_id,))
-        if job:
-            job = job[0]
-            
-            # Check if invoice already exists
-            existing_invoice = execute_query(
-                'SELECT * FROM invoices WHERE request_id = ?',
-                (selected_job_id,)
-            )
-            
-            if existing_invoice:
-                st.warning("⚠️ An invoice already exists for this job.")
-                st.session_state.selected_job_for_invoice = None
-                st.rerun()
-            else:
-                show_invoice_form(vendor_username, selected_job_id, job)
-                
-                if st.button("❌ Cancel", use_container_width=True):
-                    st.session_state.selected_job_for_invoice = None
-                    st.rerun()
-        else:
-            st.error("❌ Job not found")
-            st.session_state.selected_job_for_invoice = None
-            st.rerun()
-    else:
-        # Get completed jobs without invoices
-        completed_jobs = execute_query('''
-            SELECT * FROM maintenance_requests 
-            WHERE assigned_vendor = ? 
-            AND status = 'Completed'
-            AND id NOT IN (SELECT request_id FROM invoices WHERE request_id IS NOT NULL)
-            ORDER BY completed_date DESC
-        ''', (vendor_username,))
-        
-        if not completed_jobs:
-            st.info("📭 No completed jobs available for invoicing")
-            return
-        
-        # Select job to invoice
-        job_options = {f"{job['title']} (ID: {job['id']})": job['id'] for job in completed_jobs}
-        selected_job_desc = st.selectbox("Select Job to Invoice", list(job_options.keys()))
-        selected_job_id = job_options[selected_job_desc]
-        
-        # Get job details
-        job = next((j for j in completed_jobs if j['id'] == selected_job_id), None)
-        
-        if job:
-            show_invoice_form(vendor_username, selected_job_id, job)
-
-def show_invoice_form(vendor_username, selected_job_id, job):
-    """Show the invoice form for a specific job"""
-    st.info(f"**Selected Job:** {job['title']} | **Location:** {job['location']}")
-    
-    with st.form("invoice_form"):
-        # Generate invoice number
-        invoice_number = f"INV-{vendor_username[:3].upper()}-{datetime.now().strftime('%Y%m%d')}-{selected_job_id}"
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            invoice_date = st.date_input("Invoice Date", value=datetime.now())
-            st.text_input("Invoice Number", value=invoice_number, disabled=True)
-            st.text_input("Vendor Username", value=vendor_username, disabled=True)
-            quantity = st.number_input("Quantity", min_value=1, value=1)
-        
-        with col2:
-            unit_cost = st.number_input("Unit Cost (₦)", min_value=0.0, value=0.0, step=1000.0)
-            labour_charge = st.number_input("Labour Charges (₦)", min_value=0.0, value=0.0, step=1000.0)
-            vat_applicable = st.checkbox("VAT Applicable (7.5%)")
-            details_of_work = st.text_area("Details of Work", value=job['description'])
-        
-        # Calculate amounts
-        amount = quantity * unit_cost
-        vat_amount = (amount + labour_charge) * 0.075 if vat_applicable else 0
-        total_amount = amount + labour_charge + vat_amount
-        
-        # Display calculated amounts
-        st.markdown("### 💰 Amount Summary")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Material Cost", format_ngn(amount))
-        with col2:
-            st.metric("Labour Charges", format_ngn(labour_charge))
-        with col3:
-            st.metric("VAT Amount", format_ngn(vat_amount))
-        with col4:
-            st.metric("Total Amount", format_ngn(total_amount))
-        
-        submitted = st.form_submit_button("📤 Submit Invoice", use_container_width=True)
-        
-        if submitted:
-            if not details_of_work:
-                st.error("❌ Please provide details of work")
-            else:
-                # Check if invoice number already exists
-                existing_invoice = execute_query(
-                    'SELECT * FROM invoices WHERE invoice_number = ?',
-                    (invoice_number,)
-                )
-                
-                if existing_invoice:
-                    st.error("❌ Invoice number already exists. Please try again.")
-                else:
-                    success = execute_update(
-                        '''INSERT INTO invoices 
-                        (invoice_number, request_id, vendor_username, invoice_date,
-                         details_of_work, quantity, unit_cost, amount, labour_charge,
-                         vat_applicable, vat_amount, total_amount) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (invoice_number, selected_job_id, vendor_username,
-                         invoice_date.strftime('%Y-%m-%d'), details_of_work,
-                         quantity, unit_cost, amount, labour_charge,
-                         1 if vat_applicable else 0, vat_amount, total_amount)
-                    )
-                    
-                    if success:
-                        st.success("✅ Invoice submitted successfully!")
-                        
-                        # Update request with invoice info
-                        execute_update(
-                            '''UPDATE maintenance_requests 
-                            SET invoice_amount = ?, invoice_number = ? 
-                            WHERE id = ?''',
-                            (total_amount, invoice_number, selected_job_id)
-                        )
-                        
-                        # Clear the selected job if it was set
-                        if 'selected_job_for_invoice' in st.session_state:
-                            st.session_state.selected_job_for_invoice = None
-                        
-                        # Get the invoice ID for PDF download
-                        new_invoice = execute_query(
-                            'SELECT id FROM invoices WHERE invoice_number = ?',
-                            (invoice_number,)
-                        )
-                        
-                        if new_invoice:
-                            invoice_id = new_invoice[0]['id']
-                            pdf_buffer = create_invoice_pdf(invoice_id)
-                            if pdf_buffer:
-                                st.download_button(
-                                    label="📥 Download Invoice PDF",
-                                    data=pdf_buffer,
-                                    file_name=f"invoice_{invoice_number}.pdf",
-                                    mime="application/pdf"
-                                )
-                        
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to submit invoice")
-def show_vendor_ppm_assignments(vendor_username):
-    st.markdown("### 💼 PPM Assignments")
-    
-    # Get PPM assignments for this vendor
-    assignments = execute_query('''
-        SELECT pa.*, ps.schedule_name, ps.facility_category, ps.sub_category,
-               ps.description, ps.estimated_cost, ps.estimated_duration_hours
-        FROM ppm_assignments pa
-        JOIN ppm_schedules ps ON pa.schedule_id = ps.id
-        WHERE pa.vendor_username = ?
-        ORDER BY pa.due_date
-    ''', (vendor_username,))
-    
-    if assignments:
-        # Status counts
-        status_counts = {}
-        for assignment in assignments:
-            status = assignment['status']
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        # Display status summary
-        st.markdown("#### 📊 Assignment Status")
-        cols = st.columns(len(status_counts))
-        for idx, (status, count) in enumerate(status_counts.items()):
-            with cols[idx]:
-                create_metric_card(status, count, "📋")
-        
-        # Display assignments
-        st.markdown("#### 📋 Your PPM Assignments")
-        for assignment in assignments:
-            with st.expander(f"{assignment['schedule_name']} - Due: {assignment['due_date']}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Facility:** {assignment['facility_category']}")
-                    st.write(f"**Sub-Category:** {assignment['sub_category']}")
-                    st.write(f"**Assigned By:** {assignment['assigned_by']}")
-                    st.write(f"**Assigned Date:** {assignment['assigned_date']}")
-                with col2:
-                    st.write(f"**Status:** {assignment['status']}")
-                    st.write(f"**Due Date:** {assignment['due_date']}")
-                    if assignment['completed_date']:
-                        st.write(f"**Completed:** {assignment['completed_date']}")
-                    if assignment['estimated_cost']:
-                        st.write(f"**Est. Cost:** {format_ngn(assignment['estimated_cost'])}")
-                
-                st.write(f"**Description:** {assignment['description']}")
-                
-                # Update status
-                if assignment['status'] in ['Assigned', 'In Progress']:
-                    st.markdown("---")
-                    new_status = st.selectbox(
-                        "Update Status",
-                        ["In Progress", "Completed"],
-                        key=f"ppm_status_{assignment['id']}"
-                    )
-                    
-                    completion_notes = st.text_area(
-                        "Completion Notes",
-                        placeholder="Describe work done, observations, recommendations...",
-                        key=f"ppm_notes_{assignment['id']}",
-                        height=100
-                    )
-                    
-                    actual_cost = st.number_input(
-                        "Actual Cost (₦)",
-                        min_value=0.0,
-                        value=float(assignment['estimated_cost'] or 0),
-                        step=1000.0,
-                        key=f"actual_cost_{assignment['id']}"
-                    )
-                    
-                    if st.button("💾 Update Assignment", key=f"update_ppm_{assignment['id']}", use_container_width=True):
-                        if new_status == 'Completed' and not completion_notes:
-                            st.error("❌ Please provide completion notes")
-                        else:
-                            update_success = execute_update(
-                                '''UPDATE ppm_assignments 
-                                SET status = ?, completion_notes = ?, completed_date = ?
-                                WHERE id = ?''',
-                                (new_status, completion_notes,
-                                 datetime.now().strftime('%Y-%m-%d') if new_status == 'Completed' else None,
-                                 assignment['id'])
-                            )
-                            
-                            if update_success:
-                                # Also update the main PPM schedule
-                                execute_update(
-                                    '''UPDATE ppm_schedules 
-                                    SET status = ?, actual_completion_date = ?, 
-                                        actual_cost = ?, notes = ?
-                                    WHERE id = ?''',
-                                    (new_status, 
-                                     datetime.now().strftime('%Y-%m-%d') if new_status == 'Completed' else None,
-                                     actual_cost,
-                                     completion_notes,
-                                     assignment['schedule_id'])
-                                )
-                                
-                                st.success("✅ Assignment updated successfully!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Failed to update assignment")
-                
-                # Show PDF download for completed PPM
-                if assignment['status'] == 'Completed':
-                    pdf_buffer = create_ppm_pdf_report(assignment['schedule_id'])
-                    if pdf_buffer:
-                        st.download_button(
-                            label="📥 Download PPM Report",
-                            data=pdf_buffer,
-                            file_name=f"ppm_report_{assignment['schedule_id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            key=f"ppm_pdf_{assignment['id']}"
-                        )
-    else:
-        st.info("📭 No PPM assignments found")
-
-def show_vendor_performance(vendor_username):
-    st.markdown("### 📊 Performance Analytics")
-    
-    # Get performance data
-    jobs_data = execute_query('''
-        SELECT * FROM maintenance_requests 
-        WHERE assigned_vendor = ?
-        ORDER BY created_date DESC
-    ''', (vendor_username,))
-    
-    invoices_data = execute_query('''
-        SELECT * FROM invoices 
-        WHERE vendor_username = ?
-        ORDER BY invoice_date DESC
-    ''', (vendor_username,))
-    
-    if not jobs_data:
-        st.info("📭 No performance data available")
-        return
-    
-    df_jobs = pd.DataFrame(jobs_data)
-    df_invoices = pd.DataFrame(invoices_data) if invoices_data else pd.DataFrame()
-    
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_jobs = len(df_jobs)
-        create_metric_card("Total Jobs", total_jobs, "📋")
-    
-    with col2:
-        completed_jobs = len(df_jobs[df_jobs['status'] == 'Completed'])
-        completion_rate = (completed_jobs / total_jobs * 100) if total_jobs > 0 else 0
-        create_metric_card("Completion Rate", f"{completion_rate:.1f}%", "✅")
-    
-    with col3:
-        if not df_invoices.empty:
-            total_revenue = df_invoices['total_amount'].sum()
-            create_metric_card("Total Revenue", format_ngn(total_revenue), "💰")
-        else:
-            create_metric_card("Total Revenue", "₦0", "💰")
-    
-    with col4:
-        # Calculate average completion time
-        completed_df = df_jobs[df_jobs['status'] == 'Completed']
-        if not completed_df.empty and 'created_date' in completed_df.columns and 'completed_date' in completed_df.columns:
-            try:
-                completed_df['created_date'] = pd.to_datetime(completed_df['created_date'])
-                completed_df['completed_date'] = pd.to_datetime(completed_df['completed_date'])
-                completed_df['completion_time'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
-                avg_time = completed_df['completion_time'].mean()
-                create_metric_card("Avg Time", f"{avg_time:.1f} days", "⏱️")
-            except:
-                create_metric_card("Avg Time", "N/A", "⏱️")
-        else:
-            create_metric_card("Avg Time", "N/A", "⏱️")
-    
-    st.divider()
-    
-    # Monthly job completion trend
-    st.markdown("#### 📈 Monthly Performance")
-    
-    if not df_jobs.empty and 'created_date' in df_jobs.columns:
-        df_jobs['created_date'] = pd.to_datetime(df_jobs['created_date'])
-        df_jobs['month'] = df_jobs['created_date'].dt.strftime('%Y-%m')
-        
-        monthly_stats = df_jobs.groupby('month').agg({
-            'id': 'count',
-            'status': lambda x: (x == 'Completed').sum()
-        }).reset_index()
-        
-        monthly_stats.columns = ['Month', 'Total Jobs', 'Completed Jobs']
-        monthly_stats['Completion Rate'] = (monthly_stats['Completed Jobs'] / monthly_stats['Total Jobs'] * 100).round(1)
-        
-        fig = px.bar(monthly_stats, x='Month', y=['Total Jobs', 'Completed Jobs'],
-                     title="Monthly Job Assignments and Completions",
-                     barmode='group',
-                     labels={'value': 'Number of Jobs', 'variable': 'Metric'})
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Revenue trend if invoices exist
-    if not df_invoices.empty and 'invoice_date' in df_invoices.columns:
-        st.markdown("#### 💰 Revenue Trend")
-        
-        df_invoices['invoice_date'] = pd.to_datetime(df_invoices['invoice_date'])
-        df_invoices['month'] = df_invoices['invoice_date'].dt.strftime('%Y-%m')
-        
-        monthly_revenue = df_invoices.groupby('month')['total_amount'].sum().reset_index()
-        
-        fig2 = px.line(monthly_revenue, x='month', y='total_amount',
-                       title="Monthly Revenue",
-                       markers=True,
-                       labels={'total_amount': 'Revenue (₦)', 'month': 'Month'})
-        st.plotly_chart(fig2, use_container_width=True)
-
-def show_vendor_profile_update(vendor, vendor_username):
-    st.markdown("### 📝 Update Vendor Profile")
-    
-    with st.form("vendor_profile_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            company_name = st.text_input("Company Name *", value=vendor['company_name'])
-            contact_person = st.text_input("Contact Person *", value=vendor['contact_person'])
-            email = st.text_input("Email *", value=vendor['email'])
-            phone = st.text_input("Phone *", value=vendor['phone'])
-            vendor_type = st.selectbox(
-                "Vendor Type *",
-                ["HVAC", "Generator", "Fixture and Fittings", "Building Maintenance", 
-                 "Plumbing", "Electrical", "Cleaning", "HSE", "Space Management"],
-                index=["HVAC", "Generator", "Fixture and Fittings", "Building Maintenance", 
-                      "Plumbing", "Electrical", "Cleaning", "HSE", "Space Management"].index(vendor['vendor_type']) if vendor['vendor_type'] in ["HVAC", "Generator", "Fixture and Fittings", "Building Maintenance", "Plumbing", "Electrical", "Cleaning", "HSE", "Space Management"] else 0
-            )
-        
-        with col2:
-            annual_turnover = st.number_input("Annual Turnover (₦)", 
-                                              value=float(vendor['annual_turnover'] or 0),
-                                              step=10000.0)
-            tax_id = st.text_input("Tax Identification Number", value=vendor['tax_identification_number'] or "")
-            rc_number = st.text_input("RC Number", value=vendor['rc_number'] or "")
-            key_staff = st.text_area("Key Management Staff", 
-                                    value=vendor['key_management_staff'] or "",
-                                    placeholder="Names and positions of key staff...")
-        
-        services_offered = st.text_area("Services Offered *", 
-                                       value=vendor['services_offered'],
-                                       height=100)
-        account_details = st.text_area("Account Details", 
-                                      value=vendor['account_details'] or "",
-                                      placeholder="Bank details, account numbers...",
-                                      height=80)
-        certification = st.text_area("Certifications", 
-                                    value=vendor['certification'] or "",
-                                    placeholder="Professional certifications, licenses...",
-                                    height=80)
-        address = st.text_area("Address *", 
-                              value=vendor['address'],
-                              height=80)
-        
-        submitted = st.form_submit_button("💾 Update Profile", use_container_width=True)
-        
-        if submitted:
-            if not all([company_name, contact_person, email, phone, vendor_type, services_offered, address]):
-                st.error("❌ Please fill in all required fields (*)")
-            else:
-                success = execute_update(
-                    '''UPDATE vendors 
-                    SET company_name = ?, contact_person = ?, email = ?, phone = ?, 
-                        vendor_type = ?, services_offered = ?, annual_turnover = ?,
-                        tax_identification_number = ?, rc_number = ?, key_management_staff = ?,
-                        account_details = ?, certification = ?, address = ?
-                    WHERE username = ?''',
-                    (company_name, contact_person, email, phone, vendor_type,
-                     services_offered, annual_turnover, tax_id, rc_number,
-                     key_staff, account_details, certification, address,
-                     vendor_username)
-                )
-                
-                if success:
-                    st.success("✅ Profile updated successfully!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to update profile")
-
-# =============================================
-# FACILITY MANAGER DASHBOARD - ENHANCED
-# =============================================
-def show_facility_manager_dashboard():
-    st.markdown("<h1 class='app-title'>👨‍💼 Facility Manager Dashboard</h1>", unsafe_allow_html=True)
-    
-    # Comprehensive metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    # Get statistics
-    total_requests = execute_query('SELECT COUNT(*) as count FROM maintenance_requests')
-    total_count = total_requests[0]['count'] if total_requests else 0
-    
-    pending_requests = execute_query("SELECT COUNT(*) as count FROM maintenance_requests WHERE status = 'Pending'")
-    pending_count = pending_requests[0]['count'] if pending_requests else 0
-    
-    completed_requests = execute_query("SELECT COUNT(*) as count FROM maintenance_requests WHERE status = 'Completed'")
-    completed_count = completed_requests[0]['count'] if completed_requests else 0
-    
-    approved_requests = execute_query("SELECT COUNT(*) as count FROM maintenance_requests WHERE status = 'Approved'")
-    approved_count = approved_requests[0]['count'] if approved_requests else 0
-    
-    with col1:
-        create_metric_card("Total Requests", total_count, "📋")
-    with col2:
-        create_metric_card("Pending", pending_count, "⏳")
-    with col3:
-        create_metric_card("Completed", completed_count, "✅")
-    with col4:
-        create_metric_card("Approved", approved_count, "🏆")
-    
-    st.divider()
-    
-    # Advanced tabs for manager
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Dashboard", "✅ Approvals", "👥 Vendor Management", "📅 PPM Overview", 
-        "🔌 Generator Records", "🛡️ HSE Overview", "🏢 Space Management"
-    ])
-    
-    with tab1:
-        show_manager_dashboard()
-    
-    with tab2:
-        show_manager_approvals()
-    
-    with tab3:
-        show_vendor_management()
-    
-    with tab4:
-        show_manager_ppm_overview()
-    
-    with tab5:
-        show_manager_generator_records()
-    
-    with tab6:
-        show_manager_hse_overview()
-    
-    with tab7:
-        show_manager_space_management()
-
-def show_manager_dashboard():
-    st.markdown("### 📊 Comprehensive Analytics Dashboard")
-    
-    # Get all data
-    requests = execute_query('SELECT * FROM maintenance_requests')
-    ppm_schedules = execute_query('SELECT * FROM ppm_schedules')
-    generator_records = execute_query('SELECT * FROM generator_records')
-    
-    if not requests:
-        st.info("📭 No data available for dashboard")
-        return
-    
-    # Convert to DataFrames
-    df_requests = pd.DataFrame(requests)
-    df_ppm = pd.DataFrame(ppm_schedules) if ppm_schedules else pd.DataFrame()
-    df_generator = pd.DataFrame(generator_records) if generator_records else pd.DataFrame()
-    
-    # Request analysis
-    st.markdown("#### 📈 Request Analysis")
+    type_summary['efficiency'] = type_summary['net_diesel_consumed'] / type_summary['net_hours']
     
     col1, col2 = st.columns(2)
     
     with col1:
-        # Status distribution
-        status_counts = df_requests['status'].value_counts().reset_index()
-        status_counts.columns = ['Status', 'Count']
-        
-        fig1 = px.pie(status_counts, values='Count', names='Status',
-                      title="Request Status Distribution",
-                      hole=0.3)
-        st.plotly_chart(fig1, use_container_width=True)
-    
-    with col2:
-        # Priority distribution
-        priority_counts = df_requests['priority'].value_counts().reset_index()
-        priority_counts.columns = ['Priority', 'Count']
-        
-        fig2 = px.bar(priority_counts, x='Priority', y='Count',
-                      title="Requests by Priority",
-                      color='Priority',
-                      color_discrete_sequence=px.colors.sequential.Reds)
-        st.plotly_chart(fig2, use_container_width=True)
-    
-    # Monthly trend
-    st.markdown("#### 📅 Monthly Request Trend")
-    
-    if 'created_date' in df_requests.columns:
-        df_requests['created_date'] = pd.to_datetime(df_requests['created_date'])
-        df_requests['month'] = df_requests['created_date'].dt.strftime('%Y-%m')
-        
-        monthly_requests = df_requests.groupby('month').size().reset_index(name='Count')
-        
-        fig3 = px.line(monthly_requests, x='month', y='Count',
-                       title="Monthly Request Volume",
-                       markers=True)
+        fig3 = px.pie(type_summary, values='net_hours', names='generator_type',
+                      title="Hours by Generator Type")
         st.plotly_chart(fig3, use_container_width=True)
     
-    # Vendor performance if PPM data exists
-    if not df_ppm.empty:
-        st.markdown("#### 👷 Vendor Performance (PPM)")
-        
-        vendor_performance = df_ppm.groupby('assigned_vendor').agg({
-            'id': 'count',
-            'status': lambda x: (x == 'Completed').sum()
-        }).reset_index()
-        
-        vendor_performance.columns = ['Vendor', 'Total Assignments', 'Completed']
-        vendor_performance['Completion Rate'] = (vendor_performance['Completed'] / vendor_performance['Total Assignments'] * 100).round(1)
-        
-        fig4 = px.bar(vendor_performance, x='Vendor', y='Completion Rate',
-                      title="Vendor PPM Completion Rate",
-                      color='Completion Rate',
-                      color_continuous_scale='viridis')
+    with col2:
+        fig4 = px.bar(type_summary, x='generator_type', y='efficiency',
+                      title="Efficiency by Generator Type",
+                      labels={'efficiency': 'Liters per Hour'})
         st.plotly_chart(fig4, use_container_width=True)
-    
-    # Generator efficiency if data exists
-    if not df_generator.empty and 'net_hours' in df_generator.columns and 'net_diesel_consumed' in df_generator.columns:
-        st.markdown("#### ⚡ Generator Efficiency Analysis")
-        
-        # Calculate efficiency
-        df_generator['efficiency'] = df_generator['net_hours'] / df_generator['net_diesel_consumed'] if df_generator['net_diesel_consumed'].sum() > 0 else 0
-        
-        fig5 = px.scatter(df_generator, x='net_hours', y='net_diesel_consumed',
-                         title="Generator Hours vs Diesel Consumption",
-                         trendline="ols")
-        st.plotly_chart(fig5, use_container_width=True)
 
-def show_manager_approvals():
-    st.markdown("### ✅ Approval Queue")
+def show_generator_maintenance_alerts():
+    """Show generator maintenance alerts and schedule"""
+    st.markdown("### ⚠️ Generator Maintenance Alerts")
     
-    tab1, tab2 = st.tabs(["📋 Maintenance Requests", "📅 PPM Schedules"])
+    # Maintenance schedule
+    st.markdown("#### 📅 Maintenance Schedule")
     
-    with tab1:
-        show_maintenance_request_approvals()
+    maintenance_tasks = [
+        {"task": "Oil Change", "frequency": "Every 250 hours", "last_done": None, "next_due": None},
+        {"task": "Oil Filter Change", "frequency": "Every 500 hours", "last_done": None, "next_due": None},
+        {"task": "Fuel Filter Change", "frequency": "Every 500 hours", "last_done": None, "next_due": None},
+        {"task": "Air Filter Change", "frequency": "Every 1000 hours", "last_done": None, "next_due": None},
+        {"task": "Coolant Change", "frequency": "Every 1000 hours", "last_done": None, "next_due": None},
+        {"task": "Belt Inspection", "frequency": "Every 250 hours", "last_done": None, "next_due": None},
+        {"task": "General Inspection", "frequency": "Daily", "last_done": None, "next_due": None},
+    ]
     
-    with tab2:
-        show_ppm_manager_approvals()
-
-def show_maintenance_request_approvals():
-    """Manager approval for maintenance requests"""
-    # Get requests awaiting manager approval
-    approval_requests = get_requests_for_manager_approval()
+    # Calculate total hours from records
+    total_hours_query = execute_query('SELECT SUM(net_hours) as total_hours FROM generator_records')
+    total_hours = total_hours_query[0]['total_hours'] if total_hours_query and total_hours_query[0]['total_hours'] else 0
     
-    if approval_requests:
-        for request in approval_requests:
-            with st.expander(f"📋 {request['title']} - {request['created_by']}"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**Location:** {request['location']}")
-                    st.write(f"**Facility Type:** {request['facility_type']}")
-                    st.write(f"**Priority:** {request['priority']}")
-                    st.write(f"**Assigned Vendor:** {request['assigned_vendor']}")
-                
-                with col2:
-                    st.write(f"**Created Date:** {request['created_date']}")
-                    st.write(f"**Completed Date:** {request['completed_date']}")
-                    st.write(f"**Department Approved:** {request['department_approval_date']}")
-                
-                st.write(f"**Description:** {request['description']}")
-                
-                if request['completion_notes']:
-                    st.write(f"**Completion Notes:** {request['completion_notes']}")
-                
-                if request['job_breakdown']:
-                    st.write(f"**Job Breakdown:** {request['job_breakdown']}")
-                
-                # Invoice information if available
-                invoice = execute_query(
-                    'SELECT * FROM invoices WHERE request_id = ?',
-                    (request['id'],)
-                )
-                
-                if invoice:
-                    st.markdown("#### 💰 Invoice Details")
-                    inv = invoice[0]
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Material Cost", format_ngn(inv['amount']))
-                    with col2:
-                        st.metric("Labour Charges", format_ngn(inv['labour_charge']))
-                    with col3:
-                        st.metric("VAT", format_ngn(inv['vat_amount']))
-                    with col4:
-                        st.metric("Total", format_ngn(inv['total_amount']))
-                
-                # PDF Download
-                pdf_buffer = create_maintenance_pdf_report(request['id'])
-                if pdf_buffer:
-                    st.download_button(
-                        label="📥 Download Job Report",
-                        data=pdf_buffer,
-                        file_name=f"job_report_{request['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        key=f"manager_pdf_{request['id']}"
-                    )
-                
-                # Approval buttons
-                st.markdown("---")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    if st.button("✅ Approve", key=f"manager_approve_{request['id']}", 
-                               use_container_width=True):
-                        success = execute_update(
-                            '''UPDATE maintenance_requests 
-                            SET facilities_manager_approval = 1, 
-                                status = 'Approved',
-                                manager_approval_date = ?
-                            WHERE id = ?''',
-                            (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), request['id'])
-                        )
-                        
-                        if success and invoice:
-                            # Update invoice status
-                            execute_update(
-                                "UPDATE invoices SET status = 'Approved' WHERE request_id = ?",
-                                (request['id'],)
-                            )
-                        
-                        st.success("✅ Request approved successfully!")
-                        st.rerun()
-                
-                with col2:
-                    if st.button("❌ Reject", key=f"manager_reject_{request['id']}", 
-                               use_container_width=True, type="secondary"):
-                        reject_reason = st.text_input(
-                            "Rejection Reason", 
-                            key=f"manager_reject_reason_{request['id']}",
-                            placeholder="Please provide reason for rejection..."
-                        )
-                        
-                        if reject_reason:
-                            success = execute_update(
-                                '''UPDATE maintenance_requests 
-                                SET facilities_manager_approval = 0, 
-                                    status = 'Rejected',
-                                    completion_notes = ?
-                                WHERE id = ?''',
-                                (f"Rejected by Manager: {reject_reason}", request['id'])
-                            )
-                            st.success("✅ Request rejected")
-                            st.rerun()
+    # Update tasks with calculated due dates
+    for task in maintenance_tasks:
+        if "Every" in task["frequency"]:
+            hours = int(task["frequency"].split()[1])
+            cycles = total_hours // hours
+            task["last_done"] = f"{cycles * hours} hours ago"
+            task["next_due"] = f"In {(cycles + 1) * hours - total_hours:.0f} hours"
+    
+    # Display as table
+    df = pd.DataFrame(maintenance_tasks)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Alerts based on total hours
+    st.markdown("#### 🔔 Maintenance Alerts")
+    
+    if total_hours >= 250 and total_hours < 500:
+        st.warning("⚠️ **Oil Change Due** - Generator has reached 250 hours")
+    elif total_hours >= 500 and total_hours < 1000:
+        st.warning("⚠️ **Oil & Filter Change Due** - Generator has reached 500 hours")
+    elif total_hours >= 1000:
+        st.error("🚨 **Major Service Due** - Generator has reached 1000 hours")
     else:
-        st.info("📭 No requests awaiting manager approval")
-
-def show_ppm_manager_approvals():
-    """Manager approval for PPM schedules"""
-    # Get PPM schedules that need manager approval
-    ppm_schedules = get_ppm_for_manager_approval()
+        st.success("✅ All maintenance is up to date")
     
-    if not ppm_schedules:
-        st.info("📭 No PPM schedules awaiting manager approval")
-        return
+    # Manual maintenance log
+    st.divider()
+    st.markdown("#### 📝 Log Maintenance Activity")
     
-    for schedule in ppm_schedules:
-        with st.expander(f"📋 {schedule['schedule_name']} - Completed: {schedule['actual_completion_date']}"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write(f"**Facility:** {schedule['facility_category']}")
-                st.write(f"**Sub-Category:** {schedule['sub_category']}")
-                st.write(f"**Frequency:** {schedule['frequency']}")
-                st.write(f"**Assigned Vendor:** {schedule['assigned_vendor']}")
-            
-            with col2:
-                st.write(f"**Estimated Cost:** {format_ngn(schedule['estimated_cost'])}")
-                st.write(f"**Actual Cost:** {format_ngn(schedule['actual_cost']) if schedule['actual_cost'] else 'N/A'}")
-                st.write(f"**Completed Date:** {schedule['actual_completion_date']}")
-                st.write(f"**User Approved:** {'Yes' if schedule['user_approved'] else 'No'}")
-            
-            st.write(f"**Description:** {schedule['description']}")
-            
-            if schedule['notes']:
-                st.write(f"**Notes:** {schedule['notes']}")
-            
-            # Get assignment details
-            assignment = execute_query(
-                'SELECT * FROM ppm_assignments WHERE schedule_id = ?',
-                (schedule['id'],)
-            )
-            
-            if assignment:
-                assignment = assignment[0]
-                st.write(f"**Completion Notes:** {assignment['completion_notes']}")
-            
-            # PDF Download
-            pdf_buffer = create_ppm_pdf_report(schedule['id'])
-            if pdf_buffer:
-                st.download_button(
-                    label="📥 Download PPM Report",
-                    data=pdf_buffer,
-                    file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    key=f"manager_ppm_pdf_{schedule['id']}"
-                )
-            
-            # Approval buttons
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Final Approve PPM", key=f"manager_approve_ppm_{schedule['id']}", 
-                           use_container_width=True):
-                    execute_update(
-                        "UPDATE ppm_schedules SET manager_approved = 1 WHERE id = ?",
-                        (schedule['id'],)
-                    )
-                    st.success("✅ PPM finally approved!")
-                    st.rerun()
-            
-            with col2:
-                if st.button("❌ Request Changes", key=f"manager_reject_ppm_{schedule['id']}", 
-                           use_container_width=True, type="secondary"):
-                    changes_reason = st.text_input(
-                        "Required Changes",
-                        key=f"ppm_changes_{schedule['id']}",
-                        placeholder="What changes are required?"
-                    )
-                    if changes_reason:
-                        execute_update(
-                            '''UPDATE ppm_schedules SET status = 'WIP' WHERE id = ?''',
-                            (schedule['id'],)
-                        )
-                        st.success("✅ Changes requested")
-                        st.rerun()
-
-def show_vendor_management():
-    st.markdown("### 👥 Vendor Management")
-    
-    # Get all vendors
-    vendors = execute_query('SELECT * FROM vendors ORDER BY company_name')
-    
-    if vendors:
-        # Vendor metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        total_vendors = len(vendors)
-        active_vendors = execute_query(
-            "SELECT COUNT(DISTINCT assigned_vendor) as count FROM maintenance_requests WHERE assigned_vendor IS NOT NULL"
-        )
-        active_count = active_vendors[0]['count'] if active_vendors else 0
-        
-        with col1:
-            create_metric_card("Total Vendors", total_vendors, "🏢")
-        with col2:
-            create_metric_card("Active Vendors", active_count, "👷")
-        with col3:
-            vendor_types = len(set(v['vendor_type'] for v in vendors))
-            create_metric_card("Vendor Types", vendor_types, "📊")
-        with col4:
-            # Calculate average rating (placeholder)
-            create_metric_card("Avg Rating", "4.2/5", "⭐")
-        
-        # Vendor list
-        st.markdown("#### 📋 Vendor List")
-        for vendor in vendors:
-            with st.expander(f"{vendor['company_name']} - {vendor['vendor_type']}"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**Contact:** {vendor['contact_person']}")
-                    st.write(f"**Email:** {vendor['email']}")
-                    st.write(f"**Phone:** {vendor['phone']}")
-                    st.write(f"**TIN:** {vendor['tax_identification_number']}")
-                
-                with col2:
-                    st.write(f"**RC Number:** {vendor['rc_number']}")
-                    st.write(f"**Annual Turnover:** {format_ngn(vendor['annual_turnover'])}")
-                    st.write(f"**Username:** {vendor['username']}")
-                    st.write(f"**Registered:** {vendor['registration_date']}")
-                
-                st.write(f"**Services:** {vendor['services_offered']}")
-                st.write(f"**Address:** {vendor['address']}")
-                
-                # Performance stats
-                st.markdown("##### 📊 Performance Statistics")
-                
-                # Get vendor performance data
-                assigned_jobs = execute_query(
-                    'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ?',
-                    (vendor['username'],)
-                )
-                assigned_count = assigned_jobs[0]['count'] if assigned_jobs else 0
-                
-                completed_jobs = execute_query(
-                    'SELECT COUNT(*) as count FROM maintenance_requests WHERE assigned_vendor = ? AND status = ?',
-                    (vendor['username'], 'Completed')
-                )
-                completed_count = completed_jobs[0]['count'] if completed_jobs else 0
-                
-                total_invoices = execute_query(
-                    'SELECT SUM(total_amount) as total FROM invoices WHERE vendor_username = ? AND status = ?',
-                    (vendor['username'], 'Approved')
-                )
-                total_amount = total_invoices[0]['total'] if total_invoices and total_invoices[0]['total'] else 0
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Assigned Jobs", assigned_count)
-                with col2:
-                    completion_rate = (completed_count / assigned_count * 100) if assigned_count > 0 else 0
-                    st.metric("Completion Rate", f"{completion_rate:.1f}%")
-                with col3:
-                    st.metric("Total Revenue", format_ngn(total_amount))
-                
-                # Action buttons
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📧 Contact Vendor", key=f"contact_{vendor['id']}"):
-                        st.info(f"Email: {vendor['email']} | Phone: {vendor['phone']}")
-                with col2:
-                    if st.button("📋 View Jobs", key=f"jobs_{vendor['id']}"):
-                        vendor_jobs = execute_query(
-                            'SELECT * FROM maintenance_requests WHERE assigned_vendor = ? ORDER BY created_date DESC',
-                            (vendor['username'],)
-                        )
-                        
-                        if vendor_jobs:
-                            st.markdown("##### 📋 Recent Jobs")
-                            for job in vendor_jobs[:5]:  # Show last 5 jobs
-                                st.write(f"- {job['title']} ({job['status']}) - {job['created_date']}")
-    
-    else:
-        st.info("📭 No vendors found")
-    
-    # Add new vendor section
-    st.markdown("---")
-    st.markdown("#### ➕ Register New Vendor")
-    
-    with st.form("new_vendor_form"):
+    with st.form("maintenance_log_form"):
         col1, col2 = st.columns(2)
         
         with col1:
-            new_company = st.text_input("Company Name *")
-            new_contact = st.text_input("Contact Person *")
-            new_email = st.text_input("Email *")
-            new_phone = st.text_input("Phone *")
-            new_vendor_type = st.selectbox(
-                "Vendor Type *",
-                ["HVAC", "Generator", "Fixture and Fittings", "Building Maintenance", 
-                 "Plumbing", "Electrical", "Cleaning", "HSE", "Space Management"]
+            maintenance_date = st.date_input("Maintenance Date", value=datetime.now())
+            maintenance_type = st.selectbox(
+                "Maintenance Type",
+                ["Oil Change", "Filter Change", "General Service", "Repair", "Inspection"]
             )
         
         with col2:
-            new_turnover = st.number_input("Annual Turnover (₦)", min_value=0.0, value=0.0, step=10000.0)
-            new_tin = st.text_input("Tax Identification Number")
-            new_rc = st.text_input("RC Number")
-            new_username = st.text_input("Username *", placeholder="Vendor login username")
-            new_password = st.text_input("Temporary Password *", type="password", value="0123456")
+            generator_hours = st.number_input("Generator Hours at Service", min_value=0.0, value=total_hours)
+            cost = st.number_input("Cost (₦)", min_value=0.0, step=1000.0)
         
-        new_services = st.text_area("Services Offered *", height=80)
-        new_address = st.text_area("Address *", height=80)
-        new_certification = st.text_area("Certifications", height=60)
+        description = st.text_area("Description", placeholder="Details of maintenance performed...")
+        parts_replaced = st.text_input("Parts Replaced", placeholder="List parts replaced, if any...")
         
-        submitted = st.form_submit_button("➕ Register Vendor", use_container_width=True)
-        
-        if submitted:
-            if not all([new_company, new_contact, new_email, new_phone, new_vendor_type, 
-                       new_username, new_password, new_services, new_address]):
-                st.error("❌ Please fill in all required fields (*)")
-            else:
-                # Check if username exists
-                existing_user = execute_query(
-                    'SELECT * FROM users WHERE username = ?',
-                    (new_username,)
-                )
-                
-                if existing_user:
-                    st.error("❌ Username already exists")
-                else:
-                    # Create user account
-                    user_success = execute_update(
-                        'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
-                        (new_username, new_password, 'vendor', new_vendor_type)
-                    )
-                    
-                    if user_success:
-                        # Create vendor record
-                        vendor_success = execute_update(
-                            '''INSERT INTO vendors 
-                            (username, company_name, contact_person, email, phone, 
-                             vendor_type, services_offered, annual_turnover, 
-                             tax_identification_number, rc_number, address, certification) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (new_username, new_company, new_contact, new_email, new_phone,
-                             new_vendor_type, new_services, new_turnover, new_tin,
-                             new_rc, new_address, new_certification)
-                        )
-                        
-                        if vendor_success:
-                            st.success("✅ Vendor registered successfully!")
-                            st.info(f"**Login Credentials:** Username: {new_username} | Password: {new_password}")
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to create vendor record")
-                    else:
-                        st.error("❌ Failed to create user account")
-
-def show_manager_ppm_overview():
-    st.markdown("### 📅 PPM Overview & Management")
-    
-    # Get all PPM schedules
-    schedules = execute_query('SELECT * FROM ppm_schedules ORDER BY next_maintenance_date')
-    
-    if schedules:
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        total_ppm = len(schedules)
-        due_ppm = len([s for s in schedules if s['status'] == 'Due'])
-        prepare_ppm = len([s for s in schedules if s['status'] == 'Prepare'])
-        completed_ppm = len([s for s in schedules if s['status'] == 'Completed'])
-        
-        with col1:
-            create_metric_card("Total PPM", total_ppm, "📅")
-        with col2:
-            create_metric_card("Due Now", due_ppm, "⚠️")
-        with col3:
-            create_metric_card("To Prepare", prepare_ppm, "📋")
-        with col4:
-            create_metric_card("Completed", completed_ppm, "✅")
-        
-        # Filter options
-        st.markdown("#### 🔍 Filter PPM Schedules")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            facility_filter = st.selectbox(
-                "Facility Category",
-                ["All"] + sorted(list(set(s['facility_category'] for s in schedules if s['facility_category'])))
-            )
-        
-        with col2:
-            status_filter = st.selectbox(
-                "Status",
-                ["All", "Not Due", "Prepare", "Due", "WIP", "Completed", "Approved"]
-            )
-        
-        with col3:
-            vendor_filter = st.selectbox(
-                "Assigned Vendor",
-                ["All"] + sorted(list(set(s['assigned_vendor'] for s in schedules if s['assigned_vendor'])))
-            )
-        
-        # Apply filters
-        filtered_schedules = schedules
-        
-        if facility_filter != "All":
-            filtered_schedules = [s for s in filtered_schedules if s['facility_category'] == facility_filter]
-        
-        if status_filter != "All":
-            filtered_schedules = [s for s in filtered_schedules if s['status'] == status_filter]
-        
-        if vendor_filter != "All":
-            filtered_schedules = [s for s in filtered_schedules if s['assigned_vendor'] == vendor_filter]
-        
-        # Display filtered schedules
-        st.markdown(f"#### 📋 PPM Schedules ({len(filtered_schedules)} found)")
-        
-        for schedule in filtered_schedules:
-            status_colors = {
-                "Not Due": "status-not-due",
-                "Prepare": "status-prepare", 
-                "Due": "status-due",
-                "WIP": "status-wip",
-                "Completed": "status-completed",
-                "Approved": "status-approved"
-            }
-            
-            status_class = status_colors.get(schedule['status'], "")
-            
-            with st.expander(f"{schedule['schedule_name']} - {schedule['next_maintenance_date']}"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**Facility:** {schedule['facility_category']}")
-                    st.write(f"**Sub-Category:** {schedule['sub_category']}")
-                    st.write(f"**Frequency:** {schedule['frequency']}")
-                    st.write(f"**Created By:** {schedule['created_by']}")
-                
-                with col2:
-                    st.write(f"**Status:** <span class='{status_class}'>{schedule['status']}</span>", unsafe_allow_html=True)
-                    st.write(f"**Assigned Vendor:** {schedule['assigned_vendor'] or 'Not assigned'}")
-                    st.write(f"**Next Due:** {schedule['next_maintenance_date']}")
-                    if schedule['estimated_cost']:
-                        st.write(f"**Est. Cost:** {format_ngn(schedule['estimated_cost'])}")
-                
-                st.write(f"**Description:** {schedule['description']}")
-                
-                # Management actions
-                if schedule['status'] in ['Prepare', 'Due'] and not schedule['assigned_vendor']:
-                    st.markdown("---")
-                    st.markdown("##### 👷 Assign to Vendor")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        vendors = execute_query(
-                            'SELECT * FROM vendors WHERE vendor_type = ? OR vendor_type LIKE ?',
-                            (schedule['facility_category'], f'%{schedule['facility_category']}%')
-                        )
-                        
-                        vendor_options = ["Select vendor..."] + [f"{v['company_name']} ({v['username']})" for v in vendors]
-                        selected_vendor = st.selectbox("Choose Vendor", vendor_options, key=f"vendor_select_{schedule['id']}")
-                    
-                    with col2:
-                        due_date = st.date_input("Due Date", 
-                                                value=datetime.strptime(schedule['next_maintenance_date'], '%Y-%m-%d'),
-                                                key=f"due_date_{schedule['id']}")
-                    
-                    if st.button("✅ Assign", key=f"assign_{schedule['id']}"):
-                        if selected_vendor != "Select vendor...":
-                            vendor_username = selected_vendor.split('(')[-1].strip(')')
-                            
-                            # Update PPM schedule
-                            execute_update(
-                                '''UPDATE ppm_schedules 
-                                SET assigned_vendor = ?, status = 'WIP' 
-                                WHERE id = ?''',
-                                (vendor_username, schedule['id'])
-                            )
-                            
-                            # Create assignment record
-                            execute_update(
-                                '''INSERT INTO ppm_assignments 
-                                (schedule_id, vendor_username, assigned_date, due_date, assigned_by) 
-                                VALUES (?, ?, ?, ?, ?)''',
-                                (schedule['id'], vendor_username, 
-                                 datetime.now().strftime('%Y-%m-%d'),
-                                 due_date.strftime('%Y-%m-%d'),
-                                 st.session_state.user['username'])
-                            )
-                            
-                            st.success("✅ PPM assigned to vendor successfully!")
-                            st.rerun()
-                
-                # PDF Download for completed PPM
-                if schedule['status'] == 'Completed':
-                    pdf_buffer = create_ppm_pdf_report(schedule['id'])
-                    if pdf_buffer:
-                        st.download_button(
-                            label="📥 Download PPM Report",
-                            data=pdf_buffer,
-                            file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            key=f"manager_ppm_pdf_dl_{schedule['id']}"
-                        )
-    else:
-        st.info("📭 No PPM schedules found")
-
-def show_manager_generator_records():
-    st.markdown("### 🔌 Generator Records Overview")
-    
-    # Date range filter
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", 
-                                   value=datetime.now() - timedelta(days=30))
-    with col2:
-        end_date = st.date_input("End Date", value=datetime.now())
-    
-    # Get generator records
-    records = execute_query('''
-        SELECT * FROM generator_records 
-        WHERE record_date BETWEEN ? AND ?
-        ORDER BY record_date DESC
-    ''', (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
-    
-    if records:
-        # Summary statistics
-        total_hours = sum(safe_float(r.get('net_hours'), 0) for r in records)
-        total_diesel = sum(safe_float(r.get('net_diesel_consumed'), 0) for r in records)
-        avg_consumption = total_diesel / total_hours if total_hours > 0 else 0
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            create_metric_card("Total Records", len(records), "📋")
-        with col2:
-            create_metric_card("Total Hours", f"{total_hours:.1f}", "⏱️")
-        with col3:
-            create_metric_card("Total Diesel", f"{total_diesel:.1f}L", "⛽")
-        with col4:
-            create_metric_card("Avg Rate", f"{avg_consumption:.2f}L/hr", "⚡")
-        
-        # Display records
-        st.markdown("#### 📋 Recent Records")
-        
-        df_data = []
-        for record in records[:10]:  # Show last 10 records
-            net_hours = safe_float(record.get('net_hours'), 0)
-            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
-            
-            df_data.append({
-                "Date": record.get('record_date', ''),
-                "Generator Type": record.get('generator_type', ''),
-                "Hours Run": f"{net_hours:.1f}",
-                "Diesel Used": f"{net_diesel:.1f}L",
-                "Rate": f"{net_diesel / net_hours:.2f}L/hr" if net_hours > 0 else "N/A",
-                "Recorded By": record.get('recorded_by', '')
-            })
-        
-        if df_data:
-            df = pd.DataFrame(df_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Export option
-        all_data = []
-        for record in records:
-            all_data.append({
-                "Date": record.get('record_date', ''),
-                "Generator Type": record.get('generator_type', ''),
-                "Opening Hours": safe_float(record.get('opening_hours'), 0),
-                "Closing Hours": safe_float(record.get('closing_hours'), 0),
-                "Net Hours": safe_float(record.get('net_hours'), 0),
-                "Opening Inventory (L)": safe_float(record.get('opening_inventory_liters'), 0),
-                "Purchase (L)": safe_float(record.get('purchase_liters'), 0),
-                "Closing Inventory (L)": safe_float(record.get('closing_inventory_liters'), 0),
-                "Net Diesel (L)": safe_float(record.get('net_diesel_consumed'), 0),
-                "Recorded By": record.get('recorded_by', ''),
-                "Notes": record.get('notes', '')
-            })
-        
-        df_all = pd.DataFrame(all_data)
-        csv = df_all.to_csv(index=False).encode('utf-8')
-        
-        st.download_button(
-            label="📥 Export All Records (CSV)",
-            data=csv,
-            file_name=f"generator_records_{start_date.strftime('%Y%m%d')}_to_{end_date.strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    else:
-        st.info("📭 No generator records found for the selected period")
-
-def show_manager_hse_overview():
-    st.markdown("### 🛡️ HSE Management Overview")
-    
-    # Get HSE data
-    schedules = execute_query('SELECT * FROM hse_schedules ORDER BY next_due_date')
-    incidents = execute_query('SELECT * FROM hse_incidents ORDER BY incident_date DESC')
-    inspections = execute_query('SELECT * FROM hse_inspections ORDER BY inspection_date DESC')
-    
-    # HSE Metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        create_metric_card("HSE Schedules", len(schedules), "📅")
-    with col2:
-        create_metric_card("Incidents", len(incidents), "⚠️")
-    with col3:
-        open_incidents = len([i for i in incidents if i['status'] == 'Open'])
-        create_metric_card("Open Incidents", open_incidents, "🔴")
-    with col4:
-        create_metric_card("Inspections", len(inspections), "🔍")
-    
-    # Tabs for different HSE aspects
-    tab1, tab2, tab3 = st.tabs(["📅 Schedules", "⚠️ Incidents", "🔍 Inspections"])
-    
-    with tab1:
-        if schedules:
-            for schedule in schedules[:10]:  # Show first 10
-                with st.expander(f"{schedule['schedule_type']} - Due: {schedule['next_due_date']}"):
-                    st.write(f"**Frequency:** {schedule['frequency']}")
-                    st.write(f"**Responsible:** {schedule['responsible_person'] or 'Not assigned'}")
-                    st.write(f"**Status:** {schedule['status']}")
-                    st.write(f"**Description:** {schedule['description']}")
-        else:
-            st.info("📭 No HSE schedules found")
-    
-    with tab2:
-        if incidents:
-            # Incident severity breakdown
-            severity_counts = {}
-            for incident in incidents:
-                severity = incident['severity']
-                severity_counts[severity] = severity_counts.get(severity, 0) + 1
-            
-            # Display severity summary
-            st.markdown("##### 🎯 Incident Severity Breakdown")
-            cols = st.columns(len(severity_counts))
-            for idx, (severity, count) in enumerate(severity_counts.items()):
-                with cols[idx]:
-                    create_metric_card(severity, count, "⚠️")
-            
-            # Recent incidents
-            st.markdown("##### 📋 Recent Incidents")
-            for incident in incidents[:5]:
-                severity_icon = {
-                    "Low": "🟢",
-                    "Medium": "🟡",
-                    "High": "🟠", 
-                    "Critical": "🔴"
-                }.get(incident['severity'], "⚪")
-                
-                st.write(f"{severity_icon} **{incident['incident_type']}** - {incident['incident_date']}")
-                st.write(f"Location: {incident['location']} | Status: {incident['status']}")
-                st.write(f"Reported by: {incident['reported_by']}")
-                st.divider()
-        else:
-            st.info("📭 No incident reports found")
-    
-    with tab3:
-        if inspections:
-            for inspection in inspections[:5]:  # Show first 5
-                with st.expander(f"{inspection['inspection_type']} - {inspection['inspection_date']}"):
-                    st.write(f"**Inspector:** {inspection['inspector_name']}")
-                    st.write(f"**Area:** {inspection['area_inspected']}")
-                    st.write(f"**Status:** {inspection['status']}")
-                    st.write(f"**Findings:** {inspection['findings'][:200]}..." if len(inspection['findings']) > 200 else f"**Findings:** {inspection['findings']}")
-        else:
-            st.info("📭 No inspection reports found")
-
-def show_manager_space_management():
-    st.markdown("### 🏢 Space Management Overview")
-    
-    # Get booking data
-    bookings = execute_query('''
-        SELECT * FROM room_bookings 
-        ORDER BY booking_date DESC, start_time
-    ''')
-    
-    if bookings:
-        # Space metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        total_bookings = len(bookings)
-        today = datetime.now().strftime('%Y-%m-%d')
-        today_bookings = len([b for b in bookings if b['booking_date'] == today])
-        unique_rooms = len(set(b['room_name'] for b in bookings))
-        avg_attendees = sum(b['attendees_count'] or 0 for b in bookings) / total_bookings if total_bookings > 0 else 0
-        
-        with col1:
-            create_metric_card("Total Bookings", total_bookings, "📅")
-        with col2:
-            create_metric_card("Today's Bookings", today_bookings, "📋")
-        with col3:
-            create_metric_card("Rooms Used", unique_rooms, "🏢")
-        with col4:
-            create_metric_card("Avg Attendees", f"{avg_attendees:.0f}", "👥")
-        
-        # Room utilization
-        st.markdown("#### 📊 Room Utilization")
-        
-        # Group by room
-        room_stats = {}
-        for booking in bookings:
-            room = booking['room_name']
-            if room not in room_stats:
-                room_stats[room] = {
-                    'bookings': 0,
-                    'attendees': 0,
-                    'types': set()
-                }
-            room_stats[room]['bookings'] += 1
-            room_stats[room]['attendees'] += (booking['attendees_count'] or 0)
-            room_stats[room]['types'].add(booking['room_type'])
-        
-        # Display room statistics
-        room_data = []
-        for room, stats in room_stats.items():
-            room_data.append({
-                'Room': room,
-                'Bookings': stats['bookings'],
-                'Avg Attendees': stats['attendees'] / stats['bookings'] if stats['bookings'] > 0 else 0,
-                'Room Types': ', '.join(stats['types'])
-            })
-        
-        if room_data:
-            df_rooms = pd.DataFrame(room_data)
-            st.dataframe(df_rooms, use_container_width=True, hide_index=True)
-        
-        # Upcoming bookings
-        st.markdown("#### 📅 Upcoming Bookings (Next 7 Days)")
-        
-        upcoming_date = datetime.now() + timedelta(days=7)
-        upcoming_bookings = [b for b in bookings 
-                           if b['booking_date'] >= today 
-                           and b['booking_date'] <= upcoming_date.strftime('%Y-%m-%d')
-                           and b['status'] == 'Confirmed']
-        
-        if upcoming_bookings:
-            for booking in sorted(upcoming_bookings, key=lambda x: (x['booking_date'], x['start_time']))[:10]:
-                st.write(f"**{booking['room_name']}** - {booking['booking_date']} {booking['start_time']}-{booking['end_time']}")
-                st.write(f"Booked by: {booking['booked_by']} | Attendees: {booking['attendees_count']}")
-                st.write(f"Purpose: {booking['purpose'][:100]}..." if len(booking['purpose']) > 100 else f"Purpose: {booking['purpose']}")
-                st.divider()
-        else:
-            st.info("📭 No upcoming bookings in the next 7 days")
-    else:
-        st.info("📭 No booking data available")
+        if st.form_submit_button("📋 Log Maintenance", use_container_width=True):
+            st.success("✅ Maintenance logged successfully!")
+            # Here you would save to a maintenance_logs table
 
 # =============================================
-# FACILITY USER DASHBOARD - ENHANCED
+# MAIN DASHBOARD - FACILITY USER
 # =============================================
 def show_facility_user_dashboard():
-    st.markdown("<h1 class='app-title'>👤 Facility User Dashboard</h1>", unsafe_allow_html=True)
+    """Main dashboard for facility users"""
+    st.markdown("<h1 class='dashboard-title'>🏢 Facility User Dashboard</h1>", unsafe_allow_html=True)
     
-    user_info = st.session_state.user
-    username = user_info['username']
-    
-    # User-specific metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    # Get user statistics
-    user_requests = get_user_requests(username)
+    # Quick stats
+    user_requests = get_user_requests(st.session_state.user['username'])
     pending_requests = [r for r in user_requests if r['status'] == 'Pending']
     completed_requests = [r for r in user_requests if r['status'] == 'Completed']
     approved_requests = [r for r in user_requests if r['status'] == 'Approved']
     
+    # PPM stats
+    ppm_schedules = execute_query(
+        'SELECT * FROM ppm_schedules WHERE created_by = ?',
+        (st.session_state.user['username'],)
+    )
+    ppm_due_soon = [p for p in ppm_schedules if p['status'] in ['Prepare', 'Due']]
+    ppm_completed = [p for p in ppm_schedules if p['status'] == 'Completed']
+    
+    # Generator stats
+    today = datetime.now().strftime('%Y-%m-%d')
+    today_generator = execute_query(
+        'SELECT * FROM generator_records WHERE record_date = ?',
+        (today,)
+    )
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
     with col1:
-        create_metric_card("My Requests", len(user_requests), "📋")
+        create_metric_card("Active Requests", len(pending_requests), "📋")
+    
     with col2:
-        create_metric_card("Pending", len(pending_requests), "⏳")
+        create_metric_card("PPM Due Soon", len(ppm_due_soon), "📅")
+    
     with col3:
-        create_metric_card("Completed", len(completed_requests), "✅")
+        create_metric_card("Today's Generator", 
+                          "Recorded" if today_generator else "Pending", 
+                          "⚡")
+    
     with col4:
-        create_metric_card("Approved", len(approved_requests), "🏆")
+        create_metric_card("Room Bookings", 
+                          "Check Calendar", 
+                          "🏢")
     
-    # Enhanced tabs for facility user
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "🏠 Dashboard", "➕ New Request", "📋 My Requests", "📅 PPM", "🔌 Generator", 
-        "🛡️ HSE", "🏢 Space Management"
-    ])
+    st.divider()
     
-    with tab1:
-        show_user_dashboard(username, user_requests)
+    # Navigation
+    st.markdown("### 🚀 Quick Actions")
     
-    with tab2:
-        show_new_request(username)
+    col1, col2, col3, col4 = st.columns(4)
     
-    with tab3:
-        show_user_requests_view(username)
+    with col1:
+        if st.button("📝 New Request", use_container_width=True):
+            st.session_state.current_page = "maintenance_request"
+            st.rerun()
     
-    with tab4:
-        show_ppm_management_facility_user()
+    with col2:
+        if st.button("📅 PPM Schedule", use_container_width=True):
+            st.session_state.current_page = "ppm_management"
+            st.rerun()
     
-    with tab5:
-        show_generator_records_facility_user()
+    with col3:
+        if st.button("⚡ Generator Log", use_container_width=True):
+            st.session_state.current_page = "generator_management"
+            st.rerun()
     
-    with tab6:
-        show_hse_management_facility_user()
+    with col4:
+        if st.button("🏢 Book Room", use_container_width=True):
+            st.session_state.current_page = "space_management"
+            st.rerun()
     
-    with tab7:
-        show_space_management_facility_user()
-
-def show_user_dashboard(username, user_requests):
-    st.markdown("### 📊 My Dashboard")
+    st.divider()
+    
+    # Recent activity
+    st.markdown("### 📋 Recent Maintenance Requests")
     
     if user_requests:
-        # Convert to DataFrame for analysis
-        df = pd.DataFrame(user_requests)
-        
-        # Priority breakdown
-        st.markdown("#### 🎯 Request Priority Distribution")
-        priority_counts = df['priority'].value_counts().reset_index()
-        priority_counts.columns = ['Priority', 'Count']
-        
-        fig1 = px.pie(priority_counts, values='Count', names='Priority',
-                      title="My Requests by Priority",
-                      hole=0.3)
-        st.plotly_chart(fig1, use_container_width=True)
-        
-        # Status timeline
-        st.markdown("#### 📈 Request Status Timeline")
-        
-        if 'created_date' in df.columns:
-            df['created_date'] = pd.to_datetime(df['created_date'])
-            df['month'] = df['created_date'].dt.strftime('%Y-%m')
-            
-            monthly_stats = df.groupby('month').agg({
-                'id': 'count',
-                'status': lambda x: (x == 'Completed').sum()
-            }).reset_index()
-            
-            monthly_stats.columns = ['Month', 'Total', 'Completed']
-            
-            fig2 = px.bar(monthly_stats, x='Month', y=['Total', 'Completed'],
-                          title="Monthly Request Activity",
-                          barmode='group',
-                          labels={'value': 'Number of Requests'})
-            st.plotly_chart(fig2, use_container_width=True)
-        
-        # Recent activity
-        st.markdown("#### 📋 Recent Activity")
-        recent_requests = sorted(user_requests, key=lambda x: x.get('created_date', ''), reverse=True)[:5]
-        
+        # Show last 5 requests
+        recent_requests = user_requests[:5]
         for request in recent_requests:
-            status_icon = {
+            status_color = {
                 'Pending': '🟡',
-                'Assigned': '🔵', 
-                'Completed': '🟢',
-                'Approved': '✅',
-                'Rejected': '🔴'
+                'Assigned': '🔵',
+                'Completed': '🟣',
+                'Approved': '🟢'
             }.get(request['status'], '⚪')
             
             col1, col2 = st.columns([0.8, 0.2])
             with col1:
-                st.write(f"{status_icon} **{request['title']}**")
-                st.write(f"Priority: {request['priority']} | Status: {request['status']}")
+                st.write(f"**{request['title']}**")
+                st.write(f"{status_color} {request['status']} | 📍 {request['location']} | 🏢 {request['facility_type']}")
             with col2:
-                st.write(request.get('created_date', '')[:10])
-            
+                if st.button("View", key=f"view_{request['id']}"):
+                    st.session_state.viewing_request_id = request['id']
+                    st.rerun()
             st.divider()
     else:
-        st.info("📭 You haven't created any maintenance requests yet.")
-        st.markdown("""
-        ### 🚀 Getting Started
+        st.info("📭 No maintenance requests yet. Create your first request!")
+    
+    # Upcoming PPM
+    st.markdown("### 📅 Upcoming PPM")
+    
+    if ppm_schedules:
+        # Get schedules due in next 7 days
+        upcoming_ppm = []
+        for ppm in ppm_schedules:
+            try:
+                due_date = datetime.strptime(ppm['next_maintenance_date'], '%Y-%m-%d')
+                days_until = (due_date - datetime.now()).days
+                if 0 <= days_until <= 7:
+                    upcoming_ppm.append((ppm, days_until))
+            except:
+                continue
         
-        1. **Create a new request** using the "➕ New Request" tab
-        2. **Track PPM schedules** in the "📅 PPM" tab  
-        3. **Record generator usage** in the "🔌 Generator" tab
-        4. **Manage HSE activities** in the "🛡️ HSE" tab
-        5. **Book meeting rooms** in the "🏢 Space Management" tab
-        
-        ### 📞 Need Help?
-        - Contact your facility manager for urgent issues
-        - Check the knowledge base for common solutions
-        - Report system issues to IT support
-        """)
+        if upcoming_ppm:
+            for ppm, days in sorted(upcoming_ppm, key=lambda x: x[1]):
+                urgency = "🔴" if days == 0 else "🟠" if days <= 2 else "🟡"
+                st.write(f"{urgency} **{ppm['schedule_name']}** - Due in {days} days")
+                st.write(f"   📍 {ppm['facility_category']} | 👷 {ppm['assigned_vendor'] or 'Not assigned'}")
+        else:
+            st.info("🎉 No PPM due in the next 7 days")
+    else:
+        st.info("📭 No PPM schedules created yet")
 
-def show_new_request(username):
+# =============================================
+# MAINTENANCE REQUEST - FACILITY USER
+# =============================================
+def show_maintenance_request():
+    """Maintenance request creation and management"""
+    st.markdown("<h1 class='app-title'>🛠️ Maintenance Request</h1>", unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["➕ New Request", "📋 My Requests"])
+    
+    with tab1:
+        show_new_maintenance_request()
+    
+    with tab2:
+        show_my_requests()
+
+def show_new_maintenance_request():
+    """Form to create new maintenance request"""
     st.markdown("### ➕ Create New Maintenance Request")
     
-    with st.form("new_request_form"):
+    with st.form("maintenance_request_form"):
         col1, col2 = st.columns(2)
         
         with col1:
             title = st.text_input("Title *", placeholder="Brief description of the issue")
-            location = st.text_input("Location *", placeholder="Building, floor, room number")
+            location = st.text_input("Location *", placeholder="Where is the issue?")
             facility_type = st.selectbox(
                 "Facility Type *",
-                ["HVAC", "Electrical", "Plumbing", "Generator", "Fixture and Fittings", 
-                 "Building Structure", "Cleaning", "Security", "Other"]
+                ["Electrical", "HVAC", "Plumbing", "Generator", "Building", "Cleaning", "Security", "Other"]
             )
         
         with col2:
             priority = st.selectbox(
                 "Priority *",
-                ["Low", "Medium", "High", "Critical"],
-                help="Critical: Immediate attention required, High: Within 24 hours, Medium: Within 3 days, Low: Within 7 days"
+                ["Low", "Medium", "High", "Critical"]
             )
-            assigned_vendor = st.selectbox(
-                "Preferred Vendor (Optional)",
-                ["", "hvac_vendor", "generator_vendor", "electrical_vendor", 
-                 "plumbing_vendor", "building_vendor", "cleaning_vendor"]
-            )
+            # Vendor assignment will be done by manager
         
-        description = st.text_area(
-            "Description *", 
-            height=150,
-            placeholder="Please provide detailed description of the issue, including:\n• What is not working?\n• When did it start?\n• Any error messages?\n• Photos if available"
-        )
-        
-        job_breakdown = st.text_area(
-            "Suggested Job Breakdown (Optional)",
-            height=100,
-            placeholder="If you know what needs to be done, provide details here..."
-        )
+        description = st.text_area("Description *", 
+                                  height=150,
+                                  placeholder="Please provide detailed description of the issue...")
         
         submitted = st.form_submit_button("📤 Submit Request", use_container_width=True)
         
@@ -4110,220 +2677,655 @@ def show_new_request(username):
             if not all([title, location, facility_type, priority, description]):
                 st.error("❌ Please fill in all required fields (*)")
             else:
-                success = execute_update(
-                    '''INSERT INTO maintenance_requests 
-                    (title, description, location, facility_type, priority, 
-                     created_by, assigned_vendor, job_breakdown) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (title, description, location, facility_type, priority,
-                     username, assigned_vendor if assigned_vendor else None, job_breakdown)
-                )
+                success = execute_update('''
+                    INSERT INTO maintenance_requests 
+                    (title, description, location, facility_type, priority, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (title, description, location, facility_type, priority, 
+                     st.session_state.user['username']))
                 
                 if success:
                     st.success("✅ Maintenance request submitted successfully!")
                     
                     # Show next steps
-                    st.markdown("""
-                    ### 📋 Next Steps:
-                    
-                    1. **Request Received** - Your request has been logged
-                    2. **Assignment** - Facility manager will assign to a vendor
-                    3. **Job Execution** - Vendor will complete the work
-                    4. **Completion** - Vendor marks job as completed
-                    5. **Approval** - You'll be notified to approve the work
-                    6. **Payment** - Invoice processing after approval
-                    
-                    You can track the progress in the "📋 My Requests" tab.
+                    st.info("""
+                    **Next Steps:**
+                    1. Your request will be reviewed by the facility manager
+                    2. A vendor will be assigned based on the facility type
+                    3. You'll be notified when work begins
+                    4. You can track progress in "My Requests"
                     """)
                     
-                    st.rerun()
+                    # Option to create another request
+                    if st.button("➕ Create Another Request", use_container_width=True):
+                        st.rerun()
                 else:
                     st.error("❌ Failed to submit request")
 
-def show_user_requests_view(username):
+def show_my_requests():
+    """Display user's maintenance requests"""
     st.markdown("### 📋 My Maintenance Requests")
     
-    # Filter options
-    col1, col2, col3 = st.columns(3)
+    requests = get_user_requests(st.session_state.user['username'])
     
+    if not requests:
+        st.info("📭 You haven't created any maintenance requests yet.")
+        return
+    
+    # Filters
+    col1, col2 = st.columns(2)
     with col1:
         status_filter = st.selectbox(
             "Filter by Status",
-            ["All", "Pending", "Assigned", "Completed", "Approved", "Rejected"]
+            ["All", "Pending", "Assigned", "Completed", "Approved"]
         )
-    
     with col2:
         priority_filter = st.selectbox(
             "Filter by Priority",
-            ["All", "Critical", "High", "Medium", "Low"]
+            ["All", "Low", "Medium", "High", "Critical"]
         )
-    
-    with col3:
-        sort_order = st.selectbox(
-            "Sort by",
-            ["Newest First", "Oldest First", "Priority", "Status"]
-        )
-    
-    # Get user requests
-    user_requests = get_user_requests(username)
     
     # Apply filters
-    filtered_requests = user_requests
-    
+    filtered_requests = requests
     if status_filter != "All":
         filtered_requests = [r for r in filtered_requests if r['status'] == status_filter]
-    
     if priority_filter != "All":
         filtered_requests = [r for r in filtered_requests if r['priority'] == priority_filter]
     
-    # Apply sorting
-    if sort_order == "Newest First":
-        filtered_requests.sort(key=lambda x: x.get('created_date', ''), reverse=True)
-    elif sort_order == "Oldest First":
-        filtered_requests.sort(key=lambda x: x.get('created_date', ''))
-    elif sort_order == "Priority":
-        priority_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
-        filtered_requests.sort(key=lambda x: priority_order.get(x.get('priority', 'Low'), 3))
-    elif sort_order == "Status":
-        status_order = {"Pending": 0, "Assigned": 1, "Completed": 2, "Approved": 3, "Rejected": 4}
-        filtered_requests.sort(key=lambda x: status_order.get(x.get('status', 'Pending'), 5))
-    
-    if filtered_requests:
-        for request in filtered_requests:
-            # Determine status color
-            status_colors = {
-                'Pending': '🟡',
-                'Assigned': '🔵',
-                'Completed': '🟢',
-                'Approved': '✅',
-                'Rejected': '🔴'
-            }
+    # Display requests
+    for request in filtered_requests:
+        with st.expander(f"{request['title']} - {request['status']} - Priority: {request['priority']}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Location:** {request['location']}")
+                st.write(f"**Facility Type:** {request['facility_type']}")
+                st.write(f"**Created:** {request['created_date']}")
+                
+                # Status with color
+                status = request['status']
+                status_colors = {
+                    'Pending': '🟡',
+                    'Assigned': '🔵',
+                    'Completed': '🟣',
+                    'Approved': '🟢'
+                }
+                st.write(f"**Status:** {status_colors.get(status, '⚪')} {status}")
+                
+                if request['assigned_vendor']:
+                    st.write(f"**Assigned Vendor:** {request['assigned_vendor']}")
             
-            status_icon = status_colors.get(request['status'], '⚪')
-            
-            with st.expander(f"{status_icon} {request['title']} - {request['created_date'][:10]}"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write(f"**Location:** {request['location']}")
-                    st.write(f"**Facility Type:** {request['facility_type']}")
-                    st.write(f"**Priority:** {request['priority']}")
-                    st.write(f"**Status:** {request['status']}")
-                
-                with col2:
-                    st.write(f"**Created Date:** {request['created_date']}")
-                    st.write(f"**Assigned Vendor:** {request['assigned_vendor'] or 'Not assigned'}")
-                    if request['completed_date']:
-                        st.write(f"**Completed Date:** {request['completed_date']}")
-                    if request['invoice_amount']:
-                        st.write(f"**Invoice Amount:** {format_ngn(request['invoice_amount'])}")
-                
-                st.write(f"**Description:** {request['description']}")
-                
-                if request['job_breakdown']:
-                    st.write(f"**Job Breakdown:** {request['job_breakdown']}")
-                
+            with col2:
+                st.write(f"**Priority:** {request['priority']}")
+                if request['completed_date']:
+                    st.write(f"**Completed:** {request['completed_date']}")
                 if request['completion_notes']:
                     st.write(f"**Completion Notes:** {request['completion_notes']}")
                 
                 # Show workflow status
                 show_workflow_status(request)
-                
-                # PDF Download for completed/approved jobs
-                if request['status'] in ['Completed', 'Approved']:
-                    pdf_buffer = create_maintenance_pdf_report(request['id'])
-                    if pdf_buffer:
-                        st.download_button(
-                            label="📥 Download Job Report",
-                            data=pdf_buffer,
-                            file_name=f"job_report_{request['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            key=f"user_pdf_{request['id']}"
-                        )
-                
-                # Actions based on status
-                if request['status'] == 'Completed' and not request['requesting_dept_approval']:
-                    st.markdown("---")
-                    st.markdown("#### ✅ Department Approval Required")
-                    
-                    if st.button("✅ Approve Completion", key=f"dept_approve_{request['id']}", use_container_width=True):
-                        success = execute_update(
-                            '''UPDATE maintenance_requests 
+            
+            st.write(f"**Description:**")
+            st.info(request['description'])
+            
+            # Action buttons based on status
+            if request['status'] == 'Completed' and not request['requesting_dept_approval']:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Approve Completion", key=f"user_approve_{request['id']}", use_container_width=True):
+                        execute_update('''
+                            UPDATE maintenance_requests 
                             SET requesting_dept_approval = 1,
-                                department_approval_date = ?
-                            WHERE id = ?''',
-                            (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), request['id'])
-                        )
-                        
-                        if success:
-                            st.success("✅ Department approval submitted!")
-                            st.rerun()
-                    
-                    if st.button("❌ Request Revision", key=f"dept_reject_{request['id']}", use_container_width=True, type="secondary"):
-                        revision_reason = st.text_input(
-                            "Revision Reason", 
-                            key=f"revision_reason_{request['id']}",
-                            placeholder="What needs to be revised?"
-                        )
-                        
-                        if revision_reason:
-                            execute_update(
-                                '''UPDATE maintenance_requests 
-                                SET status = 'Assigned',
-                                    completion_notes = ?
-                                WHERE id = ?''',
-                                (f"Revision requested: {revision_reason}", request['id'])
-                            )
-                            st.success("✅ Revision requested from vendor")
-                            st.rerun()
-    else:
-        st.info("📭 No requests found with the selected filters")
+                                department_approval_date = datetime('now')
+                            WHERE id = ?
+                        ''', (request['id'],))
+                        st.success("✅ Approved! Sent to manager for final approval.")
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Request Changes", key=f"user_reject_{request['id']}", 
+                               use_container_width=True, type="secondary"):
+                        # Here you could add a modal for feedback
+                        execute_update('''
+                            UPDATE maintenance_requests 
+                            SET status = 'Assigned',
+                                completion_notes = COALESCE(completion_notes || '\n\nRejected by user: ' || datetime('now'), 'Rejected by user')
+                            WHERE id = ?
+                        ''', (request['id'],))
+                        st.success("✅ Sent back to vendor for changes.")
+                        st.rerun()
+            
+            # PDF report for completed/approved requests
+            if request['status'] in ['Completed', 'Approved']:
+                st.divider()
+                st.markdown("#### 📄 Reports")
+                
+                pdf_buffer = create_maintenance_pdf_report(request['id'])
+                if pdf_buffer:
+                    pdf_link = get_pdf_download_link(pdf_buffer, f"Maintenance_Report_{request['id']}.pdf")
+                    st.markdown(pdf_link, unsafe_allow_html=True)
 
 # =============================================
-# AUTHENTICATION & MAIN APP FLOW
+# FACILITY MANAGER FUNCTIONS
 # =============================================
-def login():
-    st.markdown("<h1 class='app-title'>🏢 A-Z Facilities Management Pro APP™</h1>", unsafe_allow_html=True)
+def show_facility_manager_dashboard():
+    """Dashboard for facility manager"""
+    st.markdown("<h1 class='dashboard-title'>👨‍💼 Facility Manager Dashboard</h1>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    # Get all data for metrics
+    all_requests = get_all_requests()
+    all_ppm = execute_query('SELECT * FROM ppm_schedules')
+    all_invoices = execute_query('SELECT * FROM invoices')
+    all_vendors = execute_query('SELECT * FROM vendors')
+    
+    # Calculate metrics
+    pending_requests = [r for r in all_requests if r['status'] == 'Pending']
+    active_requests = [r for r in all_requests if r['status'] == 'Assigned']
+    completed_requests = [r for r in all_requests if r['status'] == 'Completed']
+    ppm_due = [p for p in all_ppm if p['status'] in ['Due', 'Prepare']]
+    pending_invoices = [i for i in all_invoices if i['status'] == 'Pending']
+    
+    # Calculate financial metrics
+    total_invoice_amount = sum(i['total_amount'] for i in all_invoices if i['status'] == 'Approved')
+    pending_invoice_amount = sum(i['total_amount'] for i in pending_invoices)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        create_metric_card("Pending Requests", len(pending_requests), "📋")
     
     with col2:
-        with st.container():
-            st.markdown("### 🔐 Login")
+        create_metric_card("PPM Due", len(ppm_due), "📅")
+    
+    with col3:
+        create_metric_card("Pending Invoices", f"₦{pending_invoice_amount:,.0f}", "💰")
+    
+    with col4:
+        create_metric_card("Active Vendors", len(all_vendors), "👷")
+    
+    st.divider()
+    
+    # Quick actions
+    st.markdown("### 🚀 Quick Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("👀 Review Requests", use_container_width=True):
+            st.session_state.current_page = "manager_requests"
+            st.rerun()
+    
+    with col2:
+        if st.button("✅ Approve Jobs", use_container_width=True):
+            st.session_state.current_page = "manager_approvals"
+            st.rerun()
+    
+    with col3:
+        if st.button("💰 Invoice Approval", use_container_width=True):
+            st.session_state.current_page = "invoice_management"
+            st.rerun()
+    
+    with col4:
+        if st.button("👷 Vendor Mgmt", use_container_width=True):
+            st.session_state.current_page = "vendor_management"
+            st.rerun()
+    
+    st.divider()
+    
+    # Recent activity in two columns
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 📋 Recent Requests")
+        if all_requests[:5]:
+            for request in all_requests[:5]:
+                status_color = {
+                    'Pending': '🟡',
+                    'Assigned': '🔵',
+                    'Completed': '🟣',
+                    'Approved': '🟢'
+                }.get(request['status'], '⚪')
+                
+                st.write(f"{status_color} **{request['title']}**")
+                st.write(f"   👤 {request['created_by']} | 📍 {request['location']}")
+        else:
+            st.info("📭 No recent requests")
+    
+    with col2:
+        st.markdown("### 📅 Upcoming PPM")
+        if all_ppm:
+            # Get PPM due in next 3 days
+            upcoming = []
+            for ppm in all_ppm:
+                try:
+                    due_date = datetime.strptime(ppm['next_maintenance_date'], '%Y-%m-%d')
+                    days_until = (due_date - datetime.now()).days
+                    if 0 <= days_until <= 3:
+                        upcoming.append((ppm, days_until))
+                except:
+                    continue
             
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            
+            if upcoming:
+                for ppm, days in sorted(upcoming, key=lambda x: x[1]):
+                    urgency = "🔴" if days == 0 else "🟠"
+                    st.write(f"{urgency} **{ppm['schedule_name']}**")
+                    st.write(f"   🏢 {ppm['facility_category']} | 👷 {ppm['assigned_vendor'] or 'Unassigned'}")
+            else:
+                st.info("🎉 No PPM due in next 3 days")
+        else:
+            st.info("📭 No PPM schedules")
+
+def show_manager_requests():
+    """Manager view of all maintenance requests"""
+    st.markdown("<h1 class='app-title'>📋 All Maintenance Requests</h1>", unsafe_allow_html=True)
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_filter = st.selectbox(
+            "Status",
+            ["All", "Pending", "Assigned", "Completed", "Approved"]
+        )
+    with col2:
+        priority_filter = st.selectbox(
+            "Priority",
+            ["All", "Low", "Medium", "High", "Critical"]
+        )
+    with col3:
+        facility_filter = st.selectbox(
+            "Facility Type",
+            ["All", "Electrical", "HVAC", "Plumbing", "Generator", "Building", "Cleaning", "Security", "Other"]
+        )
+    
+    # Get all requests
+    all_requests = get_all_requests()
+    
+    # Apply filters
+    filtered_requests = all_requests
+    if status_filter != "All":
+        filtered_requests = [r for r in filtered_requests if r['status'] == status_filter]
+    if priority_filter != "All":
+        filtered_requests = [r for r in filtered_requests if r['priority'] == priority_filter]
+    if facility_filter != "All":
+        filtered_requests = [r for r in filtered_requests if r['facility_type'] == facility_filter]
+    
+    # Display requests
+    for request in filtered_requests:
+        with st.expander(f"{request['title']} - Status: {request['status']} - Priority: {request['priority']}"):
             col1, col2 = st.columns(2)
             with col1:
-                login_button = st.button("Login", use_container_width=True)
+                st.write(f"**Created By:** {request['created_by']}")
+                st.write(f"**Location:** {request['location']}")
+                st.write(f"**Facility Type:** {request['facility_type']}")
+                st.write(f"**Created Date:** {request['created_date']}")
+            
             with col2:
-                if st.button("Clear", use_container_width=True, type="secondary"):
-                    st.rerun()
+                st.write(f"**Assigned Vendor:** {request['assigned_vendor'] or 'Not assigned'}")
+                st.write(f"**Completed Date:** {request['completed_date'] or 'Not completed'}")
+                st.write(f"**Approval Status:**")
+                st.write(f"  - Department: {'✅' if request['requesting_dept_approval'] else '❌'}")
+                st.write(f"  - Manager: {'✅' if request['facilities_manager_approval'] else '❌'}")
             
-            if login_button:
-                if not username or not password:
-                    st.error("❌ Please enter both username and password")
-                else:
-                    user = authenticate_user(username, password)
-                    if user:
-                        st.session_state.user = user
-                        st.session_state.logged_in = True
-                        st.success(f"✅ Welcome, {user['username']}!")
+            st.write(f"**Description:**")
+            st.info(request['description'])
+            
+            if request['completion_notes']:
+                st.write(f"**Completion Notes:**")
+                st.success(request['completion_notes'])
+            
+            # Manager actions based on status
+            if request['status'] == 'Pending':
+                st.markdown("#### 👷 Assign to Vendor")
+                vendors = execute_query(
+                    'SELECT * FROM vendors WHERE vendor_type = ? OR vendor_type LIKE ?',
+                    (request['facility_type'], f'%{request['facility_type']}%')
+                )
+                
+                if vendors:
+                    vendor_options = {f"{v['company_name']} ({v['username']})": v['username'] for v in vendors}
+                    selected_vendor = st.selectbox("Select Vendor", list(vendor_options.keys()), 
+                                                  key=f"vendor_select_{request['id']}")
+                    
+                    if st.button("✅ Assign Vendor", key=f"assign_{request['id']}"):
+                        vendor_username = vendor_options[selected_vendor]
+                        execute_update(
+                            'UPDATE maintenance_requests SET status = "Assigned", assigned_vendor = ? WHERE id = ?',
+                            (vendor_username, request['id'])
+                        )
+                        st.success(f"✅ Assigned to {selected_vendor}")
                         st.rerun()
-                    else:
-                        st.error("❌ Invalid username or password")
+                else:
+                    st.warning("No vendors available for this facility type")
             
+            elif request['status'] == 'Completed' and request['requesting_dept_approval'] and not request['facilities_manager_approval']:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Approve & Close", key=f"manager_approve_{request['id']}", 
+                               use_container_width=True):
+                        execute_update('''
+                            UPDATE maintenance_requests 
+                            SET facilities_manager_approval = 1,
+                                manager_approval_date = datetime('now'),
+                                status = 'Approved'
+                            WHERE id = ?
+                        ''', (request['id'],))
+                        st.success("✅ Job approved and closed!")
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Send Back", key=f"manager_reject_{request['id']}", 
+                               use_container_width=True, type="secondary"):
+                        execute_update('''
+                            UPDATE maintenance_requests 
+                            SET status = 'Assigned',
+                                requesting_dept_approval = 0
+                            WHERE id = ?
+                        ''', (request['id'],))
+                        st.success("✅ Sent back for rework")
+                        st.rerun()
+            
+            # View PDF report
+            if request['status'] in ['Completed', 'Approved']:
+                st.divider()
+                pdf_buffer = create_maintenance_pdf_report(request['id'])
+                if pdf_buffer:
+                    pdf_link = get_pdf_download_link(pdf_buffer, f"Report_{request['id']}.pdf")
+                    st.markdown(pdf_link, unsafe_allow_html=True)
+
+# =============================================
+# VENDOR FUNCTIONS
+# =============================================
+def show_vendor_dashboard():
+    """Dashboard for vendors"""
+    st.markdown("<h1 class='dashboard-title'>👷 Vendor Dashboard</h1>", unsafe_allow_html=True)
+    
+    # Get vendor's jobs
+    vendor_jobs = get_vendor_requests(st.session_state.user['username'])
+    active_jobs = [j for j in vendor_jobs if j['status'] == 'Assigned']
+    completed_jobs = [j for j in vendor_jobs if j['status'] == 'Completed']
+    approved_jobs = [j for j in vendor_jobs if j['status'] == 'Approved']
+    
+    # Get PPM assignments
+    ppm_assignments = execute_query(
+        'SELECT * FROM ppm_assignments WHERE vendor_username = ?',
+        (st.session_state.user['username'],)
+    )
+    active_ppm = [p for p in ppm_assignments if p['status'] == 'Assigned']
+    completed_ppm = [p for p in ppm_assignments if p['status'] == 'Completed']
+    
+    # Get pending invoices
+    pending_invoices = execute_query(
+        'SELECT * FROM invoices WHERE vendor_username = ? AND status = "Pending"',
+        (st.session_state.user['username'],)
+    )
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        create_metric_card("Active Jobs", len(active_jobs), "🛠️")
+    
+    with col2:
+        create_metric_card("PPM Due", len(active_ppm), "📅")
+    
+    with col3:
+        create_metric_card("Pending Invoices", len(pending_invoices), "💰")
+    
+    with col4:
+        total_completed = len(completed_jobs) + len(completed_ppm)
+        create_metric_card("Completed", total_completed, "✅")
+    
+    st.divider()
+    
+    # Quick actions
+    st.markdown("### 🚀 Quick Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📋 View Jobs", use_container_width=True):
+            st.session_state.current_page = "vendor_jobs"
+            st.rerun()
+    
+    with col2:
+        if st.button("📅 PPM Tasks", use_container_width=True):
+            st.session_state.current_page = "vendor_ppm"
+            st.rerun()
+    
+    with col3:
+        if st.button("💰 Create Invoice", use_container_width=True):
+            st.session_state.current_page = "vendor_invoice"
+            st.rerun()
+    
+    with col4:
+        if st.button("📊 My Performance", use_container_width=True):
+            st.session_state.current_page = "vendor_performance"
+            st.rerun()
+    
+    st.divider()
+    
+    # Active jobs
+    st.markdown("### 🛠️ Active Jobs")
+    if active_jobs:
+        for job in active_jobs[:3]:
+            with st.container():
+                col1, col2 = st.columns([0.8, 0.2])
+                with col1:
+                    st.write(f"**{job['title']}**")
+                    st.write(f"📍 {job['location']} | 🏢 {job['facility_type']}")
+                    st.write(f"📅 Created: {job['created_date']}")
+                with col2:
+                    if st.button("Complete", key=f"complete_{job['id']}"):
+                        st.session_state.completing_job_id = job['id']
+                        st.rerun()
+                st.divider()
+    else:
+        st.info("📭 No active jobs")
+    
+    # Active PPM
+    st.markdown("### 📅 Active PPM")
+    if active_ppm:
+        for assignment in active_ppm[:3]:
+            schedule = execute_query(
+                'SELECT * FROM ppm_schedules WHERE id = ?',
+                (assignment['schedule_id'],)
+            )
+            if schedule:
+                schedule = schedule[0]
+                st.write(f"**{schedule['schedule_name']}**")
+                st.write(f"🏢 {schedule['facility_category']} | 📅 Due: {assignment['due_date']}")
+                if st.button("Complete PPM", key=f"complete_ppm_{assignment['id']}"):
+                    st.session_state.completing_ppm_assignment_id = assignment['id']
+                    st.rerun()
+                st.divider()
+    else:
+        st.info("📭 No active PPM assignments")
+
+def show_vendor_jobs():
+    """Vendor view of assigned jobs"""
+    st.markdown("<h1 class='app-title'>🛠️ My Jobs</h1>", unsafe_allow_html=True)
+    
+    vendor_jobs = get_vendor_requests(st.session_state.user['username'])
+    
+    if not vendor_jobs:
+        st.info("📭 No jobs assigned to you yet.")
+        return
+    
+    # Filter tabs
+    tab1, tab2, tab3 = st.tabs(["Active", "Completed", "All"])
+    
+    with tab1:
+        active_jobs = [j for j in vendor_jobs if j['status'] == 'Assigned']
+        show_jobs_list(active_jobs, "Active")
+    
+    with tab2:
+        completed_jobs = [j for j in vendor_jobs if j['status'] == 'Completed']
+        show_jobs_list(completed_jobs, "Completed")
+    
+    with tab3:
+        show_jobs_list(vendor_jobs, "All")
+    
+    # Handle job completion
+    if st.session_state.get('completing_job_id'):
+        show_complete_job_modal(st.session_state.completing_job_id)
+
+def show_jobs_list(jobs, title):
+    """Display list of jobs"""
+    st.markdown(f"### {title} Jobs ({len(jobs)})")
+    
+    for job in jobs:
+        with st.expander(f"{job['title']} - Priority: {job['priority']} - Status: {job['status']}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Created By:** {job['created_by']}")
+                st.write(f"**Location:** {job['location']}")
+                st.write(f"**Facility Type:** {job['facility_type']}")
+                st.write(f"**Created:** {job['created_date']}")
+            
+            with col2:
+                st.write(f"**Priority:** {job['priority']}")
+                if job['completed_date']:
+                    st.write(f"**Completed:** {job['completed_date']}")
+                if job['completion_notes']:
+                    st.write(f"**Completion Notes:** {job['completion_notes']}")
+            
+            st.write(f"**Description:**")
+            st.info(job['description'])
+            
+            # Action buttons
+            if job['status'] == 'Assigned':
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Mark as Complete", key=f"complete_{job['id']}", 
+                               use_container_width=True):
+                        st.session_state.completing_job_id = job['id']
+                        st.rerun()
+                
+                with col2:
+                    if st.button("📝 Add Job Breakdown", key=f"breakdown_{job['id']}", 
+                               use_container_width=True, type="secondary"):
+                        st.session_state.adding_breakdown_job_id = job['id']
+                        st.rerun()
+
+def show_complete_job_modal(job_id):
+    """Modal for completing a job"""
+    st.markdown("---")
+    st.markdown("### ✅ Complete Job")
+    
+    job = execute_query('SELECT * FROM maintenance_requests WHERE id = ?', (job_id,))
+    if not job:
+        st.error("Job not found")
+        return
+    
+    job = job[0]
+    
+    with st.form(f"complete_job_{job_id}"):
+        completion_notes = st.text_area(
+            "Completion Notes *",
+            height=150,
+            placeholder="Describe what work was completed..."
+        )
+        
+        job_breakdown = st.text_area(
+            "Job Breakdown",
+            height=100,
+            placeholder="Breakdown of work done (optional)...",
+            value=job.get('job_breakdown', '')
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("✅ Mark as Complete", use_container_width=True)
+        with col2:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
+        
+        if submit:
+            if not completion_notes:
+                st.error("❌ Please provide completion notes")
+            else:
+                # Update job status
+                execute_update('''
+                    UPDATE maintenance_requests 
+                    SET status = 'Completed',
+                        completed_date = datetime('now'),
+                        completion_notes = ?,
+                        job_breakdown = ?
+                    WHERE id = ?
+                ''', (completion_notes, job_breakdown, job_id))
+                
+                st.success("✅ Job marked as complete! Waiting for user approval.")
+                st.session_state.completing_job_id = None
+                st.rerun()
+        
+        if cancel:
+            st.session_state.completing_job_id = None
+            st.rerun()
+
+# =============================================
+# AUTHENTICATION & SESSION MANAGEMENT
+# =============================================
+def authenticate_user(username, password):
+    """Authenticate user"""
+    try:
+        user = execute_query('SELECT * FROM users WHERE username = ?', (username,))
+        if not user:
+            return None
+        
+        user = user[0]
+        # Simple password check (in production, use proper hashing)
+        if user['password_hash'] == password:
+            return user
+        return None
+    except Exception as e:
+        print(f"Authentication error: {e}")
+        return None
+
+def logout():
+    """Clear session state"""
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+def show_login():
+    """Login page"""
+    st.markdown("<h1 class='app-title'>🔐 A-Z Facilities Management Pro APP™</h1>", unsafe_allow_html=True)
+    
+    with st.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            with st.form("login_form"):
+                st.markdown("### Login to Your Account")
+                
+                username = st.text_input("👤 Username", placeholder="Enter your username")
+                password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    login_button = st.form_submit_button("🚀 Login", use_container_width=True)
+                with col2:
+                    if st.form_submit_button("🔄 Reset", use_container_width=True, type="secondary"):
+                        st.rerun()
+                
+                if login_button:
+                    if not username or not password:
+                        st.error("❌ Please enter both username and password")
+                    else:
+                        user = authenticate_user(username, password)
+                        if user:
+                            st.session_state.authenticated = True
+                            st.session_state.user = user
+                            st.success(f"✅ Welcome back, {user['username']}!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid username or password")
+            
+            # Demo credentials
             st.markdown("---")
             st.markdown("""
-            ### 🆕 Demo Accounts
+            ### 👥 Demo Credentials
             
             **Facility User:**
             - Username: `facility_user`
             - Password: `0123456`
             
             **Facility Manager:**
-            - Username: `facility_manager`  
+            - Username: `facility_manager`
             - Password: `0123456`
             
             **Vendor (HVAC):**
@@ -4331,157 +3333,174 @@ def login():
             - Password: `0123456`
             """)
 
-def authenticate_user(username, password):
-    users = execute_query(
-        'SELECT * FROM users WHERE username = ? AND password_hash = ?',
-        (username, password)
-    )
-    
-    if users:
-        return users[0]
-    return None
-
-def logout():
-    st.session_state.logged_in = False
-    st.session_state.user = None
-    st.rerun()
-
+# =============================================
+# MAIN APPLICATION LOGIC
+# =============================================
 def main():
-    # Check if user is logged in
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
+    """Main application logic"""
     
-    if not st.session_state.logged_in:
-        login()
+    # Initialize session state
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "dashboard"
+    
+    # Show login if not authenticated
+    if not st.session_state.authenticated:
+        show_login()
         return
     
-    # Sidebar with user info and navigation
+    # Sidebar navigation
     with st.sidebar:
         st.markdown(f"""
-        <div style='text-align: center; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                    border-radius: 10px; color: white; margin-bottom: 20px;'>
-            <h3 style='margin: 0;'>👤 {st.session_state.user['username']}</h3>
-            <p style='margin: 5px 0; opacity: 0.9;'>{st.session_state.user['role'].replace('_', ' ').title()}</p>
+        <div style='text-align: center; padding: 10px;'>
+            <h3>👤 {st.session_state.user['username']}</h3>
+            <p><strong>Role:</strong> {st.session_state.user['role'].replace('_', ' ').title()}</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Navigation based on user role
+        st.divider()
+        
+        # Navigation based on role
         user_role = st.session_state.user['role']
         
         if user_role == 'facility_user':
-            menu_options = [
-                "🏠 Dashboard",
-                "➕ New Request", 
-                "📋 My Requests",
-                "📅 PPM Management",
-                "🔌 Generator Records",
-                "🛡️ HSE Management",
-                "🏢 Space Management",
-                "🔓 Logout"
-            ]
+            st.markdown("### 📊 Navigation")
+            if st.button("🏠 Dashboard", use_container_width=True):
+                st.session_state.current_page = "dashboard"
+                st.rerun()
+            
+            if st.button("🛠️ Maintenance Request", use_container_width=True):
+                st.session_state.current_page = "maintenance_request"
+                st.rerun()
+            
+            if st.button("📅 PPM Management", use_container_width=True):
+                st.session_state.current_page = "ppm_management"
+                st.rerun()
+            
+            if st.button("⚡ Generator Management", use_container_width=True):
+                st.session_state.current_page = "generator_management"
+                st.rerun()
+            
+            if st.button("🏢 Space Management", use_container_width=True):
+                st.session_state.current_page = "space_management"
+                st.rerun()
+            
+            if st.button("🛡️ HSE Management", use_container_width=True):
+                st.session_state.current_page = "hse_management"
+                st.rerun()
+            
         elif user_role == 'facility_manager':
-            menu_options = [
-                "🏠 Dashboard",
-                "✅ Approvals",
-                "👥 Vendor Management", 
-                "📅 PPM Overview",
-                "🔌 Generator Records",
-                "🛡️ HSE Overview",
-                "🏢 Space Management",
-                "🔓 Logout"
-            ]
+            st.markdown("### 📊 Navigation")
+            if st.button("🏠 Dashboard", use_container_width=True):
+                st.session_state.current_page = "dashboard"
+                st.rerun()
+            
+            if st.button("📋 All Requests", use_container_width=True):
+                st.session_state.current_page = "manager_requests"
+                st.rerun()
+            
+            if st.button("✅ Approve Jobs", use_container_width=True):
+                st.session_state.current_page = "manager_approvals"
+                st.rerun()
+            
+            if st.button("💰 Invoice Management", use_container_width=True):
+                st.session_state.current_page = "invoice_management"
+                st.rerun()
+            
+            if st.button("👷 Vendor Management", use_container_width=True):
+                st.session_state.current_page = "vendor_management"
+                st.rerun()
+            
+            if st.button("📊 Reports & Analytics", use_container_width=True):
+                st.session_state.current_page = "reports_analytics"
+                st.rerun()
+        
         elif user_role == 'vendor':
-            menu_options = [
-                "🏠 Dashboard",
-                "📋 Assigned Jobs",
-                "📤 Submit Invoice",
-                "💼 PPM Assignments",
-                "📊 Performance",
-                "📝 Update Profile",
-                "🔓 Logout"
-            ]
-        else:
-            menu_options = ["🔓 Logout"]
+            st.markdown("### 📊 Navigation")
+            if st.button("🏠 Dashboard", use_container_width=True):
+                st.session_state.current_page = "dashboard"
+                st.rerun()
+            
+            if st.button("🛠️ My Jobs", use_container_width=True):
+                st.session_state.current_page = "vendor_jobs"
+                st.rerun()
+            
+            if st.button("📅 My PPM", use_container_width=True):
+                st.session_state.current_page = "vendor_ppm"
+                st.rerun()
+            
+            if st.button("💰 Create Invoice", use_container_width=True):
+                st.session_state.current_page = "vendor_invoice"
+                st.rerun()
+            
+            if st.button("📊 Performance", use_container_width=True):
+                st.session_state.current_page = "vendor_performance"
+                st.rerun()
         
-        selected_option = st.sidebar.selectbox("Navigation", menu_options)
+        st.divider()
         
-        # Logout button at bottom
-        st.sidebar.markdown("---")
-        if st.sidebar.button("🚪 Logout", use_container_width=True):
+        # Logout button
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
             logout()
     
-    # Main content based on selection
-    if selected_option == "🔓 Logout":
-        logout()
-    
-    elif selected_option == "🏠 Dashboard":
+    # Main content area
+    try:
+        user_role = st.session_state.user['role']
+        
+        # Facility User Pages
         if user_role == 'facility_user':
-            show_facility_user_dashboard()
+            if st.session_state.current_page == "dashboard":
+                show_facility_user_dashboard()
+            elif st.session_state.current_page == "maintenance_request":
+                show_maintenance_request()
+            elif st.session_state.current_page == "ppm_management":
+                show_ppm_management_facility_user()
+            elif st.session_state.current_page == "generator_management":
+                show_generator_management_facility_user()
+            elif st.session_state.current_page == "space_management":
+                show_space_management_facility_user()
+            elif st.session_state.current_page == "hse_management":
+                show_hse_management_facility_user()
+        
+        # Facility Manager Pages
         elif user_role == 'facility_manager':
-            show_facility_manager_dashboard()
+            if st.session_state.current_page == "dashboard":
+                show_facility_manager_dashboard()
+            elif st.session_state.current_page == "manager_requests":
+                show_manager_requests()
+            elif st.session_state.current_page == "manager_approvals":
+                show_facility_manager_approvals()
+            elif st.session_state.current_page == "invoice_management":
+                show_invoice_management()
+            elif st.session_state.current_page == "vendor_management":
+                show_vendor_management()
+            elif st.session_state.current_page == "reports_analytics":
+                show_reports_analytics()
+        
+        # Vendor Pages
         elif user_role == 'vendor':
-            show_vendor_dashboard()
+            if st.session_state.current_page == "dashboard":
+                show_vendor_dashboard()
+            elif st.session_state.current_page == "vendor_jobs":
+                show_vendor_jobs()
+            elif st.session_state.current_page == "vendor_ppm":
+                show_vendor_ppm()
+            elif st.session_state.current_page == "vendor_invoice":
+                show_vendor_invoice()
+            elif st.session_state.current_page == "vendor_performance":
+                show_vendor_performance()
     
-    elif selected_option == "➕ New Request" and user_role == 'facility_user':
-        show_new_request(st.session_state.user['username'])
-    
-    elif selected_option == "📋 My Requests" and user_role == 'facility_user':
-        show_user_requests_view(st.session_state.user['username'])
-    
-    elif selected_option == "📅 PPM Management" and user_role == 'facility_user':
-        show_ppm_management_facility_user()
-    
-    elif selected_option == "🔌 Generator Records" and user_role == 'facility_user':
-        show_generator_records_facility_user()
-    
-    elif selected_option == "🛡️ HSE Management" and user_role == 'facility_user':
-        show_hse_management_facility_user()
-    
-    elif selected_option == "🏢 Space Management" and user_role == 'facility_user':
-        show_space_management_facility_user()
-    
-    elif selected_option == "✅ Approvals" and user_role == 'facility_manager':
-        show_manager_approvals()
-    
-    elif selected_option == "👥 Vendor Management" and user_role == 'facility_manager':
-        show_vendor_management()
-    
-    elif selected_option == "📅 PPM Overview" and user_role == 'facility_manager':
-        show_manager_ppm_overview()
-    
-    elif selected_option == "🔌 Generator Records" and user_role == 'facility_manager':
-        show_manager_generator_records()
-    
-    elif selected_option == "🛡️ HSE Overview" and user_role == 'facility_manager':
-        show_manager_hse_overview()
-    
-    elif selected_option == "🏢 Space Management" and user_role == 'facility_manager':
-        show_manager_space_management()
-    
-    elif selected_option == "📋 Assigned Jobs" and user_role == 'vendor':
-        show_vendor_assigned_jobs(st.session_state.user['username'])
-    
-    elif selected_option == "📤 Submit Invoice" and user_role == 'vendor':
-        show_vendor_invoice_submission(st.session_state.user['username'])
-    
-    elif selected_option == "💼 PPM Assignments" and user_role == 'vendor':
-        show_vendor_ppm_assignments(st.session_state.user['username'])
-    
-    elif selected_option == "📊 Performance" and user_role == 'vendor':
-        show_vendor_performance(st.session_state.user['username'])
-    
-    elif selected_option == "📝 Update Profile" and user_role == 'vendor':
-        vendor_details = execute_query(
-            'SELECT * FROM vendors WHERE username = ?',
-            (st.session_state.user['username'],)
-        )
-        if vendor_details:
-            show_vendor_profile_update(vendor_details[0], st.session_state.user['username'])
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        st.info("Please try refreshing the page or contact support.")
 
 # =============================================
 # RUN THE APPLICATION
 # =============================================
 if __name__ == "__main__":
     main()
-
-
