@@ -2077,6 +2077,7 @@ def show_generator_records_facility_user():
         show_generator_analytics()
 
 def show_new_generator_record():
+    def show_new_generator_record():
     st.markdown("### 📝 New Generator Record")
     
     with st.form("generator_record_form"):
@@ -2089,17 +2090,17 @@ def show_new_generator_record():
                 ["Standby Generator", "Prime Generator", "Portable Generator", "Other"]
             )
             opening_hours = st.number_input("Opening Hours Reading *", 
-                                           min_value=0.0, value=121.0, step=0.1, format="%.1f")
-            closing_hours = st.number_input("Closing Hours Reading *", 
                                            min_value=0.0, value=122.0, step=0.1, format="%.1f")
+            closing_hours = st.number_input("Closing Hours Reading *", 
+                                           min_value=0.0, value=124.0, step=0.1, format="%.1f")
         
         with col2:
             opening_inventory = st.number_input("Opening Inventory (Liters) *", 
-                                               min_value=0.0, value=1200.0, step=0.1, format="%.1f")
-            purchase_liters = st.number_input("Purchase/Delivery (Liters)", 
-                                             min_value=0.0, value=0.0, step=0.1, format="%.1f")
-            closing_inventory = st.number_input("Closing Inventory (Liters) *", 
                                                min_value=0.0, value=800.0, step=0.1, format="%.1f")
+            purchase_liters = st.number_input("Purchase/Delivery (Liters)", 
+                                             min_value=0.0, value=500.0, step=0.1, format="%.1f")
+            closing_inventory = st.number_input("Closing Inventory (Liters) *", 
+                                               min_value=0.0, value=600.0, step=0.1, format="%.1f")
         
         recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'])
         notes = st.text_area("Notes", placeholder="Any observations, issues, or maintenance notes...", 
@@ -2120,51 +2121,65 @@ def show_new_generator_record():
                 st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
             else:
                 try:
-                    # First, update the table structure to add missing columns
+                    # SIMPLIFIED APPROACH: Try without the calculated columns first
                     conn = get_connection()
                     cursor = conn.cursor()
                     
-                    # Check if net_hours column exists
+                    # Check if table has all required columns
                     cursor.execute("PRAGMA table_info(generator_records)")
-                    columns = [col[1] for col in cursor.fetchall()]
+                    columns_info = cursor.fetchall()
+                    column_names = [col[1] for col in columns_info]
                     
-                    # Add missing columns if they don't exist
-                    if 'net_hours' not in columns:
-                        cursor.execute("ALTER TABLE generator_records ADD COLUMN net_hours REAL")
-                    
-                    if 'net_diesel_consumed' not in columns:
-                        cursor.execute("ALTER TABLE generator_records ADD COLUMN net_diesel_consumed REAL")
-                    
-                    conn.commit()
-                    
-                    # Now insert the record
-                    cursor.execute(
-                        '''INSERT INTO generator_records 
-                        (record_date, generator_type, opening_hours, closing_hours, 
-                         opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                         recorded_by, notes, net_hours, net_diesel_consumed) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (
-                            record_date.strftime('%Y-%m-%d'),
-                            str(generator_type),
-                            float(opening_hours),
-                            float(closing_hours),
-                            float(opening_inventory),
-                            float(purchase_liters),
-                            float(closing_inventory),
-                            str(recorded_by),
-                            str(notes) if notes else "",
-                            float(net_hours),
-                            float(net_diesel_consumed)
+                    # Insert based on what columns exist
+                    if 'net_hours' in column_names and 'net_diesel_consumed' in column_names:
+                        # Full insert with calculated columns
+                        cursor.execute(
+                            '''INSERT INTO generator_records 
+                            (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                             net_diesel_consumed, recorded_by, notes) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (
+                                record_date.strftime('%Y-%m-%d'),
+                                str(generator_type),
+                                float(opening_hours),
+                                float(closing_hours),
+                                float(net_hours),
+                                float(opening_inventory),
+                                float(purchase_liters),
+                                float(closing_inventory),
+                                float(net_diesel_consumed),
+                                str(recorded_by),
+                                str(notes) if notes else ""
+                            )
                         )
-                    )
+                    else:
+                        # Insert without calculated columns (they might be added later or calculated in queries)
+                        cursor.execute(
+                            '''INSERT INTO generator_records 
+                            (record_date, generator_type, opening_hours, closing_hours,
+                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                             recorded_by, notes) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (
+                                record_date.strftime('%Y-%m-%d'),
+                                str(generator_type),
+                                float(opening_hours),
+                                float(closing_hours),
+                                float(opening_inventory),
+                                float(purchase_liters),
+                                float(closing_inventory),
+                                str(recorded_by),
+                                str(notes) if notes else ""
+                            )
+                        )
                     
                     conn.commit()
                     conn.close()
                     
                     st.success("✅ Generator record saved successfully!")
                     
-                    # Show summary
+                    # Show summary (calculated locally)
                     st.markdown("#### 📊 Record Summary")
                     summary_col1, summary_col2 = st.columns(2)
                     with summary_col1:
@@ -2181,8 +2196,62 @@ def show_new_generator_record():
                     
                 except Exception as e:
                     st.error(f"❌ Error saving record: {str(e)}")
-                    st.info("Please try saving again after the table structure has been updated.")
-
+                    
+                    # Try one more approach - create a backup table
+                    try:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        
+                        # Create a new table with the correct structure
+                        cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS generator_records_new (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                record_date DATE NOT NULL,
+                                generator_type TEXT NOT NULL,
+                                opening_hours REAL NOT NULL,
+                                closing_hours REAL NOT NULL,
+                                net_hours REAL,
+                                opening_inventory_liters REAL NOT NULL,
+                                purchase_liters REAL DEFAULT 0,
+                                closing_inventory_liters REAL NOT NULL,
+                                net_diesel_consumed REAL,
+                                recorded_by TEXT NOT NULL,
+                                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                notes TEXT
+                            )
+                        ''')
+                        
+                        # Insert into the new table
+                        cursor.execute(
+                            '''INSERT INTO generator_records_new 
+                            (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                             net_diesel_consumed, recorded_by, notes) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (
+                                record_date.strftime('%Y-%m-%d'),
+                                str(generator_type),
+                                float(opening_hours),
+                                float(closing_hours),
+                                float(net_hours),
+                                float(opening_inventory),
+                                float(purchase_liters),
+                                float(closing_inventory),
+                                float(net_diesel_consumed),
+                                str(recorded_by),
+                                str(notes) if notes else ""
+                            )
+                        )
+                        
+                        conn.commit()
+                        conn.close()
+                        
+                        st.success("✅ Record saved to backup table!")
+                        st.info("Note: Records are being saved to a new table. The system will use this going forward.")
+                        st.rerun()
+                        
+                    except Exception as backup_error:
+                        st.error(f"❌ Backup also failed: {backup_error}")
 def show_generator_records():
     st.markdown("### 📋 Generator Records History")
     
@@ -2198,32 +2267,74 @@ def show_generator_records():
     generator_types = execute_query("SELECT DISTINCT generator_type FROM generator_records")
     generator_type_list = ["All"] + [g['generator_type'] for g in generator_types if g['generator_type']]
     
+    # Also check the new table
+    new_table_types = execute_query("SELECT DISTINCT generator_type FROM generator_records_new")
+    for g in new_table_types:
+        if g['generator_type'] and g['generator_type'] not in generator_type_list:
+            generator_type_list.append(g['generator_type'])
+    
     selected_type = st.selectbox("Filter by Generator Type", generator_type_list)
     
-    # Build query
-    query = '''
-        SELECT * FROM generator_records 
-        WHERE record_date BETWEEN ? AND ?
-    '''
-    params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
+    # Try to get records from both tables
+    all_records = []
     
-    if selected_type != "All":
-        query += " AND generator_type = ?"
-        params.append(selected_type)
+    # Try original table first
+    try:
+        query = '''
+            SELECT *, 'original' as source FROM generator_records 
+            WHERE record_date BETWEEN ? AND ?
+        '''
+        params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
+        
+        if selected_type != "All":
+            query += " AND generator_type = ?"
+            params.append(selected_type)
+        
+        query += " ORDER BY record_date DESC"
+        
+        original_records = execute_query(query, tuple(params))
+        all_records.extend(original_records)
+    except:
+        pass
     
-    query += " ORDER BY record_date DESC"
+    # Try new table
+    try:
+        query = '''
+            SELECT *, 'new' as source FROM generator_records_new 
+            WHERE record_date BETWEEN ? AND ?
+        '''
+        params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
+        
+        if selected_type != "All":
+            query += " AND generator_type = ?"
+            params.append(selected_type)
+        
+        query += " ORDER BY record_date DESC"
+        
+        new_records = execute_query(query, tuple(params))
+        all_records.extend(new_records)
+    except:
+        pass
     
-    records = execute_query(query, tuple(params))
-    
-    if records:
+    if all_records:
         # Convert to DataFrame for display
         df_data = []
         total_hours = 0
         total_diesel = 0
         
-        for record in records:
-            net_hours = safe_float(record.get('net_hours'), 0)
-            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
+        for record in all_records:
+            # Calculate net_hours if not in record
+            if 'net_hours' in record and record['net_hours'] is not None:
+                net_hours = safe_float(record.get('net_hours'), 0)
+            else:
+                net_hours = safe_float(record.get('closing_hours'), 0) - safe_float(record.get('opening_hours'), 0)
+            
+            # Calculate net_diesel if not in record
+            if 'net_diesel_consumed' in record and record['net_diesel_consumed'] is not None:
+                net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
+            else:
+                net_diesel = (safe_float(record.get('opening_inventory_liters'), 0) + 
+                            safe_float(record.get('purchase_liters'), 0)) - safe_float(record.get('closing_inventory_liters'), 0)
             
             df_data.append({
                 "Date": record.get('record_date', ''),
@@ -2248,7 +2359,7 @@ def show_generator_records():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Total Records", len(records))
+            st.metric("Total Records", len(all_records))
         with col2:
             st.metric("Total Hours Run", f"{total_hours:.1f}")
         with col3:
@@ -4577,6 +4688,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
