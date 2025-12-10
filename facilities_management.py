@@ -663,6 +663,9 @@ def execute_update(query, params=()):
         print(f"Update error: {e}")
         print(f"Query: {query}")
         print(f"Params: {params}")
+        # Print full traceback for debugging
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         return False
 
 # =============================================
@@ -2109,34 +2112,43 @@ def show_new_generator_record():
             elif net_diesel_consumed < 0:
                 st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
             else:
-                success = execute_update(
-                    '''INSERT INTO generator_records 
-                    (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                     opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                     net_diesel_consumed, recorded_by, notes) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
-                     net_hours, opening_inventory, purchase_liters, closing_inventory,
-                     net_diesel_consumed, recorded_by, notes)
-                )
-                if success:
-                    st.success("✅ Generator record saved successfully!")
+                try:
+                    success = execute_update(
+                        '''INSERT INTO generator_records 
+                        (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                         opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                         net_diesel_consumed, recorded_by, notes) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
+                         net_hours, opening_inventory, purchase_liters, closing_inventory,
+                         net_diesel_consumed, recorded_by, notes)
+                    )
                     
-                    # Show summary
-                    st.markdown("#### 📊 Record Summary")
-                    summary_col1, summary_col2 = st.columns(2)
-                    with summary_col1:
-                        st.write(f"**Net Hours Run:** {net_hours:.1f} hours")
-                        st.write(f"**Net Diesel Consumed:** {net_diesel_consumed:.1f} liters")
-                    with summary_col2:
-                        if net_hours > 0:
-                            consumption_rate = net_diesel_consumed / net_hours
-                            st.write(f"**Consumption Rate:** {consumption_rate:.2f} liters/hour")
-                        st.write(f"**Recorded By:** {recorded_by}")
-                    
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to save record")
+                    if success:
+                        st.success("✅ Generator record saved successfully!")
+                        
+                        # Show summary
+                        st.markdown("#### 📊 Record Summary")
+                        summary_col1, summary_col2 = st.columns(2)
+                        with summary_col1:
+                            st.write(f"**Net Hours Run:** {net_hours:.1f} hours")
+                            st.write(f"**Net Diesel Consumed:** {net_diesel_consumed:.1f} liters")
+                        with summary_col2:
+                            if net_hours > 0:
+                                consumption_rate = net_diesel_consumed / net_hours
+                                st.write(f"**Consumption Rate:** {consumption_rate:.2f} liters/hour")
+                            st.write(f"**Recorded By:** {recorded_by}")
+                        
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to save record")
+                except Exception as e:
+                    st.error(f"❌ Database error: {str(e)}")
+                    # Add debug info
+                    st.info(f"Debug values: opening_hours={opening_hours}, closing_hours={closing_hours}, "
+                           f"net_hours={net_hours}, opening_inventory={opening_inventory}, "
+                           f"purchase_liters={purchase_liters}, closing_inventory={closing_inventory}, "
+                           f"net_diesel_consumed={net_diesel_consumed}")
 
 def show_generator_records():
     st.markdown("### 📋 Generator Records History")
@@ -4483,6 +4495,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
