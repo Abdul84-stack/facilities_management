@@ -2076,10 +2076,6 @@ def show_generator_records_facility_user():
     with tab3:
         show_generator_analytics()
 
-def show_new_generator_record():
-    def show_new_generator_record():
-    st.markdown("### 📝 New Generator Record")
-    
     with st.form("generator_record_form"):
         col1, col2 = st.columns(2)
         
@@ -4688,6 +4684,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
