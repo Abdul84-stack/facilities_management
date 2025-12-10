@@ -447,7 +447,6 @@ def init_database():
         ''')
         
         # Generator Daily Records
-      # Replace the existing generator_records table creation with this:
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS generator_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4573,6 +4572,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
