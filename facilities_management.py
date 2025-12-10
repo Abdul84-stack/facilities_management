@@ -2109,95 +2109,211 @@ def show_new_generator_record():
             elif net_diesel_consumed < 0:
                 st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
             else:
-                # Debug: Print values before insert
-                st.info(f"Debug - Values to insert:")
-                st.info(f"Record Date: {record_date.strftime('%Y-%m-%d')}")
-                st.info(f"Generator Type: {generator_type}")
-                st.info(f"Opening Hours: {opening_hours}")
-                st.info(f"Closing Hours: {closing_hours}")
-                st.info(f"Net Hours: {net_hours}")
-                st.info(f"Opening Inventory: {opening_inventory}")
-                st.info(f"Purchase Liters: {purchase_liters}")
-                st.info(f"Closing Inventory: {closing_inventory}")
-                st.info(f"Net Diesel: {net_diesel_consumed}")
-                st.info(f"Recorded By: {recorded_by}")
-                
-                try:
-                    success = execute_update(
-                        '''INSERT INTO generator_records 
-                        (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                         opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                         net_diesel_consumed, recorded_by, notes) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
-                         net_hours, opening_inventory, purchase_liters, closing_inventory,
-                         net_diesel_consumed, recorded_by, notes)
-                    )
+                success = execute_update(
+                    '''INSERT INTO generator_records 
+                    (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                     opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                     net_diesel_consumed, recorded_by, notes) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
+                     net_hours, opening_inventory, purchase_liters, closing_inventory,
+                     net_diesel_consumed, recorded_by, notes)
+                )
+                if success:
+                    st.success("✅ Generator record saved successfully!")
                     
-                    if success:
-                        st.success("✅ Generator record saved successfully!")
-                        
-                        # Show summary
-                        st.markdown("#### 📊 Record Summary")
-                        summary_col1, summary_col2 = st.columns(2)
-                        with summary_col1:
-                            st.write(f"**Net Hours Run:** {net_hours:.1f} hours")
-                            st.write(f"**Net Diesel Consumed:** {net_diesel_consumed:.1f} liters")
-                        with summary_col2:
-                            if net_hours > 0:
-                                consumption_rate = net_diesel_consumed / net_hours
-                                st.write(f"**Consumption Rate:** {consumption_rate:.2f} liters/hour")
-                            st.write(f"**Recorded By:** {recorded_by}")
-                        
-                        # Add a rerun delay to show success message
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to save record. Please check database connection.")
-                        
-                        # Try to get more detailed error information
-                        try:
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            # Try to insert with error handling
-                            cursor.execute(
-                                '''INSERT INTO generator_records 
-                                (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                                 opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                                 net_diesel_consumed, recorded_by, notes) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
-                                 net_hours, opening_inventory, purchase_liters, closing_inventory,
-                                 net_diesel_consumed, recorded_by, notes)
-                            )
-                            conn.commit()
-                            conn.close()
-                            st.success("✅ Record saved on retry!")
-                            st.rerun()
-                        except Exception as db_error:
-                            st.error(f"❌ Database error: {db_error}")
-                            
-                except Exception as e:
-                    st.error(f"❌ Error saving record: {str(e)}")
+                    # Show summary
+                    st.markdown("#### 📊 Record Summary")
+                    summary_col1, summary_col2 = st.columns(2)
+                    with summary_col1:
+                        st.write(f"**Net Hours Run:** {net_hours:.1f} hours")
+                        st.write(f"**Net Diesel Consumed:** {net_diesel_consumed:.1f} liters")
+                    with summary_col2:
+                        if net_hours > 0:
+                            consumption_rate = net_diesel_consumed / net_hours
+                            st.write(f"**Consumption Rate:** {consumption_rate:.2f} liters/hour")
+                        st.write(f"**Recorded By:** {recorded_by}")
                     
-                    # Try alternative approach with different data types
-                    try:
-                        success = execute_update(
-                            '''INSERT INTO generator_records 
-                            (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                             net_diesel_consumed, recorded_by, notes) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (record_date.strftime('%Y-%m-%d'), generator_type, 
-                             float(opening_hours), float(closing_hours),
-                             float(net_hours), float(opening_inventory), 
-                             float(purchase_liters), float(closing_inventory),
-                             float(net_diesel_consumed), recorded_by, notes)
-                        )
-                        if success:
-                            st.success("✅ Generator record saved successfully (alternative method)!")
-                            st.rerun()
-                    except Exception as alt_error:
-                        st.error(f"❌ Alternative method also failed: {alt_error}")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to save record")
+
+def show_generator_records():
+    st.markdown("### 📋 Generator Records History")
+    
+    # Date range filter
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", 
+                                   value=datetime.now() - timedelta(days=30))
+    with col2:
+        end_date = st.date_input("End Date", value=datetime.now())
+    
+    # Generator type filter
+    generator_types = execute_query("SELECT DISTINCT generator_type FROM generator_records")
+    generator_type_list = ["All"] + [g['generator_type'] for g in generator_types if g['generator_type']]
+    
+    selected_type = st.selectbox("Filter by Generator Type", generator_type_list)
+    
+    # Build query
+    query = '''
+        SELECT * FROM generator_records 
+        WHERE record_date BETWEEN ? AND ?
+    '''
+    params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
+    
+    if selected_type != "All":
+        query += " AND generator_type = ?"
+        params.append(selected_type)
+    
+    query += " ORDER BY record_date DESC"
+    
+    records = execute_query(query, tuple(params))
+    
+    if records:
+        # Convert to DataFrame for display
+        df_data = []
+        total_hours = 0
+        total_diesel = 0
+        
+        for record in records:
+            net_hours = safe_float(record.get('net_hours'), 0)
+            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
+            
+            df_data.append({
+                "Date": record.get('record_date', ''),
+                "Generator Type": record.get('generator_type', ''),
+                "Opening Hours": f"{safe_float(record.get('opening_hours'), 0):.1f}",
+                "Closing Hours": f"{safe_float(record.get('closing_hours'), 0):.1f}",
+                "Net Hours": f"{net_hours:.1f}",
+                "Opening Inventory": f"{safe_float(record.get('opening_inventory_liters'), 0):.1f}L",
+                "Closing Inventory": f"{safe_float(record.get('closing_inventory_liters'), 0):.1f}L",
+                "Net Diesel": f"{net_diesel:.1f}L",
+                "Recorded By": record.get('recorded_by', '')
+            })
+            
+            total_hours += net_hours
+            total_diesel += net_diesel
+        
+        df = pd.DataFrame(df_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Summary statistics
+        st.markdown("#### 📊 Summary Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Records", len(records))
+        with col2:
+            st.metric("Total Hours Run", f"{total_hours:.1f}")
+        with col3:
+            st.metric("Total Diesel Used", f"{total_diesel:.1f}L")
+        with col4:
+            if total_hours > 0:
+                avg_consumption = total_diesel / total_hours
+                st.metric("Avg Consumption", f"{avg_consumption:.2f}L/hr")
+            else:
+                st.metric("Avg Consumption", "N/A")
+        
+        # Export option
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Export as CSV",
+            data=csv,
+            file_name=f"generator_records_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    else:
+        st.info("📭 No generator records found for the selected period")
+
+def show_generator_analytics():
+    st.markdown("### 📊 Generator Analytics")
+    
+    # Get data for the last 90 days
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=90)
+    
+    records = execute_query('''
+        SELECT * FROM generator_records 
+        WHERE record_date BETWEEN ? AND ?
+        ORDER BY record_date
+    ''', (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
+    
+    if not records:
+        st.info("📭 No generator data available for analytics")
+        return
+    
+    df = pd.DataFrame(records)
+    df['record_date'] = pd.to_datetime(df['record_date'])
+    
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_hours = df['net_hours'].sum()
+        create_metric_card("Total Hours", f"{total_hours:.0f}", "⏱️")
+    
+    with col2:
+        total_diesel = df['net_diesel_consumed'].sum()
+        create_metric_card("Total Diesel", f"{total_diesel:.0f}L", "⛽")
+    
+    with col3:
+        avg_daily_hours = total_hours / len(df['record_date'].unique()) if len(df['record_date'].unique()) > 0 else 0
+        create_metric_card("Avg Daily Hours", f"{avg_daily_hours:.1f}", "📈")
+    
+    with col4:
+        if total_hours > 0:
+            avg_consumption = total_diesel / total_hours
+            create_metric_card("Avg Consumption", f"{avg_consumption:.2f}L/hr", "⚡")
+        else:
+            create_metric_card("Avg Consumption", "N/A", "⚡")
+    
+    st.divider()
+    
+    # Daily hours trend
+    st.markdown("#### 📈 Daily Running Hours Trend")
+    daily_data = df.groupby('record_date').agg({
+        'net_hours': 'sum',
+        'net_diesel_consumed': 'sum'
+    }).reset_index()
+    
+    fig1 = px.line(daily_data, x='record_date', y='net_hours',
+                   title="Daily Generator Running Hours",
+                   labels={'net_hours': 'Hours', 'record_date': 'Date'})
+    st.plotly_chart(fig1, use_container_width=True)
+    
+    # Consumption analysis
+    st.markdown("#### ⛽ Diesel Consumption Analysis")
+    
+    if total_hours > 0:
+        # Calculate consumption rate
+        daily_data['consumption_rate'] = daily_data['net_diesel_consumed'] / daily_data['net_hours']
+        
+        fig2 = px.scatter(daily_data, x='net_hours', y='net_diesel_consumed',
+                         title="Hours vs Diesel Consumption",
+                         labels={'net_hours': 'Running Hours', 'net_diesel_consumed': 'Diesel (L)'},
+                         trendline="ols")
+        st.plotly_chart(fig2, use_container_width=True)
+        
+        # Show correlation
+        correlation = daily_data['net_hours'].corr(daily_data['net_diesel_consumed'])
+        st.write(f"**Correlation between hours and diesel consumption:** {correlation:.3f}")
+    
+    # Monthly summary
+    st.markdown("#### 📅 Monthly Summary")
+    df['month'] = df['record_date'].dt.strftime('%Y-%m')
+    monthly_data = df.groupby('month').agg({
+        'net_hours': 'sum',
+        'net_diesel_consumed': 'sum'
+    }).reset_index()
+    
+    fig3 = px.bar(monthly_data, x='month', y=['net_hours', 'net_diesel_consumed'],
+                  title="Monthly Hours and Diesel Usage",
+                  barmode='group',
+                  labels={'value': 'Amount', 'variable': 'Metric'})
+    st.plotly_chart(fig3, use_container_width=True)
+
 # =============================================
 # VENDOR DASHBOARD - ENHANCED
 # =============================================
@@ -4416,4 +4532,3 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
-
