@@ -1699,7 +1699,7 @@ def show_space_analytics():
     # Peak hours analysis
     st.markdown("#### ⏰ Peak Booking Hours")
     df['start_time'] = pd.to_datetime(df['start_time']).dt.hour
-    hourly_counts = df['start_time'].value_counts().sort_index().reset_index()
+    hourly_counts = df['start_time'].value_counts().sort_index().resetindex()
     hourly_counts.columns = ['Hour', 'Bookings']
     
     fig4 = px.bar(hourly_counts, x='Hour', y='Bookings',
@@ -1825,7 +1825,7 @@ def show_ppm_schedules():
                             st.success("✅ PPM approved!")
                             st.rerun()
                     
-                    # PDF Download for completed PPM
+                    # PDF Download for completed PPM - MOVED OUTSIDE THE FORM
                     if safe_get(schedule, 'status') == 'Completed':
                         pdf_buffer = create_ppm_pdf_report(schedule['id'])
                         if pdf_buffer:
@@ -2017,7 +2017,7 @@ def show_ppm_approvals_facility_user():
                 assignment = assignment[0]
                 st.write(f"**Completion Notes:** {safe_get(assignment, 'completion_notes', '')}")
             
-            # Approval buttons
+            # Approval buttons - MOVED OUTSIDE OF ANY FORM
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Approve PPM", key=f"user_approve_ppm_{schedule['id']}", 
@@ -2554,7 +2554,7 @@ def show_vendor_assigned_jobs(vendor_username):
                                 else:
                                     st.error("❌ Failed to update job")
                 
-                # Show PDF download for completed jobs
+                # Show PDF download for completed jobs - MOVED OUTSIDE THE FORM
                 if job['status'] == 'Completed':
                     st.markdown("---")
                     st.markdown("#### 📄 Job Reports")
@@ -2583,9 +2583,10 @@ def show_vendor_assigned_jobs(vendor_username):
                         else:
                             if st.button("📤 Create Invoice", key=f"create_invoice_{job['id']}", use_container_width=True):
                                 st.session_state.selected_job_for_invoice = job['id']
-                                st.switch_page("?tab=Submit Invoice")
+                                st.rerun()
     else:
         st.info("📭 No jobs assigned to you yet")
+
 def show_vendor_invoice_submission(vendor_username):
     st.markdown("### 📤 Submit Invoice")
     
@@ -2647,6 +2648,9 @@ def show_vendor_invoice_submission(vendor_username):
 def show_invoice_form(vendor_username, selected_job_id, job):
     """Show the invoice form for a specific job"""
     st.info(f"**Selected Job:** {job['title']} | **Location:** {job['location']}")
+    
+    # IMPORTANT FIX: Moved download button OUTSIDE the form
+    # The form will only contain input fields and the submit button
     
     with st.form("invoice_form"):
         # Generate invoice number
@@ -2732,18 +2736,23 @@ def show_invoice_form(vendor_username, selected_job_id, job):
                         
                         if new_invoice:
                             invoice_id = new_invoice[0]['id']
+                            # Show download button AFTER successful submission (outside form)
+                            st.markdown("---")
+                            st.markdown("### 📄 Invoice PDF Download")
                             pdf_buffer = create_invoice_pdf(invoice_id)
                             if pdf_buffer:
                                 st.download_button(
                                     label="📥 Download Invoice PDF",
                                     data=pdf_buffer,
                                     file_name=f"invoice_{invoice_number}.pdf",
-                                    mime="application/pdf"
+                                    mime="application/pdf",
+                                    key=f"invoice_download_{invoice_id}"
                                 )
                         
                         st.rerun()
                     else:
                         st.error("❌ Failed to submit invoice")
+
 def show_vendor_ppm_assignments(vendor_username):
     st.markdown("### 💼 PPM Assignments")
     
@@ -2791,7 +2800,7 @@ def show_vendor_ppm_assignments(vendor_username):
                 
                 st.write(f"**Description:** {assignment['description']}")
                 
-                # Update status
+                # Update status - MOVED OUTSIDE ANY FORM
                 if assignment['status'] in ['Assigned', 'In Progress']:
                     st.markdown("---")
                     new_status = st.selectbox(
@@ -2847,7 +2856,7 @@ def show_vendor_ppm_assignments(vendor_username):
                             else:
                                 st.error("❌ Failed to update assignment")
                 
-                # Show PDF download for completed PPM
+                # Show PDF download for completed PPM - MOVED OUTSIDE ANY FORM
                 if assignment['status'] == 'Completed':
                     pdf_buffer = create_ppm_pdf_report(assignment['schedule_id'])
                     if pdf_buffer:
@@ -2884,6 +2893,17 @@ def show_vendor_performance(vendor_username):
     df_jobs = pd.DataFrame(jobs_data)
     df_invoices = pd.DataFrame(invoices_data) if invoices_data else pd.DataFrame()
     
+    # FIXED: Safe date parsing
+    if not df_invoices.empty and 'invoice_date' in df_invoices.columns:
+        try:
+            # Try to parse dates with error handling
+            df_invoices['invoice_date'] = pd.to_datetime(df_invoices['invoice_date'], errors='coerce')
+            # Fill NaT with today's date
+            df_invoices['invoice_date'] = df_invoices['invoice_date'].fillna(pd.Timestamp.now())
+        except Exception as e:
+            st.warning(f"⚠️ Could not parse some invoice dates: {e}")
+            df_invoices['invoice_date'] = pd.Timestamp.now()
+    
     # Key metrics
     col1, col2, col3, col4 = st.columns(4)
     
@@ -2897,7 +2917,7 @@ def show_vendor_performance(vendor_username):
         create_metric_card("Completion Rate", f"{completion_rate:.1f}%", "✅")
     
     with col3:
-        if not df_invoices.empty:
+        if not df_invoices.empty and 'total_amount' in df_invoices.columns:
             total_revenue = df_invoices['total_amount'].sum()
             create_metric_card("Total Revenue", format_ngn(total_revenue), "💰")
         else:
@@ -2908,12 +2928,17 @@ def show_vendor_performance(vendor_username):
         completed_df = df_jobs[df_jobs['status'] == 'Completed']
         if not completed_df.empty and 'created_date' in completed_df.columns and 'completed_date' in completed_df.columns:
             try:
-                completed_df['created_date'] = pd.to_datetime(completed_df['created_date'])
-                completed_df['completed_date'] = pd.to_datetime(completed_df['completed_date'])
-                completed_df['completion_time'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
-                avg_time = completed_df['completion_time'].mean()
-                create_metric_card("Avg Time", f"{avg_time:.1f} days", "⏱️")
-            except:
+                completed_df['created_date'] = pd.to_datetime(completed_df['created_date'], errors='coerce')
+                completed_df['completed_date'] = pd.to_datetime(completed_df['completed_date'], errors='coerce')
+                # Filter out rows with invalid dates
+                completed_df = completed_df.dropna(subset=['created_date', 'completed_date'])
+                if not completed_df.empty:
+                    completed_df['completion_time'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
+                    avg_time = completed_df['completion_time'].mean()
+                    create_metric_card("Avg Time", f"{avg_time:.1f} days", "⏱️")
+                else:
+                    create_metric_card("Avg Time", "N/A", "⏱️")
+            except Exception as e:
                 create_metric_card("Avg Time", "N/A", "⏱️")
         else:
             create_metric_card("Avg Time", "N/A", "⏱️")
@@ -2924,37 +2949,52 @@ def show_vendor_performance(vendor_username):
     st.markdown("#### 📈 Monthly Performance")
     
     if not df_jobs.empty and 'created_date' in df_jobs.columns:
-        df_jobs['created_date'] = pd.to_datetime(df_jobs['created_date'])
-        df_jobs['month'] = df_jobs['created_date'].dt.strftime('%Y-%m')
-        
-        monthly_stats = df_jobs.groupby('month').agg({
-            'id': 'count',
-            'status': lambda x: (x == 'Completed').sum()
-        }).reset_index()
-        
-        monthly_stats.columns = ['Month', 'Total Jobs', 'Completed Jobs']
-        monthly_stats['Completion Rate'] = (monthly_stats['Completed Jobs'] / monthly_stats['Total Jobs'] * 100).round(1)
-        
-        fig = px.bar(monthly_stats, x='Month', y=['Total Jobs', 'Completed Jobs'],
-                     title="Monthly Job Assignments and Completions",
-                     barmode='group',
-                     labels={'value': 'Number of Jobs', 'variable': 'Metric'})
-        st.plotly_chart(fig, use_container_width=True)
+        try:
+            df_jobs['created_date'] = pd.to_datetime(df_jobs['created_date'], errors='coerce')
+            # Filter out rows with invalid dates
+            df_jobs_clean = df_jobs.dropna(subset=['created_date'])
+            if not df_jobs_clean.empty:
+                df_jobs_clean['month'] = df_jobs_clean['created_date'].dt.strftime('%Y-%m')
+                
+                monthly_stats = df_jobs_clean.groupby('month').agg({
+                    'id': 'count',
+                    'status': lambda x: (x == 'Completed').sum()
+                }).reset_index()
+                
+                monthly_stats.columns = ['Month', 'Total Jobs', 'Completed Jobs']
+                monthly_stats['Completion Rate'] = (monthly_stats['Completed Jobs'] / monthly_stats['Total Jobs'] * 100).round(1)
+                
+                fig = px.bar(monthly_stats, x='Month', y=['Total Jobs', 'Completed Jobs'],
+                             title="Monthly Job Assignments and Completions",
+                             barmode='group',
+                             labels={'value': 'Number of Jobs', 'variable': 'Metric'})
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("📭 No valid date data available for monthly analysis")
+        except Exception as e:
+            st.warning(f"⚠️ Could not generate monthly chart: {e}")
     
     # Revenue trend if invoices exist
-    if not df_invoices.empty and 'invoice_date' in df_invoices.columns:
+    if not df_invoices.empty and 'invoice_date' in df_invoices.columns and 'total_amount' in df_invoices.columns:
         st.markdown("#### 💰 Revenue Trend")
         
-        df_invoices['invoice_date'] = pd.to_datetime(df_invoices['invoice_date'])
-        df_invoices['month'] = df_invoices['invoice_date'].dt.strftime('%Y-%m')
-        
-        monthly_revenue = df_invoices.groupby('month')['total_amount'].sum().reset_index()
-        
-        fig2 = px.line(monthly_revenue, x='month', y='total_amount',
-                       title="Monthly Revenue",
-                       markers=True,
-                       labels={'total_amount': 'Revenue (₦)', 'month': 'Month'})
-        st.plotly_chart(fig2, use_container_width=True)
+        try:
+            # Filter out rows with invalid dates
+            df_invoices_clean = df_invoices.dropna(subset=['invoice_date'])
+            if not df_invoices_clean.empty:
+                df_invoices_clean['month'] = df_invoices_clean['invoice_date'].dt.strftime('%Y-%m')
+                
+                monthly_revenue = df_invoices_clean.groupby('month')['total_amount'].sum().reset_index()
+                
+                fig2 = px.line(monthly_revenue, x='month', y='total_amount',
+                               title="Monthly Revenue",
+                               markers=True,
+                               labels={'total_amount': 'Revenue (₦)', 'month': 'Month'})
+                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.info("📭 No valid invoice date data available for revenue analysis")
+        except Exception as e:
+            st.warning(f"⚠️ Could not generate revenue chart: {e}")
 
 def show_vendor_profile_update(vendor, vendor_username):
     st.markdown("### 📝 Update Vendor Profile")
@@ -3231,7 +3271,7 @@ def show_maintenance_request_approvals():
                     with col4:
                         st.metric("Total", format_ngn(inv['total_amount']))
                 
-                # PDF Download
+                # PDF Download - MOVED OUTSIDE ANY FORM
                 pdf_buffer = create_maintenance_pdf_report(request['id'])
                 if pdf_buffer:
                     st.download_button(
@@ -3242,7 +3282,7 @@ def show_maintenance_request_approvals():
                         key=f"manager_pdf_{request['id']}"
                     )
                 
-                # Approval buttons
+                # Approval buttons - MOVED OUTSIDE ANY FORM
                 st.markdown("---")
                 col1, col2 = st.columns(2)
                 
@@ -3331,7 +3371,7 @@ def show_ppm_manager_approvals():
                 assignment = assignment[0]
                 st.write(f"**Completion Notes:** {assignment['completion_notes']}")
             
-            # PDF Download
+            # PDF Download - MOVED OUTSIDE ANY FORM
             pdf_buffer = create_ppm_pdf_report(schedule['id'])
             if pdf_buffer:
                 st.download_button(
@@ -3342,7 +3382,7 @@ def show_ppm_manager_approvals():
                     key=f"manager_ppm_pdf_{schedule['id']}"
                 )
             
-            # Approval buttons
+            # Approval buttons - MOVED OUTSIDE ANY FORM
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Final Approve PPM", key=f"manager_approve_ppm_{schedule['id']}", 
@@ -3633,7 +3673,7 @@ def show_manager_ppm_overview():
                 
                 st.write(f"**Description:** {schedule['description']}")
                 
-                # Management actions
+                # Management actions - MOVED OUTSIDE ANY FORM
                 if schedule['status'] in ['Prepare', 'Due'] and not schedule['assigned_vendor']:
                     st.markdown("---")
                     st.markdown("##### 👷 Assign to Vendor")
@@ -3680,7 +3720,7 @@ def show_manager_ppm_overview():
                             st.success("✅ PPM assigned to vendor successfully!")
                             st.rerun()
                 
-                # PDF Download for completed PPM
+                # PDF Download for completed PPM - MOVED OUTSIDE ANY FORM
                 if schedule['status'] == 'Completed':
                     pdf_buffer = create_ppm_pdf_report(schedule['id'])
                     if pdf_buffer:
@@ -4229,7 +4269,7 @@ def show_user_requests_view(username):
                 # Show workflow status
                 show_workflow_status(request)
                 
-                # PDF Download for completed/approved jobs
+                # PDF Download for completed/approved jobs - MOVED OUTSIDE ANY FORM
                 if request['status'] in ['Completed', 'Approved']:
                     pdf_buffer = create_maintenance_pdf_report(request['id'])
                     if pdf_buffer:
@@ -4241,7 +4281,7 @@ def show_user_requests_view(username):
                             key=f"user_pdf_{request['id']}"
                         )
                 
-                # Actions based on status
+                # Actions based on status - MOVED OUTSIDE ANY FORM
                 if request['status'] == 'Completed' and not request['requesting_dept_approval']:
                     st.markdown("---")
                     st.markdown("#### ✅ Department Approval Required")
@@ -4347,10 +4387,19 @@ def logout():
     st.rerun()
 
 def main():
-    # Check if user is logged in
+    # Initialize session state variables
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    if 'ppm_filter' not in st.session_state:
+        st.session_state.ppm_filter = 'All'
+    if 'selected_job_for_invoice' not in st.session_state:
+        st.session_state.selected_job_for_invoice = None
+    if 'assigning_schedule_id' not in st.session_state:
+        st.session_state.assigning_schedule_id = None
     
+    # Check if user is logged in
     if not st.session_state.logged_in:
         login()
         return
@@ -4483,5 +4532,3 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
-
-
