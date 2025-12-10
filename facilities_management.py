@@ -338,6 +338,7 @@ inject_custom_css()
 # =============================================
 # DATABASE SETUP - ENHANCED WITH NEW TABLES
 # =============================================
+
 def init_database():
     try:
         conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
@@ -446,24 +447,25 @@ def init_database():
             )
         ''')
         
-        # Generator Daily Records
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS generator_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        record_date DATE NOT NULL,
-        generator_type TEXT NOT NULL,
-        opening_hours REAL NOT NULL,
-        closing_hours REAL NOT NULL,
-        net_hours REAL,
-        opening_inventory_liters REAL NOT NULL,
-        purchase_liters REAL DEFAULT 0,
-        closing_inventory_liters REAL NOT NULL,
-        net_diesel_consumed REAL,
-        recorded_by TEXT NOT NULL,
-        created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        notes TEXT
-    )
-''')
+        # Generator Daily Records - UPDATED WITH MISSING COLUMNS
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS generator_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_date DATE NOT NULL,
+                generator_type TEXT NOT NULL,
+                opening_hours REAL NOT NULL,
+                closing_hours REAL NOT NULL,
+                net_hours REAL,
+                opening_inventory_liters REAL NOT NULL,
+                purchase_liters REAL DEFAULT 0,
+                closing_inventory_liters REAL NOT NULL,
+                net_diesel_consumed REAL,
+                recorded_by TEXT NOT NULL,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT
+            )
+        ''')
+        
         # HSE Management
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS hse_schedules (
@@ -545,68 +547,74 @@ cursor.execute('''
         ''')
         
         # Insert sample users if table is empty
-        cursor.execute('SELECT COUNT(*) FROM users')
-        user_count = cursor.fetchone()[0]
-        
-        if user_count == 0:
-            sample_users = [
-                ('facility_user', '0123456', 'facility_user', None),
-                ('facility_manager', '0123456', 'facility_manager', None),
-                ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
-                ('generator_vendor', '0123456', 'vendor', 'Generator'),
-                ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
-                ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
-                ('hse_vendor', '0123456', 'vendor', 'HSE'),
-                ('space_vendor', '0123456', 'vendor', 'Space Management'),
-                ('plumbing_vendor', '0123456', 'vendor', 'Plumbing'),
-                ('electrical_vendor', '0123456', 'vendor', 'Electrical'),
-                ('cleaning_vendor', '0123456', 'vendor', 'Cleaning')
-            ]
+        try:
+            cursor.execute('SELECT COUNT(*) FROM users')
+            user_count = cursor.fetchone()[0]
             
-            for username, password, role, vendor_type in sample_users:
-                try:
-                    cursor.execute(
-                        'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
-                        (username, password, role, vendor_type)
-                    )
-                except:
-                    pass
+            if user_count == 0:
+                sample_users = [
+                    ('facility_user', '0123456', 'facility_user', None),
+                    ('facility_manager', '0123456', 'facility_manager', None),
+                    ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
+                    ('generator_vendor', '0123456', 'vendor', 'Generator'),
+                    ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
+                    ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
+                    ('hse_vendor', '0123456', 'vendor', 'HSE'),
+                    ('space_vendor', '0123456', 'vendor', 'Space Management'),
+                    ('plumbing_vendor', '0123456', 'vendor', 'Plumbing'),
+                    ('electrical_vendor', '0123456', 'vendor', 'Electrical'),
+                    ('cleaning_vendor', '0123456', 'vendor', 'Cleaning')
+                ]
+                
+                for username, password, role, vendor_type in sample_users:
+                    try:
+                        cursor.execute(
+                            'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
+                            (username, password, role, vendor_type)
+                        )
+                    except sqlite3.IntegrityError:
+                        pass  # User already exists
+        except Exception as e:
+            print(f"Error inserting sample users: {e}")
         
         # Insert sample vendors if table is empty
-        cursor.execute('SELECT COUNT(*) FROM vendors')
-        vendor_count = cursor.fetchone()[0]
-        
-        if vendor_count == 0:
-            sample_vendors = [
-                ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
-                 'HVAC installation, maintenance and repair services', 500000.00, 'TIN123456', 'RC789012',
-                 'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: ABC Bank, Acc: 123456789', 
-                 'HVAC Certified', '123 HVAC Street, City, State'),
-                ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
-                 'Generator installation and maintenance', 300000.00, 'TIN123457', 'RC789013',
-                 'Mike Johnson (Director)', 'Bank: XYZ Bank, Acc: 987654321', 
-                 'Generator Specialist', '456 Power Ave, City, State'),
-                ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
-                 'Fixture installation and repairs', 250000.00, 'TIN123458', 'RC789014',
-                 'Sarah Wilson (Owner)', 'Bank: DEF Bank, Acc: 456123789', 
-                 'Fixture Expert', '789 Fixture Road, City, State'),
-                ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
-                 'General building maintenance and repairs', 400000.00, 'TIN123459', 'RC789015',
-                 'David Brown (Manager)', 'Bank: GHI Bank, Acc: 789456123', 
-                 'Building Maintenance Certified', '321 Builders Lane, City, State')
-            ]
+        try:
+            cursor.execute('SELECT COUNT(*) FROM vendors')
+            vendor_count = cursor.fetchone()[0]
             
-            for vendor_data in sample_vendors:
-                try:
-                    cursor.execute('''
-                        INSERT INTO vendors 
-                        (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
-                         annual_turnover, tax_identification_number, rc_number, key_management_staff, 
-                         account_details, certification, address) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', vendor_data)
-                except:
-                    pass
+            if vendor_count == 0:
+                sample_vendors = [
+                    ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
+                     'HVAC installation, maintenance and repair services', 500000.00, 'TIN123456', 'RC789012',
+                     'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: ABC Bank, Acc: 123456789', 
+                     'HVAC Certified', '123 HVAC Street, City, State'),
+                    ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
+                     'Generator installation and maintenance', 300000.00, 'TIN123457', 'RC789013',
+                     'Mike Johnson (Director)', 'Bank: XYZ Bank, Acc: 987654321', 
+                     'Generator Specialist', '456 Power Ave, City, State'),
+                    ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
+                     'Fixture installation and repairs', 250000.00, 'TIN123458', 'RC789014',
+                     'Sarah Wilson (Owner)', 'Bank: DEF Bank, Acc: 456123789', 
+                     'Fixture Expert', '789 Fixture Road, City, State'),
+                    ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
+                     'General building maintenance and repairs', 400000.00, 'TIN123459', 'RC789015',
+                     'David Brown (Manager)', 'Bank: GHI Bank, Acc: 789456123', 
+                     'Building Maintenance Certified', '321 Builders Lane, City, State')
+                ]
+                
+                for vendor_data in sample_vendors:
+                    try:
+                        cursor.execute('''
+                            INSERT INTO vendors 
+                            (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                             annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                             account_details, certification, address) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', vendor_data)
+                    except sqlite3.IntegrityError:
+                        pass  # Vendor already exists
+        except Exception as e:
+            print(f"Error inserting sample vendors: {e}")
         
         conn.commit()
         conn.close()
@@ -614,10 +622,7 @@ cursor.execute('''
         
     except Exception as e:
         print(f"Database initialization error: {e}")
-
-# Initialize database
-init_database()
-
+        
 # =============================================
 # DATABASE FUNCTIONS
 # =============================================
@@ -4572,6 +4577,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
