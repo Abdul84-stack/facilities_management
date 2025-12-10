@@ -338,7 +338,6 @@ inject_custom_css()
 # =============================================
 # DATABASE SETUP - ENHANCED WITH NEW TABLES
 # =============================================
-
 def init_database():
     try:
         conn = sqlite3.connect('facilities_management.db', check_same_thread=False)
@@ -447,7 +446,7 @@ def init_database():
             )
         ''')
         
-        # Generator Daily Records - UPDATED WITH MISSING COLUMNS
+        # Generator Daily Records
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS generator_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -547,74 +546,68 @@ def init_database():
         ''')
         
         # Insert sample users if table is empty
-        try:
-            cursor.execute('SELECT COUNT(*) FROM users')
-            user_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM users')
+        user_count = cursor.fetchone()[0]
+        
+        if user_count == 0:
+            sample_users = [
+                ('facility_user', '0123456', 'facility_user', None),
+                ('facility_manager', '0123456', 'facility_manager', None),
+                ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
+                ('generator_vendor', '0123456', 'vendor', 'Generator'),
+                ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
+                ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
+                ('hse_vendor', '0123456', 'vendor', 'HSE'),
+                ('space_vendor', '0123456', 'vendor', 'Space Management'),
+                ('plumbing_vendor', '0123456', 'vendor', 'Plumbing'),
+                ('electrical_vendor', '0123456', 'vendor', 'Electrical'),
+                ('cleaning_vendor', '0123456', 'vendor', 'Cleaning')
+            ]
             
-            if user_count == 0:
-                sample_users = [
-                    ('facility_user', '0123456', 'facility_user', None),
-                    ('facility_manager', '0123456', 'facility_manager', None),
-                    ('hvac_vendor', '0123456', 'vendor', 'HVAC'),
-                    ('generator_vendor', '0123456', 'vendor', 'Generator'),
-                    ('fixture_vendor', '0123456', 'vendor', 'Fixture and Fittings'),
-                    ('building_vendor', '0123456', 'vendor', 'Building Maintenance'),
-                    ('hse_vendor', '0123456', 'vendor', 'HSE'),
-                    ('space_vendor', '0123456', 'vendor', 'Space Management'),
-                    ('plumbing_vendor', '0123456', 'vendor', 'Plumbing'),
-                    ('electrical_vendor', '0123456', 'vendor', 'Electrical'),
-                    ('cleaning_vendor', '0123456', 'vendor', 'Cleaning')
-                ]
-                
-                for username, password, role, vendor_type in sample_users:
-                    try:
-                        cursor.execute(
-                            'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
-                            (username, password, role, vendor_type)
-                        )
-                    except sqlite3.IntegrityError:
-                        pass  # User already exists
-        except Exception as e:
-            print(f"Error inserting sample users: {e}")
+            for username, password, role, vendor_type in sample_users:
+                try:
+                    cursor.execute(
+                        'INSERT INTO users (username, password_hash, role, vendor_type) VALUES (?, ?, ?, ?)',
+                        (username, password, role, vendor_type)
+                    )
+                except:
+                    pass
         
         # Insert sample vendors if table is empty
-        try:
-            cursor.execute('SELECT COUNT(*) FROM vendors')
-            vendor_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM vendors')
+        vendor_count = cursor.fetchone()[0]
+        
+        if vendor_count == 0:
+            sample_vendors = [
+                ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
+                 'HVAC installation, maintenance and repair services', 500000.00, 'TIN123456', 'RC789012',
+                 'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: ABC Bank, Acc: 123456789', 
+                 'HVAC Certified', '123 HVAC Street, City, State'),
+                ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
+                 'Generator installation and maintenance', 300000.00, 'TIN123457', 'RC789013',
+                 'Mike Johnson (Director)', 'Bank: XYZ Bank, Acc: 987654321', 
+                 'Generator Specialist', '456 Power Ave, City, State'),
+                ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
+                 'Fixture installation and repairs', 250000.00, 'TIN123458', 'RC789014',
+                 'Sarah Wilson (Owner)', 'Bank: DEF Bank, Acc: 456123789', 
+                 'Fixture Expert', '789 Fixture Road, City, State'),
+                ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
+                 'General building maintenance and repairs', 400000.00, 'TIN123459', 'RC789015',
+                 'David Brown (Manager)', 'Bank: GHI Bank, Acc: 789456123', 
+                 'Building Maintenance Certified', '321 Builders Lane, City, State')
+            ]
             
-            if vendor_count == 0:
-                sample_vendors = [
-                    ('hvac_vendor', 'HVAC Solutions Inc.', 'John HVAC', 'hvac@example.com', '123-456-7890', 'HVAC', 
-                     'HVAC installation, maintenance and repair services', 500000.00, 'TIN123456', 'RC789012',
-                     'John Smith (CEO), Jane Doe (Operations Manager)', 'Bank: ABC Bank, Acc: 123456789', 
-                     'HVAC Certified', '123 HVAC Street, City, State'),
-                    ('generator_vendor', 'Generator Pros Ltd.', 'Mike Generator', 'generator@example.com', '123-456-7891', 'Generator',
-                     'Generator installation and maintenance', 300000.00, 'TIN123457', 'RC789013',
-                     'Mike Johnson (Director)', 'Bank: XYZ Bank, Acc: 987654321', 
-                     'Generator Specialist', '456 Power Ave, City, State'),
-                    ('fixture_vendor', 'Fixture Masters Co.', 'Sarah Fixtures', 'fixtures@example.com', '123-456-7892', 'Fixture and Fittings',
-                     'Fixture installation and repairs', 250000.00, 'TIN123458', 'RC789014',
-                     'Sarah Wilson (Owner)', 'Bank: DEF Bank, Acc: 456123789', 
-                     'Fixture Expert', '789 Fixture Road, City, State'),
-                    ('building_vendor', 'Building Care Services', 'David Builder', 'building@example.com', '123-456-7893', 'Building Maintenance',
-                     'General building maintenance and repairs', 400000.00, 'TIN123459', 'RC789015',
-                     'David Brown (Manager)', 'Bank: GHI Bank, Acc: 789456123', 
-                     'Building Maintenance Certified', '321 Builders Lane, City, State')
-                ]
-                
-                for vendor_data in sample_vendors:
-                    try:
-                        cursor.execute('''
-                            INSERT INTO vendors 
-                            (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
-                             annual_turnover, tax_identification_number, rc_number, key_management_staff, 
-                             account_details, certification, address) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', vendor_data)
-                    except sqlite3.IntegrityError:
-                        pass  # Vendor already exists
-        except Exception as e:
-            print(f"Error inserting sample vendors: {e}")
+            for vendor_data in sample_vendors:
+                try:
+                    cursor.execute('''
+                        INSERT INTO vendors 
+                        (username, company_name, contact_person, email, phone, vendor_type, services_offered, 
+                         annual_turnover, tax_identification_number, rc_number, key_management_staff, 
+                         account_details, certification, address) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', vendor_data)
+                except:
+                    pass
         
         conn.commit()
         conn.close()
@@ -622,7 +615,10 @@ def init_database():
         
     except Exception as e:
         print(f"Database initialization error: {e}")
-        
+
+# Initialize database
+init_database()
+
 # =============================================
 # DATABASE FUNCTIONS
 # =============================================
@@ -1700,22 +1696,17 @@ def show_space_analytics():
                   hole=0.3)
     st.plotly_chart(fig3, use_container_width=True)
     
-    # Peak hours analysis - FIXED THE TYPO HERE
+    # Peak hours analysis
     st.markdown("#### ⏰ Peak Booking Hours")
-    if 'start_time' in df.columns and len(df) > 0:
-        try:
-            df['start_time'] = pd.to_datetime(df['start_time']).dt.hour
-            hourly_counts = df['start_time'].value_counts().sort_index().reset_index()
-            hourly_counts.columns = ['Hour', 'Bookings']
-            
-            fig4 = px.bar(hourly_counts, x='Hour', y='Bookings',
-                          title="Bookings by Hour of Day",
-                          labels={'Hour': 'Hour of Day (24h)'})
-            st.plotly_chart(fig4, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Could not generate peak hours chart: {e}")
-    else:
-        st.info("No time data available for peak hours analysis")
+    df['start_time'] = pd.to_datetime(df['start_time']).dt.hour
+    hourly_counts = df['start_time'].value_counts().sort_index().reset_index()
+    hourly_counts.columns = ['Hour', 'Bookings']
+    
+    fig4 = px.bar(hourly_counts, x='Hour', y='Bookings',
+                  title="Bookings by Hour of Day",
+                  labels={'Hour': 'Hour of Day (24h)'})
+    st.plotly_chart(fig4, use_container_width=True)
+
 # =============================================
 # PPM MANAGEMENT - FACILITY USER
 # =============================================
@@ -1834,7 +1825,7 @@ def show_ppm_schedules():
                             st.success("✅ PPM approved!")
                             st.rerun()
                     
-                    # PDF Download for completed PPM - MOVED OUTSIDE THE FORM
+                    # PDF Download for completed PPM
                     if safe_get(schedule, 'status') == 'Completed':
                         pdf_buffer = create_ppm_pdf_report(schedule['id'])
                         if pdf_buffer:
@@ -2026,7 +2017,7 @@ def show_ppm_approvals_facility_user():
                 assignment = assignment[0]
                 st.write(f"**Completion Notes:** {safe_get(assignment, 'completion_notes', '')}")
             
-            # Approval buttons - MOVED OUTSIDE OF ANY FORM
+            # Approval buttons
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Approve PPM", key=f"user_approve_ppm_{schedule['id']}", 
@@ -2076,6 +2067,9 @@ def show_generator_records_facility_user():
     with tab3:
         show_generator_analytics()
 
+def show_new_generator_record():
+    st.markdown("### 📝 New Generator Record")
+    
     with st.form("generator_record_form"):
         col1, col2 = st.columns(2)
         
@@ -2086,96 +2080,49 @@ def show_generator_records_facility_user():
                 ["Standby Generator", "Prime Generator", "Portable Generator", "Other"]
             )
             opening_hours = st.number_input("Opening Hours Reading *", 
-                                           min_value=0.0, value=122.0, step=0.1, format="%.1f")
+                                           min_value=0.0, step=0.1, format="%.1f")
             closing_hours = st.number_input("Closing Hours Reading *", 
-                                           min_value=0.0, value=124.0, step=0.1, format="%.1f")
+                                           min_value=0.0, step=0.1, format="%.1f")
         
         with col2:
             opening_inventory = st.number_input("Opening Inventory (Liters) *", 
-                                               min_value=0.0, value=800.0, step=0.1, format="%.1f")
+                                               min_value=0.0, step=0.1, format="%.1f")
             purchase_liters = st.number_input("Purchase/Delivery (Liters)", 
-                                             min_value=0.0, value=500.0, step=0.1, format="%.1f")
+                                             min_value=0.0, step=0.1, format="%.1f", value=0.0)
             closing_inventory = st.number_input("Closing Inventory (Liters) *", 
-                                               min_value=0.0, value=600.0, step=0.1, format="%.1f")
+                                               min_value=0.0, step=0.1, format="%.1f")
         
         recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'])
-        notes = st.text_area("Notes", placeholder="Any observations, issues, or maintenance notes...", 
-                            value="The Generator is in good condition")
+        notes = st.text_area("Notes", placeholder="Any observations, issues, or maintenance notes...")
         
         submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
         
         if submitted:
             # Calculate derived values
-            net_hours = float(closing_hours) - float(opening_hours)
-            net_diesel_consumed = (float(opening_inventory) + float(purchase_liters)) - float(closing_inventory)
+            net_hours = closing_hours - opening_hours
+            net_diesel_consumed = (opening_inventory + purchase_liters) - closing_inventory
             
             if not all([generator_type, recorded_by]):
                 st.error("❌ Please fill in all required fields (*)")
-            elif float(closing_hours) < float(opening_hours):
+            elif closing_hours < opening_hours:
                 st.error("❌ Closing hours must be greater than opening hours")
             elif net_diesel_consumed < 0:
                 st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
             else:
-                try:
-                    # SIMPLIFIED APPROACH: Try without the calculated columns first
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    
-                    # Check if table has all required columns
-                    cursor.execute("PRAGMA table_info(generator_records)")
-                    columns_info = cursor.fetchall()
-                    column_names = [col[1] for col in columns_info]
-                    
-                    # Insert based on what columns exist
-                    if 'net_hours' in column_names and 'net_diesel_consumed' in column_names:
-                        # Full insert with calculated columns
-                        cursor.execute(
-                            '''INSERT INTO generator_records 
-                            (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                             net_diesel_consumed, recorded_by, notes) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (
-                                record_date.strftime('%Y-%m-%d'),
-                                str(generator_type),
-                                float(opening_hours),
-                                float(closing_hours),
-                                float(net_hours),
-                                float(opening_inventory),
-                                float(purchase_liters),
-                                float(closing_inventory),
-                                float(net_diesel_consumed),
-                                str(recorded_by),
-                                str(notes) if notes else ""
-                            )
-                        )
-                    else:
-                        # Insert without calculated columns (they might be added later or calculated in queries)
-                        cursor.execute(
-                            '''INSERT INTO generator_records 
-                            (record_date, generator_type, opening_hours, closing_hours,
-                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                             recorded_by, notes) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (
-                                record_date.strftime('%Y-%m-%d'),
-                                str(generator_type),
-                                float(opening_hours),
-                                float(closing_hours),
-                                float(opening_inventory),
-                                float(purchase_liters),
-                                float(closing_inventory),
-                                str(recorded_by),
-                                str(notes) if notes else ""
-                            )
-                        )
-                    
-                    conn.commit()
-                    conn.close()
-                    
+                success = execute_update(
+                    '''INSERT INTO generator_records 
+                    (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                     opening_inventory_liters, purchase_liters, closing_inventory_liters,
+                     net_diesel_consumed, recorded_by, notes) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (record_date.strftime('%Y-%m-%d'), generator_type, opening_hours, closing_hours,
+                     net_hours, opening_inventory, purchase_liters, closing_inventory,
+                     net_diesel_consumed, recorded_by, notes)
+                )
+                if success:
                     st.success("✅ Generator record saved successfully!")
                     
-                    # Show summary (calculated locally)
+                    # Show summary
                     st.markdown("#### 📊 Record Summary")
                     summary_col1, summary_col2 = st.columns(2)
                     with summary_col1:
@@ -2187,67 +2134,10 @@ def show_generator_records_facility_user():
                             st.write(f"**Consumption Rate:** {consumption_rate:.2f} liters/hour")
                         st.write(f"**Recorded By:** {recorded_by}")
                     
-                    # Clear form by rerunning
                     st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"❌ Error saving record: {str(e)}")
-                    
-                    # Try one more approach - create a backup table
-                    try:
-                        conn = get_connection()
-                        cursor = conn.cursor()
-                        
-                        # Create a new table with the correct structure
-                        cursor.execute('''
-                            CREATE TABLE IF NOT EXISTS generator_records_new (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                record_date DATE NOT NULL,
-                                generator_type TEXT NOT NULL,
-                                opening_hours REAL NOT NULL,
-                                closing_hours REAL NOT NULL,
-                                net_hours REAL,
-                                opening_inventory_liters REAL NOT NULL,
-                                purchase_liters REAL DEFAULT 0,
-                                closing_inventory_liters REAL NOT NULL,
-                                net_diesel_consumed REAL,
-                                recorded_by TEXT NOT NULL,
-                                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                notes TEXT
-                            )
-                        ''')
-                        
-                        # Insert into the new table
-                        cursor.execute(
-                            '''INSERT INTO generator_records_new 
-                            (record_date, generator_type, opening_hours, closing_hours, net_hours,
-                             opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                             net_diesel_consumed, recorded_by, notes) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (
-                                record_date.strftime('%Y-%m-%d'),
-                                str(generator_type),
-                                float(opening_hours),
-                                float(closing_hours),
-                                float(net_hours),
-                                float(opening_inventory),
-                                float(purchase_liters),
-                                float(closing_inventory),
-                                float(net_diesel_consumed),
-                                str(recorded_by),
-                                str(notes) if notes else ""
-                            )
-                        )
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success("✅ Record saved to backup table!")
-                        st.info("Note: Records are being saved to a new table. The system will use this going forward.")
-                        st.rerun()
-                        
-                    except Exception as backup_error:
-                        st.error(f"❌ Backup also failed: {backup_error}")
+                else:
+                    st.error("❌ Failed to save record")
+
 def show_generator_records():
     st.markdown("### 📋 Generator Records History")
     
@@ -2263,74 +2153,32 @@ def show_generator_records():
     generator_types = execute_query("SELECT DISTINCT generator_type FROM generator_records")
     generator_type_list = ["All"] + [g['generator_type'] for g in generator_types if g['generator_type']]
     
-    # Also check the new table
-    new_table_types = execute_query("SELECT DISTINCT generator_type FROM generator_records_new")
-    for g in new_table_types:
-        if g['generator_type'] and g['generator_type'] not in generator_type_list:
-            generator_type_list.append(g['generator_type'])
-    
     selected_type = st.selectbox("Filter by Generator Type", generator_type_list)
     
-    # Try to get records from both tables
-    all_records = []
+    # Build query
+    query = '''
+        SELECT * FROM generator_records 
+        WHERE record_date BETWEEN ? AND ?
+    '''
+    params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
     
-    # Try original table first
-    try:
-        query = '''
-            SELECT *, 'original' as source FROM generator_records 
-            WHERE record_date BETWEEN ? AND ?
-        '''
-        params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
-        
-        if selected_type != "All":
-            query += " AND generator_type = ?"
-            params.append(selected_type)
-        
-        query += " ORDER BY record_date DESC"
-        
-        original_records = execute_query(query, tuple(params))
-        all_records.extend(original_records)
-    except:
-        pass
+    if selected_type != "All":
+        query += " AND generator_type = ?"
+        params.append(selected_type)
     
-    # Try new table
-    try:
-        query = '''
-            SELECT *, 'new' as source FROM generator_records_new 
-            WHERE record_date BETWEEN ? AND ?
-        '''
-        params = [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')]
-        
-        if selected_type != "All":
-            query += " AND generator_type = ?"
-            params.append(selected_type)
-        
-        query += " ORDER BY record_date DESC"
-        
-        new_records = execute_query(query, tuple(params))
-        all_records.extend(new_records)
-    except:
-        pass
+    query += " ORDER BY record_date DESC"
     
-    if all_records:
+    records = execute_query(query, tuple(params))
+    
+    if records:
         # Convert to DataFrame for display
         df_data = []
         total_hours = 0
         total_diesel = 0
         
-        for record in all_records:
-            # Calculate net_hours if not in record
-            if 'net_hours' in record and record['net_hours'] is not None:
-                net_hours = safe_float(record.get('net_hours'), 0)
-            else:
-                net_hours = safe_float(record.get('closing_hours'), 0) - safe_float(record.get('opening_hours'), 0)
-            
-            # Calculate net_diesel if not in record
-            if 'net_diesel_consumed' in record and record['net_diesel_consumed'] is not None:
-                net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
-            else:
-                net_diesel = (safe_float(record.get('opening_inventory_liters'), 0) + 
-                            safe_float(record.get('purchase_liters'), 0)) - safe_float(record.get('closing_inventory_liters'), 0)
+        for record in records:
+            net_hours = safe_float(record.get('net_hours'), 0)
+            net_diesel = safe_float(record.get('net_diesel_consumed'), 0)
             
             df_data.append({
                 "Date": record.get('record_date', ''),
@@ -2355,7 +2203,7 @@ def show_generator_records():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Total Records", len(all_records))
+            st.metric("Total Records", len(records))
         with col2:
             st.metric("Total Hours Run", f"{total_hours:.1f}")
         with col3:
@@ -2706,7 +2554,7 @@ def show_vendor_assigned_jobs(vendor_username):
                                 else:
                                     st.error("❌ Failed to update job")
                 
-                # Show PDF download for completed jobs - MOVED OUTSIDE THE FORM
+                # Show PDF download for completed jobs
                 if job['status'] == 'Completed':
                     st.markdown("---")
                     st.markdown("#### 📄 Job Reports")
@@ -2735,10 +2583,9 @@ def show_vendor_assigned_jobs(vendor_username):
                         else:
                             if st.button("📤 Create Invoice", key=f"create_invoice_{job['id']}", use_container_width=True):
                                 st.session_state.selected_job_for_invoice = job['id']
-                                st.rerun()
+                                st.switch_page("?tab=Submit Invoice")
     else:
         st.info("📭 No jobs assigned to you yet")
-
 def show_vendor_invoice_submission(vendor_username):
     st.markdown("### 📤 Submit Invoice")
     
@@ -2800,9 +2647,6 @@ def show_vendor_invoice_submission(vendor_username):
 def show_invoice_form(vendor_username, selected_job_id, job):
     """Show the invoice form for a specific job"""
     st.info(f"**Selected Job:** {job['title']} | **Location:** {job['location']}")
-    
-    # IMPORTANT FIX: Moved download button OUTSIDE the form
-    # The form will only contain input fields and the submit button
     
     with st.form("invoice_form"):
         # Generate invoice number
@@ -2888,23 +2732,18 @@ def show_invoice_form(vendor_username, selected_job_id, job):
                         
                         if new_invoice:
                             invoice_id = new_invoice[0]['id']
-                            # Show download button AFTER successful submission (outside form)
-                            st.markdown("---")
-                            st.markdown("### 📄 Invoice PDF Download")
                             pdf_buffer = create_invoice_pdf(invoice_id)
                             if pdf_buffer:
                                 st.download_button(
                                     label="📥 Download Invoice PDF",
                                     data=pdf_buffer,
                                     file_name=f"invoice_{invoice_number}.pdf",
-                                    mime="application/pdf",
-                                    key=f"invoice_download_{invoice_id}"
+                                    mime="application/pdf"
                                 )
                         
                         st.rerun()
                     else:
                         st.error("❌ Failed to submit invoice")
-
 def show_vendor_ppm_assignments(vendor_username):
     st.markdown("### 💼 PPM Assignments")
     
@@ -2952,7 +2791,7 @@ def show_vendor_ppm_assignments(vendor_username):
                 
                 st.write(f"**Description:** {assignment['description']}")
                 
-                # Update status - MOVED OUTSIDE ANY FORM
+                # Update status
                 if assignment['status'] in ['Assigned', 'In Progress']:
                     st.markdown("---")
                     new_status = st.selectbox(
@@ -3008,7 +2847,7 @@ def show_vendor_ppm_assignments(vendor_username):
                             else:
                                 st.error("❌ Failed to update assignment")
                 
-                # Show PDF download for completed PPM - MOVED OUTSIDE ANY FORM
+                # Show PDF download for completed PPM
                 if assignment['status'] == 'Completed':
                     pdf_buffer = create_ppm_pdf_report(assignment['schedule_id'])
                     if pdf_buffer:
@@ -3045,17 +2884,6 @@ def show_vendor_performance(vendor_username):
     df_jobs = pd.DataFrame(jobs_data)
     df_invoices = pd.DataFrame(invoices_data) if invoices_data else pd.DataFrame()
     
-    # FIXED: Safe date parsing
-    if not df_invoices.empty and 'invoice_date' in df_invoices.columns:
-        try:
-            # Try to parse dates with error handling
-            df_invoices['invoice_date'] = pd.to_datetime(df_invoices['invoice_date'], errors='coerce')
-            # Fill NaT with today's date
-            df_invoices['invoice_date'] = df_invoices['invoice_date'].fillna(pd.Timestamp.now())
-        except Exception as e:
-            st.warning(f"⚠️ Could not parse some invoice dates: {e}")
-            df_invoices['invoice_date'] = pd.Timestamp.now()
-    
     # Key metrics
     col1, col2, col3, col4 = st.columns(4)
     
@@ -3069,7 +2897,7 @@ def show_vendor_performance(vendor_username):
         create_metric_card("Completion Rate", f"{completion_rate:.1f}%", "✅")
     
     with col3:
-        if not df_invoices.empty and 'total_amount' in df_invoices.columns:
+        if not df_invoices.empty:
             total_revenue = df_invoices['total_amount'].sum()
             create_metric_card("Total Revenue", format_ngn(total_revenue), "💰")
         else:
@@ -3080,17 +2908,12 @@ def show_vendor_performance(vendor_username):
         completed_df = df_jobs[df_jobs['status'] == 'Completed']
         if not completed_df.empty and 'created_date' in completed_df.columns and 'completed_date' in completed_df.columns:
             try:
-                completed_df['created_date'] = pd.to_datetime(completed_df['created_date'], errors='coerce')
-                completed_df['completed_date'] = pd.to_datetime(completed_df['completed_date'], errors='coerce')
-                # Filter out rows with invalid dates
-                completed_df = completed_df.dropna(subset=['created_date', 'completed_date'])
-                if not completed_df.empty:
-                    completed_df['completion_time'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
-                    avg_time = completed_df['completion_time'].mean()
-                    create_metric_card("Avg Time", f"{avg_time:.1f} days", "⏱️")
-                else:
-                    create_metric_card("Avg Time", "N/A", "⏱️")
-            except Exception as e:
+                completed_df['created_date'] = pd.to_datetime(completed_df['created_date'])
+                completed_df['completed_date'] = pd.to_datetime(completed_df['completed_date'])
+                completed_df['completion_time'] = (completed_df['completed_date'] - completed_df['created_date']).dt.days
+                avg_time = completed_df['completion_time'].mean()
+                create_metric_card("Avg Time", f"{avg_time:.1f} days", "⏱️")
+            except:
                 create_metric_card("Avg Time", "N/A", "⏱️")
         else:
             create_metric_card("Avg Time", "N/A", "⏱️")
@@ -3101,52 +2924,37 @@ def show_vendor_performance(vendor_username):
     st.markdown("#### 📈 Monthly Performance")
     
     if not df_jobs.empty and 'created_date' in df_jobs.columns:
-        try:
-            df_jobs['created_date'] = pd.to_datetime(df_jobs['created_date'], errors='coerce')
-            # Filter out rows with invalid dates
-            df_jobs_clean = df_jobs.dropna(subset=['created_date'])
-            if not df_jobs_clean.empty:
-                df_jobs_clean['month'] = df_jobs_clean['created_date'].dt.strftime('%Y-%m')
-                
-                monthly_stats = df_jobs_clean.groupby('month').agg({
-                    'id': 'count',
-                    'status': lambda x: (x == 'Completed').sum()
-                }).reset_index()
-                
-                monthly_stats.columns = ['Month', 'Total Jobs', 'Completed Jobs']
-                monthly_stats['Completion Rate'] = (monthly_stats['Completed Jobs'] / monthly_stats['Total Jobs'] * 100).round(1)
-                
-                fig = px.bar(monthly_stats, x='Month', y=['Total Jobs', 'Completed Jobs'],
-                             title="Monthly Job Assignments and Completions",
-                             barmode='group',
-                             labels={'value': 'Number of Jobs', 'variable': 'Metric'})
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("📭 No valid date data available for monthly analysis")
-        except Exception as e:
-            st.warning(f"⚠️ Could not generate monthly chart: {e}")
+        df_jobs['created_date'] = pd.to_datetime(df_jobs['created_date'])
+        df_jobs['month'] = df_jobs['created_date'].dt.strftime('%Y-%m')
+        
+        monthly_stats = df_jobs.groupby('month').agg({
+            'id': 'count',
+            'status': lambda x: (x == 'Completed').sum()
+        }).reset_index()
+        
+        monthly_stats.columns = ['Month', 'Total Jobs', 'Completed Jobs']
+        monthly_stats['Completion Rate'] = (monthly_stats['Completed Jobs'] / monthly_stats['Total Jobs'] * 100).round(1)
+        
+        fig = px.bar(monthly_stats, x='Month', y=['Total Jobs', 'Completed Jobs'],
+                     title="Monthly Job Assignments and Completions",
+                     barmode='group',
+                     labels={'value': 'Number of Jobs', 'variable': 'Metric'})
+        st.plotly_chart(fig, use_container_width=True)
     
     # Revenue trend if invoices exist
-    if not df_invoices.empty and 'invoice_date' in df_invoices.columns and 'total_amount' in df_invoices.columns:
+    if not df_invoices.empty and 'invoice_date' in df_invoices.columns:
         st.markdown("#### 💰 Revenue Trend")
         
-        try:
-            # Filter out rows with invalid dates
-            df_invoices_clean = df_invoices.dropna(subset=['invoice_date'])
-            if not df_invoices_clean.empty:
-                df_invoices_clean['month'] = df_invoices_clean['invoice_date'].dt.strftime('%Y-%m')
-                
-                monthly_revenue = df_invoices_clean.groupby('month')['total_amount'].sum().reset_index()
-                
-                fig2 = px.line(monthly_revenue, x='month', y='total_amount',
-                               title="Monthly Revenue",
-                               markers=True,
-                               labels={'total_amount': 'Revenue (₦)', 'month': 'Month'})
-                st.plotly_chart(fig2, use_container_width=True)
-            else:
-                st.info("📭 No valid invoice date data available for revenue analysis")
-        except Exception as e:
-            st.warning(f"⚠️ Could not generate revenue chart: {e}")
+        df_invoices['invoice_date'] = pd.to_datetime(df_invoices['invoice_date'])
+        df_invoices['month'] = df_invoices['invoice_date'].dt.strftime('%Y-%m')
+        
+        monthly_revenue = df_invoices.groupby('month')['total_amount'].sum().reset_index()
+        
+        fig2 = px.line(monthly_revenue, x='month', y='total_amount',
+                       title="Monthly Revenue",
+                       markers=True,
+                       labels={'total_amount': 'Revenue (₦)', 'month': 'Month'})
+        st.plotly_chart(fig2, use_container_width=True)
 
 def show_vendor_profile_update(vendor, vendor_username):
     st.markdown("### 📝 Update Vendor Profile")
@@ -3423,7 +3231,7 @@ def show_maintenance_request_approvals():
                     with col4:
                         st.metric("Total", format_ngn(inv['total_amount']))
                 
-                # PDF Download - MOVED OUTSIDE ANY FORM
+                # PDF Download
                 pdf_buffer = create_maintenance_pdf_report(request['id'])
                 if pdf_buffer:
                     st.download_button(
@@ -3434,7 +3242,7 @@ def show_maintenance_request_approvals():
                         key=f"manager_pdf_{request['id']}"
                     )
                 
-                # Approval buttons - MOVED OUTSIDE ANY FORM
+                # Approval buttons
                 st.markdown("---")
                 col1, col2 = st.columns(2)
                 
@@ -3523,7 +3331,7 @@ def show_ppm_manager_approvals():
                 assignment = assignment[0]
                 st.write(f"**Completion Notes:** {assignment['completion_notes']}")
             
-            # PDF Download - MOVED OUTSIDE ANY FORM
+            # PDF Download
             pdf_buffer = create_ppm_pdf_report(schedule['id'])
             if pdf_buffer:
                 st.download_button(
@@ -3534,7 +3342,7 @@ def show_ppm_manager_approvals():
                     key=f"manager_ppm_pdf_{schedule['id']}"
                 )
             
-            # Approval buttons - MOVED OUTSIDE ANY FORM
+            # Approval buttons
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Final Approve PPM", key=f"manager_approve_ppm_{schedule['id']}", 
@@ -3825,7 +3633,7 @@ def show_manager_ppm_overview():
                 
                 st.write(f"**Description:** {schedule['description']}")
                 
-                # Management actions - MOVED OUTSIDE ANY FORM
+                # Management actions
                 if schedule['status'] in ['Prepare', 'Due'] and not schedule['assigned_vendor']:
                     st.markdown("---")
                     st.markdown("##### 👷 Assign to Vendor")
@@ -3872,7 +3680,7 @@ def show_manager_ppm_overview():
                             st.success("✅ PPM assigned to vendor successfully!")
                             st.rerun()
                 
-                # PDF Download for completed PPM - MOVED OUTSIDE ANY FORM
+                # PDF Download for completed PPM
                 if schedule['status'] == 'Completed':
                     pdf_buffer = create_ppm_pdf_report(schedule['id'])
                     if pdf_buffer:
@@ -4421,7 +4229,7 @@ def show_user_requests_view(username):
                 # Show workflow status
                 show_workflow_status(request)
                 
-                # PDF Download for completed/approved jobs - MOVED OUTSIDE ANY FORM
+                # PDF Download for completed/approved jobs
                 if request['status'] in ['Completed', 'Approved']:
                     pdf_buffer = create_maintenance_pdf_report(request['id'])
                     if pdf_buffer:
@@ -4433,7 +4241,7 @@ def show_user_requests_view(username):
                             key=f"user_pdf_{request['id']}"
                         )
                 
-                # Actions based on status - MOVED OUTSIDE ANY FORM
+                # Actions based on status
                 if request['status'] == 'Completed' and not request['requesting_dept_approval']:
                     st.markdown("---")
                     st.markdown("#### ✅ Department Approval Required")
@@ -4539,19 +4347,10 @@ def logout():
     st.rerun()
 
 def main():
-    # Initialize session state variables
+    # Check if user is logged in
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
-    if 'user' not in st.session_state:
-        st.session_state.user = None
-    if 'ppm_filter' not in st.session_state:
-        st.session_state.ppm_filter = 'All'
-    if 'selected_job_for_invoice' not in st.session_state:
-        st.session_state.selected_job_for_invoice = None
-    if 'assigning_schedule_id' not in st.session_state:
-        st.session_state.assigning_schedule_id = None
     
-    # Check if user is logged in
     if not st.session_state.logged_in:
         login()
         return
@@ -4684,10 +4483,6 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
-
-
-
-
 
 
 
