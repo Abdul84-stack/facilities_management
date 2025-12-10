@@ -447,24 +447,24 @@ def init_database():
         ''')
         
         # Generator Daily Records
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS generator_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                record_date DATE NOT NULL,
-                generator_type TEXT NOT NULL,
-                opening_hours REAL NOT NULL,
-                closing_hours REAL NOT NULL,
-                net_hours REAL,
-                opening_inventory_liters REAL NOT NULL,
-                purchase_liters REAL DEFAULT 0,
-                closing_inventory_liters REAL NOT NULL,
-                net_diesel_consumed REAL,
-                recorded_by TEXT NOT NULL,
-                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                notes TEXT
-            )
-        ''')
-        
+      # Replace the existing generator_records table creation with this:
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS generator_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_date DATE NOT NULL,
+        generator_type TEXT NOT NULL,
+        opening_hours REAL NOT NULL,
+        closing_hours REAL NOT NULL,
+        net_hours REAL,
+        opening_inventory_liters REAL NOT NULL,
+        purchase_liters REAL DEFAULT 0,
+        closing_inventory_liters REAL NOT NULL,
+        net_diesel_consumed REAL,
+        recorded_by TEXT NOT NULL,
+        created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT
+    )
+''')
         # HSE Management
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS hse_schedules (
@@ -1696,17 +1696,22 @@ def show_space_analytics():
                   hole=0.3)
     st.plotly_chart(fig3, use_container_width=True)
     
-    # Peak hours analysis
+    # Peak hours analysis - FIXED THE TYPO HERE
     st.markdown("#### ⏰ Peak Booking Hours")
-    df['start_time'] = pd.to_datetime(df['start_time']).dt.hour
-    hourly_counts = df['start_time'].value_counts().sort_index().resetindex()
-    hourly_counts.columns = ['Hour', 'Bookings']
-    
-    fig4 = px.bar(hourly_counts, x='Hour', y='Bookings',
-                  title="Bookings by Hour of Day",
-                  labels={'Hour': 'Hour of Day (24h)'})
-    st.plotly_chart(fig4, use_container_width=True)
-
+    if 'start_time' in df.columns and len(df) > 0:
+        try:
+            df['start_time'] = pd.to_datetime(df['start_time']).dt.hour
+            hourly_counts = df['start_time'].value_counts().sort_index().reset_index()
+            hourly_counts.columns = ['Hour', 'Bookings']
+            
+            fig4 = px.bar(hourly_counts, x='Hour', y='Bookings',
+                          title="Bookings by Hour of Day",
+                          labels={'Hour': 'Hour of Day (24h)'})
+            st.plotly_chart(fig4, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not generate peak hours chart: {e}")
+    else:
+        st.info("No time data available for peak hours analysis")
 # =============================================
 # PPM MANAGEMENT - FACILITY USER
 # =============================================
@@ -4568,5 +4573,6 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
