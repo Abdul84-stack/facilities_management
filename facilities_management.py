@@ -2080,20 +2080,21 @@ def show_new_generator_record():
                 ["Standby Generator", "Prime Generator", "Portable Generator", "Other"]
             )
             opening_hours = st.number_input("Opening Hours Reading *", 
-                                           min_value=0.0, value=0.0, step=0.1, format="%.1f")
+                                           min_value=0.0, value=121.0, step=0.1, format="%.1f")
             closing_hours = st.number_input("Closing Hours Reading *", 
-                                           min_value=0.0, value=0.0, step=0.1, format="%.1f")
+                                           min_value=0.0, value=122.0, step=0.1, format="%.1f")
         
         with col2:
             opening_inventory = st.number_input("Opening Inventory (Liters) *", 
-                                               min_value=0.0, value=0.0, step=0.1, format="%.1f")
+                                               min_value=0.0, value=1200.0, step=0.1, format="%.1f")
             purchase_liters = st.number_input("Purchase/Delivery (Liters)", 
                                              min_value=0.0, value=0.0, step=0.1, format="%.1f")
             closing_inventory = st.number_input("Closing Inventory (Liters) *", 
-                                               min_value=0.0, value=0.0, step=0.1, format="%.1f")
+                                               min_value=0.0, value=800.0, step=0.1, format="%.1f")
         
         recorded_by = st.text_input("Recorded By *", value=st.session_state.user['username'])
-        notes = st.text_area("Notes", placeholder="Any observations, issues, or maintenance notes...")
+        notes = st.text_area("Notes", placeholder="Any observations, issues, or maintenance notes...", 
+                            value="The Generator is in good condition")
         
         submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
         
@@ -2110,34 +2111,42 @@ def show_new_generator_record():
                 st.error("❌ Diesel consumption cannot be negative. Check your inventory figures.")
             else:
                 try:
-                    # Direct database connection approach
+                    # First, update the table structure to add missing columns
                     conn = get_connection()
                     cursor = conn.cursor()
                     
-                    # Check table structure
+                    # Check if net_hours column exists
                     cursor.execute("PRAGMA table_info(generator_records)")
-                    columns = cursor.fetchall()
-                    st.info(f"Table columns: {columns}")
+                    columns = [col[1] for col in cursor.fetchall()]
                     
-                    # Insert the record
+                    # Add missing columns if they don't exist
+                    if 'net_hours' not in columns:
+                        cursor.execute("ALTER TABLE generator_records ADD COLUMN net_hours REAL")
+                    
+                    if 'net_diesel_consumed' not in columns:
+                        cursor.execute("ALTER TABLE generator_records ADD COLUMN net_diesel_consumed REAL")
+                    
+                    conn.commit()
+                    
+                    # Now insert the record
                     cursor.execute(
                         '''INSERT INTO generator_records 
-                        (record_date, generator_type, opening_hours, closing_hours, net_hours,
+                        (record_date, generator_type, opening_hours, closing_hours, 
                          opening_inventory_liters, purchase_liters, closing_inventory_liters,
-                         net_diesel_consumed, recorded_by, notes) 
+                         recorded_by, notes, net_hours, net_diesel_consumed) 
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                         (
                             record_date.strftime('%Y-%m-%d'),
                             str(generator_type),
                             float(opening_hours),
                             float(closing_hours),
-                            float(net_hours),
                             float(opening_inventory),
                             float(purchase_liters),
                             float(closing_inventory),
-                            float(net_diesel_consumed),
                             str(recorded_by),
-                            str(notes) if notes else ""
+                            str(notes) if notes else "",
+                            float(net_hours),
+                            float(net_diesel_consumed)
                         )
                     )
                     
@@ -2162,39 +2171,8 @@ def show_new_generator_record():
                     st.rerun()
                     
                 except Exception as e:
-                    st.error(f"❌ Database error: {str(e)}")
-                    
-                    # Try to create table if it doesn't exist
-                    try:
-                        conn = get_connection()
-                        cursor = conn.cursor()
-                        
-                        # Recreate the table with correct structure
-                        cursor.execute('''
-                            CREATE TABLE IF NOT EXISTS generator_records (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                record_date DATE NOT NULL,
-                                generator_type TEXT NOT NULL,
-                                opening_hours REAL NOT NULL,
-                                closing_hours REAL NOT NULL,
-                                net_hours REAL,
-                                opening_inventory_liters REAL NOT NULL,
-                                purchase_liters REAL DEFAULT 0,
-                                closing_inventory_liters REAL NOT NULL,
-                                net_diesel_consumed REAL,
-                                recorded_by TEXT NOT NULL,
-                                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                notes TEXT
-                            )
-                        ''')
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success("✅ Table structure verified/created. Please try saving again.")
-                        
-                    except Exception as create_error:
-                        st.error(f"❌ Could not create table: {create_error}")
+                    st.error(f"❌ Error saving record: {str(e)}")
+                    st.info("Please try saving again after the table structure has been updated.")
 
 def show_generator_records():
     st.markdown("### 📋 Generator Records History")
@@ -4590,4 +4568,5 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
