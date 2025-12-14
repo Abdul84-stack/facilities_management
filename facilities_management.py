@@ -1713,9 +1713,6 @@ def show_space_analytics():
 # =============================================
 # PPM MANAGEMENT - FACILITY USER
 # =============================================
-def show_ppm_schedules():
-    # ... copy the entire show_ppm_schedules() function here ...
-
 def show_new_ppm_schedule():
     # ... copy the entire show_new_ppm_schedule() function here ...
 
@@ -4532,6 +4529,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
