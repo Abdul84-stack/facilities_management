@@ -1766,144 +1766,143 @@ def show_ppm_schedules():
     
     schedules = execute_query(query, tuple(params))
     
-    if schedules:
-        for schedule in schedules:
-            # Determine status color
-            status_colors = {
-                "Not Due": "status-not-due",
-                "Prepare": "status-prepare",
-                "Due": "status-due",
-                "Completed": "status-completed",
-                "WIP": "status-wip",
-                "Approved": "status-approved"
-            }
+    # Check if we're in the process of assigning a PPM
+    if 'assigning_schedule_id' in st.session_state:
+        schedule_id = st.session_state.assigning_schedule_id
+        schedule = next((s for s in schedules if s['id'] == schedule_id), None)
+        
+        if schedule:
+            st.markdown(f"### 👷 Assign PPM to Vendor")
+            st.info(f"Assigning: **{schedule['schedule_name']}** - {schedule['facility_category']}")
             
-            status_class = status_colors.get(safe_get(schedule, 'status', ''), "")
+            # Get vendors that match the facility category
+            vendors = execute_query(
+                'SELECT * FROM vendors WHERE vendor_type = ? OR vendor_type LIKE ?',
+                (schedule['facility_category'], f'%{schedule['facility_category']}%')
+            )
             
-            with st.expander(f"{safe_get(schedule, 'schedule_name', '')} - {safe_get(schedule, 'next_maintenance_date', '')}"):
+            if vendors:
+                vendor_options = {f"{v['company_name']} ({v['username']})": v['username'] for v in vendors}
+                selected_vendor_desc = st.selectbox("Select Vendor", list(vendor_options.keys()))
+                
+                due_date = st.date_input("Due Date", 
+                                        value=datetime.strptime(schedule['next_maintenance_date'], '%Y-%m-%d'))
+                
                 col1, col2 = st.columns(2)
-                
                 with col1:
-                    st.write(f"**Facility:** {safe_get(schedule, 'facility_category', '')}")
-                    st.write(f"**Sub-Category:** {safe_get(schedule, 'sub_category', '')}")
-                    st.write(f"**Frequency:** {safe_get(schedule, 'frequency', '')}")
-                    st.write(f"**Assigned Vendor:** {safe_get(schedule, 'assigned_vendor', 'Not assigned')}")
-                
-                with col2:
-                    st.write(f"**Status:** <span class='{status_class}'>{safe_get(schedule, 'status', '')}</span>", unsafe_allow_html=True)
-                    st.write(f"**Created By:** {safe_get(schedule, 'created_by', '')}")
-                    st.write(f"**Created Date:** {safe_get(schedule, 'created_date', '')}")
-                    if safe_get(schedule, 'estimated_cost'):
-                        st.write(f"**Est. Cost:** {format_ngn(safe_get(schedule, 'estimated_cost', 0))}")
-                
-                st.write(f"**Description:** {safe_get(schedule, 'description', '')}")
-                
-                if safe_get(schedule, 'notes'):
-                    st.write(f"**Notes:** {safe_get(schedule, 'notes', '')}")
-                
-                # Action buttons based on status
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if safe_get(schedule, 'status') == 'Not Due' and st.button("🔄 Mark as Prepare", key=f"prep_{schedule['id']}"):
+                    if st.button("✅ Assign", use_container_width=True):
+                        vendor_username = vendor_options[selected_vendor_desc]
+                        
+                        # Update PPM schedule
                         execute_update(
-                            "UPDATE ppm_schedules SET status = 'Prepare' WHERE id = ?",
-                            (schedule['id'],)
+                            '''UPDATE ppm_schedules 
+                            SET assigned_vendor = ?, status = 'WIP' 
+                            WHERE id = ?''',
+                            (vendor_username, schedule_id)
                         )
-                        st.success("✅ Status updated to Prepare")
+                        
+                        # Create assignment record
+                        execute_update(
+                            '''INSERT INTO ppm_assignments 
+                            (schedule_id, vendor_username, assigned_date, due_date, assigned_by) 
+                            VALUES (?, ?, ?, ?, ?)''',
+                            (schedule_id, vendor_username, 
+                             datetime.now().strftime('%Y-%m-%d'),
+                             due_date.strftime('%Y-%m-%d'),
+                             st.session_state.user['username'])
+                        )
+                        
+                        st.success("✅ PPM assigned to vendor successfully!")
+                        del st.session_state.assigning_schedule_id
                         st.rerun()
                 
                 with col2:
-                    if safe_get(schedule, 'status') in ['Prepare', 'Due'] and st.button("⚡ Assign to Vendor", key=f"assign_{schedule['id']}"):
-                        st.session_state.assigning_schedule_id = schedule['id']
+                    if st.button("❌ Cancel", use_container_width=True):
+                        del st.session_state.assigning_schedule_id
                         st.rerun()
+            else:
+                st.warning("⚠️ No vendors found for this facility category")
+                if st.button("← Back", use_container_width=True):
+                    del st.session_state.assigning_schedule_id
+                    st.rerun()
+    
+    # Display schedules (only if not in assignment mode)
+    if 'assigning_schedule_id' not in st.session_state:
+        if schedules:
+            for schedule in schedules:
+                # Determine status color
+                status_colors = {
+                    "Not Due": "status-not-due",
+                    "Prepare": "status-prepare",
+                    "Due": "status-due",
+                    "Completed": "status-completed",
+                    "WIP": "status-wip",
+                    "Approved": "status-approved"
+                }
                 
-                with col3:
-                    if safe_get(schedule, 'status') == 'Completed' and safe_get(schedule, 'user_approved', 0) == 0:
-                        if st.button("✅ Approve PPM", key=f"approve_ppm_{schedule['id']}"):
+                status_class = status_colors.get(safe_get(schedule, 'status', ''), "")
+                
+                with st.expander(f"{safe_get(schedule, 'schedule_name', '')} - {safe_get(schedule, 'next_maintenance_date', '')}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Facility:** {safe_get(schedule, 'facility_category', '')}")
+                        st.write(f"**Sub-Category:** {safe_get(schedule, 'sub_category', '')}")
+                        st.write(f"**Frequency:** {safe_get(schedule, 'frequency', '')}")
+                        st.write(f"**Assigned Vendor:** {safe_get(schedule, 'assigned_vendor', 'Not assigned')}")
+                    
+                    with col2:
+                        st.write(f"**Status:** <span class='{status_class}'>{safe_get(schedule, 'status', '')}</span>", unsafe_allow_html=True)
+                        st.write(f"**Created By:** {safe_get(schedule, 'created_by', '')}")
+                        st.write(f"**Created Date:** {safe_get(schedule, 'created_date', '')}")
+                        if safe_get(schedule, 'estimated_cost'):
+                            st.write(f"**Est. Cost:** {format_ngn(safe_get(schedule, 'estimated_cost', 0))}")
+                    
+                    st.write(f"**Description:** {safe_get(schedule, 'description', '')}")
+                    
+                    if safe_get(schedule, 'notes'):
+                        st.write(f"**Notes:** {safe_get(schedule, 'notes', '')}")
+                    
+                    # Action buttons based on status
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if safe_get(schedule, 'status') == 'Not Due' and st.button("🔄 Mark as Prepare", key=f"prep_{schedule['id']}"):
                             execute_update(
-                                "UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?",
+                                "UPDATE ppm_schedules SET status = 'Prepare' WHERE id = ?",
                                 (schedule['id'],)
                             )
-                            st.success("✅ PPM approved!")
+                            st.success("✅ Status updated to Prepare")
                             st.rerun()
                     
-                    # PDF Download for completed PPM
-                    if safe_get(schedule, 'status') == 'Completed':
-                        pdf_buffer = create_ppm_pdf_report(schedule['id'])
-                        if pdf_buffer:
-                            st.download_button(
-                                label="📥 Download PPM Report",
-                                data=pdf_buffer,
-                                file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                                mime="application/pdf",
-                                key=f"ppm_pdf_{schedule['id']}"
-                            )
-    else:
-        st.info("📭 No PPM schedules found")
-
-def show_new_ppm_schedule():
-    st.markdown("### ➕ Create New PPM Schedule")
-    
-    with st.form("new_ppm_schedule_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            schedule_name = st.text_input("Schedule Name *", placeholder="e.g., Monthly AC Maintenance")
-            facility_category = st.selectbox(
-                "Facility Category *",
-                ["HVAC", "Electrical", "Plumbing", "Generator", "Fire Safety", 
-                 "Elevator", "Building Structure", "Cleaning", "Security", "Other"]
-            )
-            sub_category = st.text_input("Sub-Category", placeholder="e.g., Split Units, Chillers")
-            frequency = st.selectbox(
-                "Frequency *",
-                ["Daily", "Weekly", "Monthly", "Quarterly", "Bi-annual", "Annual", "Custom"]
-            )
-        
-        with col2:
-            next_maintenance_date = st.date_input("Next Maintenance Date *", 
-                                                  value=datetime.now() + timedelta(days=30))
-            estimated_duration = st.number_input("Estimated Duration (hours)", 
-                                                 min_value=1, value=2)
-            estimated_cost = st.number_input("Estimated Cost (₦)", 
-                                            min_value=0.0, value=0.0, step=1000.0)
-            assigned_vendor = st.selectbox(
-                "Assign to Vendor (Optional)",
-                ["", "hvac_vendor", "generator_vendor", "electrical_vendor", 
-                 "plumbing_vendor", "building_vendor"]
-            )
-        
-        description = st.text_area("Description *", 
-                                  placeholder="Detailed description of maintenance activities...",
-                                  height=100)
-        notes = st.text_area("Additional Notes", 
-                            placeholder="Special instructions, requirements...",
-                            height=80)
-        
-        submitted = st.form_submit_button("💾 Save PPM Schedule", use_container_width=True)
-        
-        if submitted:
-            if not all([schedule_name, facility_category, frequency, description]):
-                st.error("❌ Please fill in all required fields (*)")
-            else:
-                success = execute_update(
-                    '''INSERT INTO ppm_schedules 
-                    (schedule_name, facility_category, sub_category, frequency,
-                     next_maintenance_date, estimated_duration_hours, estimated_cost,
-                     assigned_vendor, description, notes, created_by) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (schedule_name, facility_category, sub_category, frequency,
-                     next_maintenance_date.strftime('%Y-%m-%d'), estimated_duration,
-                     estimated_cost, assigned_vendor if assigned_vendor else None,
-                     description, notes, st.session_state.user['username'])
-                )
-                if success:
-                    st.success("✅ PPM schedule created successfully!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to create schedule")
-
+                    with col2:
+                        if safe_get(schedule, 'status') in ['Prepare', 'Due'] and st.button("⚡ Assign to Vendor", key=f"assign_{schedule['id']}"):
+                            st.session_state.assigning_schedule_id = schedule['id']
+                            st.rerun()
+                    
+                    with col3:
+                        if safe_get(schedule, 'status') == 'Completed' and safe_get(schedule, 'user_approved', 0) == 0:
+                            if st.button("✅ Approve PPM", key=f"approve_ppm_{schedule['id']}"):
+                                execute_update(
+                                    "UPDATE ppm_schedules SET user_approved = 1 WHERE id = ?",
+                                    (schedule['id'],)
+                                )
+                                st.success("✅ PPM approved!")
+                                st.rerun()
+                        
+                        # PDF Download for completed PPM
+                        if safe_get(schedule, 'status') == 'Completed':
+                            pdf_buffer = create_ppm_pdf_report(schedule['id'])
+                            if pdf_buffer:
+                                st.download_button(
+                                    label="📥 Download PPM Report",
+                                    data=pdf_buffer,
+                                    file_name=f"ppm_report_{schedule['id']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    mime="application/pdf",
+                                    key=f"ppm_pdf_{schedule['id']}"
+                                )
+        else:
+            st.info("📭 No PPM schedules found")
 def show_ppm_analytics():
     st.markdown("### 📊 PPM Analytics Dashboard")
     
@@ -2655,15 +2654,15 @@ def show_vendor_invoice_submission(vendor_username):
         
         if job:
             show_invoice_form(vendor_username, selected_job_id, job)
-
 def show_invoice_form(vendor_username, selected_job_id, job):
     """Show the invoice form for a specific job"""
     st.info(f"**Selected Job:** {job['title']} | **Location:** {job['location']}")
     
+    # Generate invoice number
+    invoice_number = f"INV-{vendor_username[:3].upper()}-{datetime.now().strftime('%Y%m%d')}-{selected_job_id}"
+    
+    # Use st.form for the form elements
     with st.form("invoice_form"):
-        # Generate invoice number
-        invoice_number = f"INV-{vendor_username[:3].upper()}-{datetime.now().strftime('%Y%m%d')}-{selected_job_id}"
-        
         col1, col2 = st.columns(2)
         with col1:
             invoice_date = st.date_input("Invoice Date", value=datetime.now())
@@ -2695,67 +2694,77 @@ def show_invoice_form(vendor_username, selected_job_id, job):
             st.metric("Total Amount", format_ngn(total_amount))
         
         submitted = st.form_submit_button("📤 Submit Invoice", use_container_width=True)
-        
-        if submitted:
-            if not details_of_work:
-                st.error("❌ Please provide details of work")
+    
+    # Move download button OUTSIDE the form
+    # Check if invoice was just submitted
+    if 'last_submitted_invoice' in st.session_state:
+        invoice_id = st.session_state.last_submitted_invoice
+        pdf_buffer = create_invoice_pdf(invoice_id)
+        if pdf_buffer:
+            st.download_button(
+                label="📥 Download Invoice PDF",
+                data=pdf_buffer,
+                file_name=f"invoice_{invoice_number}.pdf",
+                mime="application/pdf",
+                key=f"download_invoice_{invoice_id}"
+            )
+    
+    # Handle form submission logic OUTSIDE the form
+    if submitted:
+        if not details_of_work:
+            st.error("❌ Please provide details of work")
+        else:
+            # Check if invoice number already exists
+            existing_invoice = execute_query(
+                'SELECT * FROM invoices WHERE invoice_number = ?',
+                (invoice_number,)
+            )
+            
+            if existing_invoice:
+                st.error("❌ Invoice number already exists. Please try again.")
             else:
-                # Check if invoice number already exists
-                existing_invoice = execute_query(
-                    'SELECT * FROM invoices WHERE invoice_number = ?',
-                    (invoice_number,)
+                success = execute_update(
+                    '''INSERT INTO invoices 
+                    (invoice_number, request_id, vendor_username, invoice_date,
+                     details_of_work, quantity, unit_cost, amount, labour_charge,
+                     vat_applicable, vat_amount, total_amount) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (invoice_number, selected_job_id, vendor_username,
+                     invoice_date.strftime('%Y-%m-%d'), details_of_work,
+                     quantity, unit_cost, amount, labour_charge,
+                     1 if vat_applicable else 0, vat_amount, total_amount)
                 )
                 
-                if existing_invoice:
-                    st.error("❌ Invoice number already exists. Please try again.")
-                else:
-                    success = execute_update(
-                        '''INSERT INTO invoices 
-                        (invoice_number, request_id, vendor_username, invoice_date,
-                         details_of_work, quantity, unit_cost, amount, labour_charge,
-                         vat_applicable, vat_amount, total_amount) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (invoice_number, selected_job_id, vendor_username,
-                         invoice_date.strftime('%Y-%m-%d'), details_of_work,
-                         quantity, unit_cost, amount, labour_charge,
-                         1 if vat_applicable else 0, vat_amount, total_amount)
+                if success:
+                    st.success("✅ Invoice submitted successfully!")
+                    
+                    # Update request with invoice info
+                    execute_update(
+                        '''UPDATE maintenance_requests 
+                        SET invoice_amount = ?, invoice_number = ? 
+                        WHERE id = ?''',
+                        (total_amount, invoice_number, selected_job_id)
                     )
                     
-                    if success:
-                        st.success("✅ Invoice submitted successfully!")
-                        
-                        # Update request with invoice info
-                        execute_update(
-                            '''UPDATE maintenance_requests 
-                            SET invoice_amount = ?, invoice_number = ? 
-                            WHERE id = ?''',
-                            (total_amount, invoice_number, selected_job_id)
-                        )
-                        
-                        # Clear the selected job if it was set
-                        if 'selected_job_for_invoice' in st.session_state:
-                            st.session_state.selected_job_for_invoice = None
-                        
-                        # Get the invoice ID for PDF download
-                        new_invoice = execute_query(
-                            'SELECT id FROM invoices WHERE invoice_number = ?',
-                            (invoice_number,)
-                        )
-                        
-                        if new_invoice:
-                            invoice_id = new_invoice[0]['id']
-                            pdf_buffer = create_invoice_pdf(invoice_id)
-                            if pdf_buffer:
-                                st.download_button(
-                                    label="📥 Download Invoice PDF",
-                                    data=pdf_buffer,
-                                    file_name=f"invoice_{invoice_number}.pdf",
-                                    mime="application/pdf"
-                                )
-                        
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to submit invoice")
+                    # Clear the selected job if it was set
+                    if 'selected_job_for_invoice' in st.session_state:
+                        st.session_state.selected_job_for_invoice = None
+                    
+                    # Get the invoice ID for PDF download
+                    new_invoice = execute_query(
+                        'SELECT id FROM invoices WHERE invoice_number = ?',
+                        (invoice_number,)
+                    )
+                    
+                    if new_invoice:
+                        invoice_id = new_invoice[0]['id']
+                        # Store in session state to show download button
+                        st.session_state.last_submitted_invoice = invoice_id
+                        st.session_state.last_invoice_number = invoice_number
+                    
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to submit invoice")
 def show_vendor_ppm_assignments(vendor_username):
     st.markdown("### 💼 PPM Assignments")
     
@@ -4495,6 +4504,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
