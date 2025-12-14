@@ -1713,47 +1713,68 @@ def show_space_analytics():
 # =============================================
 # PPM MANAGEMENT - FACILITY USER
 # =============================================
+
 def show_new_ppm_schedule():
-    # ... copy the entire show_new_ppm_schedule() function here ...
-
-def show_ppm_analytics():
-    # ... copy the entire show_ppm_analytics() function here ...
-
-def show_ppm_approvals_facility_user():
-    # ... copy the entire show_ppm_approvals_facility_user() function here ...
-
-def show_ppm_management_facility_user():
-    st.markdown("<h1 class='app-title'>📅 Planned Preventive Maintenance</h1>", unsafe_allow_html=True)
+    st.markdown("### ➕ Create New PPM Schedule")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 PPM Schedules", "➕ New Schedule", "📊 PPM Analytics", "✅ PPM Approvals"])
-    
-    with tab1:
-        show_ppm_schedules()
-    
-    with tab2:
-        show_new_ppm_schedule()
-    
-    with tab3:
-        show_ppm_analytics()
-    
-    with tab4:
-        show_ppm_approvals_facility_user()
-def show_ppm_management_facility_user():
-    st.markdown("<h1 class='app-title'>📅 Planned Preventive Maintenance</h1>", unsafe_allow_html=True)
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 PPM Schedules", "➕ New Schedule", "📊 PPM Analytics", "✅ PPM Approvals"])
-    
-    with tab1:
-        show_ppm_schedules()
-    
-    with tab2:
-        show_new_ppm_schedule()
-    
-    with tab3:
-        show_ppm_analytics()
-    
-    with tab4:
-        show_ppm_approvals_facility_user()
+    with st.form("new_ppm_schedule_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            schedule_name = st.text_input("Schedule Name *", placeholder="e.g., Monthly AC Maintenance")
+            facility_category = st.selectbox(
+                "Facility Category *",
+                ["HVAC", "Electrical", "Plumbing", "Generator", "Fire Safety", 
+                 "Elevator", "Building Structure", "Cleaning", "Security", "Other"]
+            )
+            sub_category = st.text_input("Sub-Category", placeholder="e.g., Split Units, Chillers")
+            frequency = st.selectbox(
+                "Frequency *",
+                ["Daily", "Weekly", "Monthly", "Quarterly", "Bi-annual", "Annual", "Custom"]
+            )
+        
+        with col2:
+            next_maintenance_date = st.date_input("Next Maintenance Date *", 
+                                                  value=datetime.now() + timedelta(days=30))
+            estimated_duration = st.number_input("Estimated Duration (hours)", 
+                                                 min_value=1, value=2)
+            estimated_cost = st.number_input("Estimated Cost (₦)", 
+                                            min_value=0.0, value=0.0, step=1000.0)
+            assigned_vendor = st.selectbox(
+                "Assign to Vendor (Optional)",
+                ["", "hvac_vendor", "generator_vendor", "electrical_vendor", 
+                 "plumbing_vendor", "building_vendor"]
+            )
+        
+        description = st.text_area("Description *", 
+                                  placeholder="Detailed description of maintenance activities...",
+                                  height=100)
+        notes = st.text_area("Additional Notes", 
+                            placeholder="Special instructions, requirements...",
+                            height=80)
+        
+        submitted = st.form_submit_button("💾 Save PPM Schedule", use_container_width=True)
+        
+        if submitted:
+            if not all([schedule_name, facility_category, frequency, description]):
+                st.error("❌ Please fill in all required fields (*)")
+            else:
+                success = execute_update(
+                    '''INSERT INTO ppm_schedules 
+                    (schedule_name, facility_category, sub_category, frequency,
+                     next_maintenance_date, estimated_duration_hours, estimated_cost,
+                     assigned_vendor, description, notes, created_by) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (schedule_name, facility_category, sub_category, frequency,
+                     next_maintenance_date.strftime('%Y-%m-%d'), estimated_duration,
+                     estimated_cost, assigned_vendor if assigned_vendor else None,
+                     description, notes, st.session_state.user['username'])
+                )
+                if success:
+                    st.success("✅ PPM schedule created successfully!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to create schedule")
 
 def show_ppm_schedules():
     st.markdown("### 📋 PPM Schedules Overview")
@@ -1928,6 +1949,7 @@ def show_ppm_schedules():
                                 )
         else:
             st.info("📭 No PPM schedules found")
+
 def show_ppm_analytics():
     st.markdown("### 📊 PPM Analytics Dashboard")
     
@@ -2077,6 +2099,22 @@ def show_ppm_approvals_facility_user():
                         st.success("✅ Revision requested from vendor")
                         st.rerun()
 
+def show_ppm_management_facility_user():
+    st.markdown("<h1 class='app-title'>📅 Planned Preventive Maintenance</h1>", unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 PPM Schedules", "➕ New Schedule", "📊 PPM Analytics", "✅ PPM Approvals"])
+    
+    with tab1:
+        show_ppm_schedules()
+    
+    with tab2:
+        show_new_ppm_schedule()
+    
+    with tab3:
+        show_ppm_analytics()
+    
+    with tab4:
+        show_ppm_approvals_facility_user()
 # =============================================
 # GENERATOR RECORDS - FACILITY USER
 # =============================================
@@ -4529,6 +4567,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
