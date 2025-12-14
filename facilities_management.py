@@ -1713,6 +1713,34 @@ def show_space_analytics():
 # =============================================
 # PPM MANAGEMENT - FACILITY USER
 # =============================================
+def show_ppm_schedules():
+    # ... copy the entire show_ppm_schedules() function here ...
+
+def show_new_ppm_schedule():
+    # ... copy the entire show_new_ppm_schedule() function here ...
+
+def show_ppm_analytics():
+    # ... copy the entire show_ppm_analytics() function here ...
+
+def show_ppm_approvals_facility_user():
+    # ... copy the entire show_ppm_approvals_facility_user() function here ...
+
+def show_ppm_management_facility_user():
+    st.markdown("<h1 class='app-title'>📅 Planned Preventive Maintenance</h1>", unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 PPM Schedules", "➕ New Schedule", "📊 PPM Analytics", "✅ PPM Approvals"])
+    
+    with tab1:
+        show_ppm_schedules()
+    
+    with tab2:
+        show_new_ppm_schedule()
+    
+    with tab3:
+        show_ppm_analytics()
+    
+    with tab4:
+        show_ppm_approvals_facility_user()
 def show_ppm_management_facility_user():
     st.markdown("<h1 class='app-title'>📅 Planned Preventive Maintenance</h1>", unsafe_allow_html=True)
     
@@ -4504,6 +4532,7 @@ def main():
 # =============================================
 if __name__ == "__main__":
     main()
+
 
 
 
